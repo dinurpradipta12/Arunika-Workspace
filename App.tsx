@@ -80,7 +80,6 @@ const App: React.FC = () => {
         setNotificationsEnabled(userData.app_settings.notificationsEnabled ?? true);
       }
     } else if (defaultData) {
-      // Fallback to Auth metadata only if DB record doesn't exist yet
       setCurrentUser(defaultData);
     }
   }, []);
@@ -136,11 +135,11 @@ const App: React.FC = () => {
       // 2. Fetch Workspaces
       let { data: wsData, error: wsError } = await supabase
         .from('workspaces')
-        .select('*');
+        .select('*')
+        .order('created_at', { ascending: true });
 
-      // If no personal workspace exists, create one
-      const personalWs = wsData?.find(w => w.type === 'personal' && w.owner_id === currentUser.id);
-      if (!wsError && (!wsData || wsData.length === 0 || !personalWs)) {
+      // If no workspaces exist, create one
+      if (!wsError && (!wsData || wsData.length === 0)) {
         const { data: newWs, error: newWsError } = await supabase.from('workspaces').insert({
           name: 'Personal Space',
           type: 'personal',
@@ -148,7 +147,7 @@ const App: React.FC = () => {
         }).select().single();
         
         if (!newWsError && newWs) {
-          wsData = wsData ? [...wsData, newWs] : [newWs];
+          wsData = [newWs];
         }
       }
 
@@ -157,10 +156,11 @@ const App: React.FC = () => {
         setWorkspaces(wsData as Workspace[]);
       }
 
-      // 3. Fetch Tasks belonging to those workspaces
+      // 3. Fetch Tasks
       const { data: tData, error: tError } = await supabase
         .from('tasks')
-        .select('*');
+        .select('*')
+        .order('created_at', { ascending: false });
         
       if (!tError && tData) {
         setTasks(tData as Task[]);
@@ -170,23 +170,27 @@ const App: React.FC = () => {
       console.error("Critical fetch error:", err);
       setIsApiConnected(false);
     } finally {
-      setTimeout(() => setIsFetching(false), 800);
+      setTimeout(() => setIsFetching(false), 500);
     }
   }, [currentUser?.id, fetchUserProfile]);
 
   const setupRealtime = useCallback(() => {
     if (!currentUser) return;
     
+    // Bersihkan channel lama
     if (channelRef.current) supabase.removeChannel(channelRef.current);
     if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
 
-    // Global Tasks Realtime
+    // Global Realtime Subscription - Lebih agresif
     channelRef.current = supabase
-      .channel('tasks-realtime')
+      .channel('db-global-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-        if (payload.eventType === 'INSERT') setTasks(prev => [...prev, payload.new as Task]);
+        if (payload.eventType === 'INSERT') setTasks(prev => [payload.new as Task, ...prev]);
         else if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
         else if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, () => {
+        fetchData(); // Refresh workspaces if changed
       })
       .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
 
@@ -194,16 +198,11 @@ const App: React.FC = () => {
       .channel(`user-updates-${currentUser.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}` }, (payload) => {
          const updated = payload.new as User;
-         setCurrentUser(updated); // Sync local user state immediately on DB change
-         if (updated.app_settings) {
-           setSourceColors(updated.app_settings.sourceColors || {});
-           setVisibleSources(updated.app_settings.visibleSources || []);
-           setNotificationsEnabled(updated.app_settings.notificationsEnabled ?? true);
-         }
+         setCurrentUser(updated);
       })
       .subscribe();
       
-  }, [currentUser?.id]);
+  }, [currentUser?.id, fetchData]);
 
   useEffect(() => {
     if (isAuthenticated && currentUser) {
@@ -213,6 +212,7 @@ const App: React.FC = () => {
   }, [isAuthenticated, currentUser?.id]);
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
+    // Optimistic Update
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
     const { error } = await supabase.from('tasks').update({ status }).eq('id', id);
     if (error) console.error("Status update failed:", error.message);
@@ -221,25 +221,18 @@ const App: React.FC = () => {
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
     
-    const targetWsId = taskData.workspace_id || workspaces.find(w => w.type === 'personal')?.id || workspaces[0]?.id;
+    const targetWsId = taskData.workspace_id || workspaces[0]?.id;
+    if (!targetWsId) return;
     
     if (editingTask) {
       const { error } = await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
       if (error) console.error("Task update error:", error.message);
     } else {
-      const newTask = {
+      const { error } = await supabase.from('tasks').insert({
+        ...taskData,
         workspace_id: targetWsId,
-        parent_id: taskData.parent_id || selectedTaskId || undefined,
-        status: taskData.status || TaskStatus.TODO,
         created_by: currentUser.id,
-        priority: taskData.priority || TaskPriority.MEDIUM,
-        title: taskData.title || 'Untitled Task',
-        description: taskData.description,
-        due_date: taskData.due_date,
-        start_date: taskData.start_date,
-        is_all_day: taskData.is_all_day,
-      };
-      const { error } = await supabase.from('tasks').insert(newTask);
+      });
       if (error) console.error("Task insert error:", error.message);
     }
     setIsNewTaskModalOpen(false);
@@ -255,36 +248,20 @@ const App: React.FC = () => {
       visibleSources
     };
 
-    // 1. Optimistic UI update
-    const updatedUser = { ...currentUser, ...userData, status: newRole, app_settings: nextSettings };
-    setCurrentUser(updatedUser);
+    setCurrentUser({ ...currentUser, ...userData, status: newRole, app_settings: nextSettings });
     setAccountRole(newRole);
 
     try {
-      // 2. Persist to DB
-      const { error } = await supabase.from('users').upsert({
+      await supabase.from('users').upsert({
         id: currentUser.id,
         email: userData.email || currentUser.email,
         name: userData.name || currentUser.name,
         avatar_url: userData.avatar_url || currentUser.avatar_url,
         status: newRole,
-        last_seen: new Date().toISOString(),
         app_settings: nextSettings
       });
-
-      if (error) throw error;
-      
-      // 3. Optional: Sync with Auth Metadata if needed, but DB is our source of truth now
-      await supabase.auth.updateUser({
-        data: { 
-          name: userData.name || currentUser.name, 
-          avatar_url: userData.avatar_url || currentUser.avatar_url 
-        }
-      });
-
     } catch (err) {
       console.error("Sync Profile Exception:", err);
-      // Revert on error could go here if critical
     }
   };
 
@@ -304,7 +281,8 @@ const App: React.FC = () => {
   if (!isAuthenticated || !currentUser) return <Login onLoginSuccess={() => {}} />;
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
-  const activeWorkspace = workspaces[0] || null;
+  // Pastikan kita mengambil workspace yang aktif secara konsisten
+  const activeWorkspace = workspaces.find(w => w.type === 'team') || workspaces[0] || null;
   const topLevelTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
   const archivedTasks = tasks.filter(t => t.is_archived);
   const statusColor = isRealtimeConnected ? 'bg-quaternary' : isApiConnected ? 'bg-tertiary' : 'bg-secondary';
