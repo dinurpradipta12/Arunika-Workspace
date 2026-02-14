@@ -30,6 +30,11 @@ export interface User {
   created_at: string;
   last_seen?: string;
   status?: string;
+  app_settings?: {
+    notificationsEnabled?: boolean;
+    sourceColors?: Record<string, string>;
+    visibleSources?: string[];
+  };
 }
 
 export interface Workspace {

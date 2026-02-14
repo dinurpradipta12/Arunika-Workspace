@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
@@ -37,133 +36,215 @@ const App: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [inspectedTask, setInspectedTask] = useState<Task | null>(null);
   const [reschedulingTask, setReschedulingTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [preSelectedDate, setPreSelectedDate] = useState<string | undefined>(undefined);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | 'all'>('all');
   
   // Persistent Calendar State
-  const [sourceColors, setSourceColors] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('calendar_source_colors');
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [visibleSources, setVisibleSources] = useState<string[]>(() => {
-    const saved = localStorage.getItem('calendar_visible_sources');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [googleEvents, setGoogleEvents] = useState<Task[]>([]);
+  const [sourceColors, setSourceColors] = useState<Record<string, string>>({});
+  const [visibleSources, setVisibleSources] = useState<string[]>([]);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(true);
   
+  const [googleEvents, setGoogleEvents] = useState<Task[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [isApiConnected, setIsApiConnected] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
   const channelRef = useRef<any>(null);
+  const userChannelRef = useRef<any>(null);
   
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
 
-  const [currentUser, setCurrentUser] = useState<User>({
-    ...mockData.user,
-    created_at: new Date().toISOString()
-  });
-  const [accountRole, setAccountRole] = useState('Workspace Architect & Lead');
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [accountRole, setAccountRole] = useState('Member');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Sync colors/visibility to localStorage
+  // Sync Auth State
   useEffect(() => {
-    localStorage.setItem('calendar_source_colors', JSON.stringify(sourceColors));
-  }, [sourceColors]);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setIsAuthenticated(true);
+        const user = session.user;
+        setCurrentUser({
+          id: user.id,
+          email: user.email || '',
+          name: user.user_metadata?.name || 'User',
+          avatar_url: user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
+          created_at: user.created_at
+        });
+      }
+    });
 
-  useEffect(() => {
-    localStorage.setItem('calendar_visible_sources', JSON.stringify(visibleSources));
-  }, [visibleSources]);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        setIsAuthenticated(true);
+        setCurrentUser({
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.name || 'User',
+          avatar_url: session.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.id}`,
+          created_at: session.user.created_at
+        });
+      } else {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const fetchData = useCallback(async () => {
+    if (!currentUser) return;
     setIsFetching(true);
     try {
+      // Fetch User Profile and Settings First
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', currentUser.id)
+        .single();
+
+      if (userError && userError.code !== 'PGRST116') {
+        console.error("Error fetching user data:", userError.message);
+      }
+
+      if (userData) {
+        setCurrentUser(prev => prev ? { ...prev, ...userData } : null);
+        if (userData.status) setAccountRole(userData.status);
+        if (userData.app_settings) {
+          setSourceColors(userData.app_settings.sourceColors || {});
+          setVisibleSources(userData.app_settings.visibleSources || []);
+          setNotificationsEnabled(userData.app_settings.notificationsEnabled ?? true);
+        }
+      } else {
+        // Attempt to create initial user record if missing
+        const { error: insertError } = await supabase.from('users').insert({
+          id: currentUser.id,
+          email: currentUser.email,
+          name: currentUser.name,
+          avatar_url: currentUser.avatar_url,
+          status: accountRole
+        });
+        
+        if (insertError) {
+          console.warn("Could not create initial user record with status, trying minimal fallback...", insertError.message);
+          // Minimal fallback to ensure the record exists even if DB schema is slightly out of sync
+          await supabase.from('users').insert({
+            id: currentUser.id,
+            email: currentUser.email,
+            name: currentUser.name
+          });
+        }
+      }
+
+      // Fetch Workspaces
       const { data: wsData, error: wsError } = await supabase.from('workspaces').select('*');
       if (wsError) {
+        console.error("Workspaces fetch error:", wsError.message);
         setIsApiConnected(false);
+        setWorkspaces(mockData.workspaces as Workspace[]);
       } else {
         setIsApiConnected(true);
-        if (wsData && wsData.length > 0) setWorkspaces(wsData as Workspace[]);
-        else setWorkspaces(mockData.workspaces as Workspace[]);
+        setWorkspaces(wsData as Workspace[]);
       }
 
+      // Fetch Tasks
       const { data: tData, error: tError } = await supabase.from('tasks').select('*');
-      if (tData) setTasks(tData as Task[]);
-
-      // Also try to fetch existing user profile if it exists
-      const { data: userData } = await supabase.from('users').select('*').eq('id', currentUser.id).single();
-      if (userData) {
-        setCurrentUser(prev => ({ ...prev, ...userData }));
-        if (userData.status) setAccountRole(userData.status);
+      if (tError) {
+        console.error("Tasks fetch error:", tError.message);
+      } else if (tData) {
+        setTasks(tData as Task[]);
       }
+
     } catch (err) {
+      console.error("Critical fetch error:", err);
       setIsApiConnected(false);
     } finally {
       setTimeout(() => setIsFetching(false), 800);
     }
-  }, [currentUser.id]);
+  }, [currentUser?.id, accountRole]);
 
   const setupRealtime = useCallback(() => {
+    if (!currentUser) return;
+    
+    // Cleanup old channels
     if (channelRef.current) supabase.removeChannel(channelRef.current);
-    const channel = supabase
-      .channel('db-changes')
+    if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
+
+    // Tasks Channel
+    channelRef.current = supabase
+      .channel('tasks-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
         if (payload.eventType === 'INSERT') setTasks(prev => [...prev, payload.new as Task]);
         else if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
         else if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}` }, (payload) => {
-         setCurrentUser(prev => ({ ...prev, ...payload.new }));
-         if (payload.new.status) setAccountRole(payload.new.status);
-      })
       .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
-    channelRef.current = channel;
-  }, [currentUser.id]);
+
+    // User Profile Channel
+    userChannelRef.current = supabase
+      .channel(`user-${currentUser.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}` }, (payload) => {
+         const updated = payload.new as User;
+         setCurrentUser(prev => prev ? { ...prev, ...updated } : null);
+         if (updated.status) setAccountRole(updated.status);
+         if (updated.app_settings) {
+           setSourceColors(updated.app_settings.sourceColors || {});
+           setVisibleSources(updated.app_settings.visibleSources || []);
+           setNotificationsEnabled(updated.app_settings.notificationsEnabled ?? true);
+         }
+      })
+      .subscribe();
+      
+  }, [currentUser?.id]);
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && currentUser) {
       fetchData();
       setupRealtime();
-      return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
     }
-  }, [isAuthenticated, fetchData, setupRealtime]);
+  }, [isAuthenticated, currentUser?.id]);
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-    await supabase.from('tasks').update({ status }).eq('id', id);
+    const { error } = await supabase.from('tasks').update({ status }).eq('id', id);
+    if (error) console.error("Status update failed:", error.message);
   };
 
   const handleReschedule = async (id: string, newDate: string) => {
     const isoDate = new Date(newDate).toISOString();
     setTasks(prev => prev.map(t => t.id === id ? { ...t, due_date: isoDate } : t));
-    await supabase.from('tasks').update({ due_date: isoDate }).eq('id', id);
+    const { error } = await supabase.from('tasks').update({ due_date: isoDate }).eq('id', id);
+    if (error) console.error("Reschedule failed:", error.message);
   };
 
   const handleArchiveTask = async (id: string) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, is_archived: true } : t));
-    await supabase.from('tasks').update({ is_archived: true }).eq('id', id);
+    const { error } = await supabase.from('tasks').update({ is_archived: true }).eq('id', id);
+    if (error) console.error("Archive failed:", error.message);
   };
 
   const handleDeleteTask = async (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
-    await supabase.from('tasks').delete().eq('id', id);
+    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    if (error) console.error("Delete failed:", error.message);
   };
 
-  const handleSaveTask = async (taskData: Partial<Task>, targetCalendarId?: string) => {
+  const handleSaveTask = async (taskData: Partial<Task>) => {
+    if (!currentUser) return;
     if (editingTask) {
       const updated = { ...editingTask, ...taskData };
       setTasks(prev => prev.map(t => t.id === editingTask.id ? updated : t));
-      await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
+      const { error } = await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
+      if (error) console.error("Task update error:", error.message);
     } else {
-      const newTask: Partial<Task> = {
-        workspace_id: taskData.workspace_id || workspaces[0]?.id || 'ws-1',
+      const newTask = {
+        workspace_id: taskData.workspace_id || workspaces[0]?.id,
         parent_id: selectedTaskId || undefined,
         status: TaskStatus.TODO,
         created_by: currentUser.id,
@@ -174,31 +255,47 @@ const App: React.FC = () => {
         start_date: taskData.start_date,
         is_all_day: taskData.is_all_day,
       };
-      await supabase.from('tasks').insert(newTask).select().single();
+      const { error } = await supabase.from('tasks').insert(newTask);
+      if (error) console.error("Task insert error:", error.message);
     }
     setIsNewTaskModalOpen(false);
     setEditingTask(null);
   };
 
-  const handleSaveProfile = async (userData: Partial<User>, newRole: string) => {
-    // Update local state for immediate feedback
-    setCurrentUser(prev => ({ ...prev, ...userData }));
-    setAccountRole(newRole);
+  const handleSaveProfile = async (userData: Partial<User>, newRole: string, settingsUpdate?: any) => {
+    if (!currentUser) return;
+    
+    const nextSettings = {
+      notificationsEnabled: settingsUpdate?.notificationsEnabled ?? notificationsEnabled,
+      sourceColors,
+      visibleSources
+    };
 
-    // Persist to Supabase
+    // Immediate state update
+    setCurrentUser(prev => prev ? { ...prev, ...userData, app_settings: nextSettings } : null);
+    setAccountRole(newRole);
+    setNotificationsEnabled(nextSettings.notificationsEnabled);
+
     try {
       const { error } = await supabase.from('users').upsert({
         id: currentUser.id,
         email: userData.email || currentUser.email,
         name: userData.name || currentUser.name,
         avatar_url: userData.avatar_url || currentUser.avatar_url,
-        status: newRole, // Store role in status column
-        last_seen: new Date().toISOString()
+        status: newRole,
+        last_seen: new Date().toISOString(),
+        app_settings: nextSettings
       });
-      if (error) console.error("Error saving profile to Supabase:", error);
+      if (error) console.error("Supabase Save Error:", error.message);
     } catch (err) {
-      console.error("Failed to sync profile:", err);
+      console.error("Sync Profile Exception:", err);
     }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsAuthenticated(false);
+    setCurrentUser(null);
   };
 
   const handleTaskClick = (task: Task) => {
@@ -210,12 +307,11 @@ const App: React.FC = () => {
     }
   };
 
+  if (!isAuthenticated || !currentUser) return <Login onLoginSuccess={() => {}} />;
+
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const topLevelTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
   const archivedTasks = tasks.filter(t => t.is_archived);
-
-  if (!isAuthenticated) return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
-
   const statusColor = isRealtimeConnected ? 'bg-quaternary' : isApiConnected ? 'bg-tertiary' : 'bg-secondary';
 
   return (
@@ -240,7 +336,7 @@ const App: React.FC = () => {
           tasks={tasks}
           workspaces={workspaces}
           handleTaskClick={handleTaskClick}
-          onLogout={() => setIsAuthenticated(false)}
+          onLogout={handleLogout}
         />
 
         <TaskInspectModal
@@ -256,6 +352,7 @@ const App: React.FC = () => {
           onClose={() => setIsSettingsModalOpen(false)} 
           user={currentUser} 
           role={accountRole}
+          notificationsEnabled={notificationsEnabled}
           onSaveProfile={handleSaveProfile}
           googleAccessToken={googleAccessToken}
           setGoogleAccessToken={setGoogleAccessToken}
@@ -295,7 +392,7 @@ const App: React.FC = () => {
 
           <div className={`flex-1 flex flex-col min-h-0 p-4 sm:p-8 w-full mx-auto ${activeTab === 'calendar' ? 'max-w-none' : 'max-w-7xl'}`}>
             {activeTab === 'dashboard' && <Dashboard />}
-            {activeTab === 'profile' && <ProfileView onLogout={() => setIsAuthenticated(false)} user={currentUser} role={accountRole} />}
+            {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
             {activeTab === 'calendar' && (
               <CalendarView 
                 tasks={tasks} 

@@ -15,17 +15,18 @@ interface SettingsModalProps {
   onClose: () => void;
   user: UserType;
   role: string;
-  onSaveProfile: (userData: Partial<UserType>, newRole: string) => void;
+  notificationsEnabled: boolean;
+  onSaveProfile: (userData: Partial<UserType>, newRole: string, settingsUpdate?: any) => void;
   googleAccessToken: string | null;
   setGoogleAccessToken: (token: string | null) => void;
   isRealtimeConnected: boolean;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
-  isOpen, onClose, user, role, onSaveProfile, googleAccessToken, setGoogleAccessToken, isRealtimeConnected 
+  isOpen, onClose, user, role, notificationsEnabled, onSaveProfile, googleAccessToken, setGoogleAccessToken, isRealtimeConnected 
 }) => {
   const [expandedSection, setExpandedSection] = useState<'profile' | 'app' | null>('profile');
-  const [notifications, setNotifications] = useState(true);
+  const [tempNotifications, setTempNotifications] = useState(notificationsEnabled);
   const [isSyncing, setIsSyncing] = useState(false);
   
   // Temporary State for edits
@@ -47,8 +48,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setGoogleAccessToken(token);
         setIsSyncing(false);
       });
+      // Sync local temp state with current props on open
+      setTempNotifications(notificationsEnabled);
+      setTempName(user.name);
+      setTempEmail(user.email);
+      setTempAvatar(user.avatar_url);
+      setTempRole(role);
     }
-  }, [isOpen]);
+  }, [isOpen, notificationsEnabled, user, role]);
 
   if (!isOpen) return null;
 
@@ -81,7 +88,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       name: tempName,
       email: tempEmail,
       avatar_url: tempAvatar
-    }, tempRole);
+    }, tempRole, {
+      notificationsEnabled: tempNotifications
+    });
     onClose();
   };
 
@@ -259,7 +268,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <p className="text-[10px] text-slate-400 font-medium">Real-time alerts for deadlines</p>
                       </div>
                     </div>
-                    <Toggle active={notifications} onToggle={() => setNotifications(!notifications)} />
+                    <Toggle active={tempNotifications} onToggle={() => setTempNotifications(!tempNotifications)} />
                   </div>
                 </div>
               </div>
