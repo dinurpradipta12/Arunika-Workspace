@@ -89,42 +89,16 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Sinkronisasi Branding
-  useEffect(() => {
-    if (currentUser?.app_settings?.appName) {
-      document.title = currentUser.app_settings.appName;
-    }
-    if (currentUser?.app_settings?.appFavicon) {
-      const link: any = document.querySelector("link[rel*='icon']") || document.createElement('link');
-      link.href = currentUser.app_settings.appFavicon;
-      document.getElementsByTagName('head')[0].appendChild(link);
-    }
-  }, [currentUser?.app_settings?.appName, currentUser?.app_settings?.appFavicon]);
-
   const fetchAndSubscribeUser = useCallback(async (userId: string) => {
     setIsFetching(true);
     try {
-      const { data: userData, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
+      const { data: userData, error } = await supabase.from('users').select('*').eq('id', userId).single();
       if (!error && userData) {
         setCurrentUser(userData as User);
         setAccountRole(userData.status || 'Owner');
         setIsApiConnected(true);
       } else {
-        // Fallback default user if not in DB yet
-        const defaultUser = {
-          id: userId,
-          email: 'user@taskplay.io',
-          name: 'New Player',
-          avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
-          status: 'Owner',
-          app_settings: { appName: 'TaskPlay' },
-          created_at: new Date().toISOString()
-        };
+        const defaultUser = { id: userId, email: 'user@taskplay.io', name: 'New Player', avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`, status: 'Owner', app_settings: { appName: 'TaskPlay' }, created_at: new Date().toISOString() };
         setCurrentUser(defaultUser as any);
       }
 
@@ -133,14 +107,9 @@ const App: React.FC = () => {
         .channel(`sync-user-${userId}`)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${userId}` }, (payload) => {
           setCurrentUser(payload.new as User);
-          if (payload.new.status) setAccountRole(payload.new.status);
         })
         .subscribe();
-    } catch (e) {
-      setIsApiConnected(false);
-    } finally {
-      setIsFetching(false);
-    }
+    } catch (e) { setIsApiConnected(false); } finally { setIsFetching(false); }
   }, []);
 
   useEffect(() => {
@@ -160,12 +129,10 @@ const App: React.FC = () => {
         setIsAuthenticated(false);
         setCurrentUser(null);
       }
-      setIsAuthLoading(false);
     });
 
     return () => {
       subscription.unsubscribe();
-      if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
     };
   }, [fetchAndSubscribeUser]);
 
@@ -173,60 +140,57 @@ const App: React.FC = () => {
     if (!currentUser) return;
     setIsFetching(true);
     try {
-      // Mencoba akses tabel ringan untuk test koneksi API
       const [{ data: wsData }, { data: tData }] = await Promise.all([
         supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false })
       ]);
-      
-      // Jika salah satu berhasil, berarti API terhubung
       setIsApiConnected(true);
       if (wsData) setWorkspaces(wsData as Workspace[]);
       if (tData) setTasks(tData as Task[]);
-    } catch (err) {
-      console.error("Supabase connection failed:", err);
-      setIsApiConnected(false);
-    } finally {
-      setIsFetching(false);
-    }
+    } catch (err) { setIsApiConnected(false); } finally { setIsFetching(false); }
   }, [currentUser?.id]);
 
   useEffect(() => {
     if (currentUser && isAuthenticated) {
       fetchData();
-      
       if (taskChannelRef.current) supabase.removeChannel(taskChannelRef.current);
       taskChannelRef.current = supabase
-        .channel('tasks-live-main')
+        .channel('tasks-live-v2')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-          if (payload.eventType === 'INSERT') setTasks(prev => [payload.new as Task, ...prev]);
-          else if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
-          else if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+          if (payload.eventType === 'INSERT') {
+            setTasks(prev => [payload.new as Task, ...prev]);
+          } else if (payload.eventType === 'UPDATE') {
+            setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
+          } else if (payload.eventType === 'DELETE') {
+            setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+          }
         })
-        .subscribe((status) => {
-          setIsRealtimeConnected(status === 'SUBSCRIBED');
-        });
+        .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
     }
   }, [currentUser?.id, isAuthenticated]);
 
-  const handleSaveProfile = async (userData: Partial<User>, newRole: string, settingsUpdate?: any) => {
+  const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
     setIsFetching(true);
-    const mergedSettings = { ...currentUser.app_settings, ...settingsUpdate };
     try {
-      const { data, error } = await supabase.from('users').upsert({
-        id: currentUser.id,
-        name: userData.name || currentUser.name,
-        email: userData.email || currentUser.email,
-        avatar_url: userData.avatar_url || currentUser.avatar_url,
-        status: newRole,
-        app_settings: mergedSettings,
-        updated_at: new Date().toISOString()
-      }).select();
-      if (!error && data) {
-        setCurrentUser(data[0] as User);
-        setAccountRole(data[0].status || 'Owner');
+      if (editingTask) {
+        await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
+      } else {
+        const finalTask = {
+          ...taskData,
+          created_by: currentUser.id,
+          status: taskData.status || TaskStatus.TODO,
+          priority: taskData.priority || TaskPriority.MEDIUM,
+          workspace_id: taskData.workspace_id || (workspaces[0]?.id || 'ws-1'),
+          is_archived: false,
+        };
+        const { error } = await supabase.from('tasks').insert(finalTask);
+        if (error) throw error;
       }
+      setIsNewTaskModalOpen(false);
+      setEditingTask(null);
+    } catch (err) {
+      console.error("Save task error:", err);
     } finally {
       setIsFetching(false);
     }
@@ -242,14 +206,12 @@ const App: React.FC = () => {
     setIsAuthenticated(false);
   };
 
-  if (isAuthLoading) {
-    return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
-        <div className="w-16 h-16 border-4 border-slate-800 border-t-accent rounded-full animate-spin mb-4" />
-        <h2 className="font-heading text-xl">Inisialisasi Sistem...</h2>
-      </div>
-    );
-  }
+  if (isAuthLoading) return (
+    <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
+      <div className="w-16 h-16 border-4 border-slate-800 border-t-accent rounded-full animate-spin mb-4" />
+      <h2 className="font-heading text-xl">Inisialisasi...</h2>
+    </div>
+  );
 
   if (!isAuthenticated) return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
   if (!currentUser) return null;
@@ -263,10 +225,7 @@ const App: React.FC = () => {
         <NewTaskModal 
           isOpen={isNewTaskModalOpen} 
           onClose={() => setIsNewTaskModalOpen(false)} 
-          onSave={async (task) => {
-             const { data } = await supabase.from('tasks').insert({ ...task, created_by: currentUser.id });
-             setIsNewTaskModalOpen(false);
-          }} 
+          onSave={handleSaveTask} 
           workspaces={workspaces} 
           googleCalendars={googleCalendars}
           initialData={editingTask}
@@ -293,7 +252,8 @@ const App: React.FC = () => {
 
         <SettingsModal 
           isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} user={currentUser} role={accountRole}
-          notificationsEnabled={currentUser.app_settings?.notificationsEnabled ?? true} onSaveProfile={handleSaveProfile}
+          notificationsEnabled={currentUser.app_settings?.notificationsEnabled ?? true} 
+          onSaveProfile={(p, r, s) => { setIsFetching(true); fetchData(); }}
           googleAccessToken={googleAccessToken} setGoogleAccessToken={setGoogleAccessToken}
         />
 
@@ -306,18 +266,13 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex items-center gap-4">
-              <button 
-                onClick={fetchData} 
-                className="group flex items-center px-4 py-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-none"
-              >
-                 <div className={`${connStatus.color} mr-2 transition-colors duration-300`}>
-                   {connStatus.icon}
-                 </div>
+              <button onClick={fetchData} className="group flex items-center px-4 py-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all">
+                 <div className={`${connStatus.color} mr-2`}>{connStatus.icon}</div>
                  <div className="flex flex-col items-start leading-none pr-3">
-                   <span className="text-[9px] font-black tracking-tighter text-slate-400">Koneksi</span>
-                   <span className={`text-[10px] font-bold ${connStatus.color} whitespace-nowrap`}>{connStatus.label}</span>
+                   <span className="text-[9px] font-black tracking-tighter text-slate-400 uppercase">Status</span>
+                   <span className={`text-[10px] font-bold ${connStatus.color}`}>{connStatus.label}</span>
                  </div>
-                 <RefreshCw size={12} className={`text-slate-300 group-hover:text-accent transition-all ${isFetching ? 'animate-spin text-accent' : ''}`} />
+                 <RefreshCw size={12} className={`text-slate-300 ${isFetching ? 'animate-spin' : ''}`} />
               </button>
               <Button variant="ghost" className="p-2" onClick={() => setIsSettingsModalOpen(true)}><Settings size={20} /></Button>
               <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer" onClick={() => setActiveTab('profile')}>
@@ -336,7 +291,7 @@ const App: React.FC = () => {
             {activeTab === 'team' && <TeamSpace currentWorkspace={workspaces.find(w => w.type === 'team') || null} currentUser={currentUser} />}
             {activeTab === 'calendar' && (
               <CalendarView 
-                tasks={tasks} workspaces={workspaces} onTaskClick={setInspectedTask} userEmail={currentUser.email} googleAccessToken={googleAccessToken} onDayClick={() => setIsNewTaskModalOpen(true)}
+                tasks={tasks.filter(t => !t.is_archived)} workspaces={workspaces} onTaskClick={setInspectedTask} userEmail={currentUser.email} googleAccessToken={googleAccessToken} onDayClick={(d) => { setIsNewTaskModalOpen(true); }}
                 sourceColors={sourceColors} setSourceColors={setSourceColors} visibleSources={visibleSources} setVisibleSources={setVisibleSources}
                 googleEvents={googleEvents} setGoogleEvents={setGoogleEvents} googleCalendars={googleCalendars} setGoogleCalendars={setGoogleCalendars}
               />
@@ -362,6 +317,7 @@ const App: React.FC = () => {
                       <div key={status} className="space-y-4">
                         <h3 className="font-heading text-lg pb-2 border-b-2 border-slate-200 uppercase tracking-widest">{status.replace('_', ' ')}</h3>
                         {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).map(task => <TaskItem key={task.id} task={task} onStatusChange={handleStatusChange} onClick={setInspectedTask} />)}
+                        {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length === 0 && <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl text-[10px] font-bold text-slate-400 uppercase tracking-widest">Kosong</div>}
                       </div>
                     ))}
                   </div>
