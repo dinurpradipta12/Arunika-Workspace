@@ -19,7 +19,7 @@ import {
   Layout
 } from 'lucide-react';
 import { Task, TaskStatus, Workspace, WorkspaceType, User, TaskPriority } from '../types';
-import { GoogleCalendarService, GoogleCalendarEvent } from '../services/googleCalendarService';
+import { GoogleCalendarService, GoogleCalendarEvent, GoogleCalendar } from '../services/googleCalendarService';
 
 interface CalendarViewProps {
   tasks: Task[];
@@ -30,16 +30,11 @@ interface CalendarViewProps {
   onDayClick: (date: Date) => void;
 }
 
-const mockGoogleCalendars = [
-  { id: 'gc-1', name: 'Personal (Google)', color: 'bg-blue-400', checked: true },
-  { id: 'gc-2', name: 'Work Events', color: 'bg-orange-400', checked: true },
-  { id: 'gc-3', name: 'Holiday Schedule', color: 'bg-indigo-400', checked: false },
-];
-
 export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, onTaskClick, userEmail, googleAccessToken, onDayClick }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
   const [googleEvents, setGoogleEvents] = useState<Task[]>([]);
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [visibleWorkspaces, setVisibleWorkspaces] = useState<string[]>(
     [...workspaces.map(ws => ws.id), 'google-sync']
@@ -66,6 +61,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
     
     try {
       const service = new GoogleCalendarService(() => {});
+      
+      // Fetch dynamic calendars
+      const calendars = await service.fetchCalendars(googleAccessToken);
+      setGoogleCalendars(calendars);
+
+      // Fetch primary events
       const events = await service.fetchEvents(googleAccessToken);
       
       const mappedEvents: Task[] = events.map(event => ({
@@ -88,7 +89,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
     }
   };
 
-  // AUTO-SYNC when token is available or changes
   useEffect(() => {
     if (googleAccessToken) {
       handleSync();
@@ -116,7 +116,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
 
   const getTasksForDate = (date: Date) => {
     return allVisibleTasks.filter(t => {
-      // Filter by visibility list
       if (!visibleWorkspaces.includes(t.workspace_id)) return false;
       if (!t.due_date) return false;
       
@@ -149,7 +148,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
       {/* SIDEBAR */}
       <aside className="w-full xl:w-64 shrink-0 space-y-4">
         
-        {/* CARD 1: Task Due Today (Linkable & No Uppercase) */}
+        {/* CARD 1: Task Due Today */}
         <div className="bg-white border-4 border-slate-800 rounded-3xl p-5 shadow-pop">
            <div className="flex items-center gap-2 mb-4">
              <Zap size={18} className="text-secondary" />
@@ -170,17 +169,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                  </button>
                ))
              )}
-             {todayTasks.length > 5 && (
-               <p className="text-[9px] font-black text-accent text-center mt-2">+ {todayTasks.length - 5} more tasks</p>
-             )}
            </div>
         </div>
 
-        {/* CARD 2: Visibility Card (Now includes Google Calendar) */}
+        {/* CARD 2: Workspace & Google Calendar View */}
         <div className="bg-white border-4 border-slate-800 rounded-3xl p-5 shadow-pop">
           <div className="flex items-center gap-2 mb-4">
             <Layout size={16} className="text-accent" />
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Workspace View</h3>
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Visibility</h3>
           </div>
           <div className="space-y-3">
             {workspaces.map(ws => (
@@ -193,59 +189,54 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                   type="checkbox" 
                   checked={visibleWorkspaces.includes(ws.id)}
                   onChange={() => toggleWorkspace(ws.id)}
-                  className="w-4 h-4 rounded-md border-2 border-slate-800 checked:bg-accent appearance-none transition-all cursor-pointer relative checked:after:content-['✓'] checked:after:absolute checked:after:text-white checked:after:text-[8px] checked:after:font-black checked:after:inset-0 checked:after:flex checked:after:items-center checked:after:justify-center"
+                  className="w-4 h-4 rounded-md border-2 border-slate-800 checked:bg-accent appearance-none transition-all cursor-pointer relative checked:after:content-['✓']"
                 />
               </label>
             ))}
             
-            {/* Added Google Sync Checkbox */}
             {googleAccessToken && (
               <label className="flex items-center justify-between group cursor-pointer hover:translate-x-1 transition-transform pt-2 border-t border-slate-100">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full border border-black/10 bg-tertiary" />
-                  <span className="text-xs font-bold text-slate-700">Google Calendar</span>
+                  <span className="text-xs font-bold text-slate-700">Google Events</span>
                 </div>
                 <input 
                   type="checkbox" 
                   checked={visibleWorkspaces.includes('google-sync')}
                   onChange={() => toggleWorkspace('google-sync')}
-                  className="w-4 h-4 rounded-md border-2 border-slate-800 checked:bg-accent appearance-none transition-all cursor-pointer relative checked:after:content-['✓'] checked:after:absolute checked:after:text-white checked:after:text-[8px] checked:after:font-black checked:after:inset-0 checked:after:flex checked:after:items-center checked:after:justify-center"
+                  className="w-4 h-4 rounded-md border-2 border-slate-800 checked:bg-accent appearance-none transition-all cursor-pointer relative checked:after:content-['✓']"
                 />
               </label>
             )}
           </div>
         </div>
 
-        {/* CARD 3: Live Sync (Google Connect) */}
+        {/* CARD 3: Connected Google Calendars List */}
         <div className="bg-slate-800 rounded-3xl p-5 text-white shadow-pop border-4 border-slate-900">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center">
               <Chrome size={18} className="text-tertiary" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-tertiary">Live Sync</h3>
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-tertiary">Google Sync</h3>
               <p className="text-[9px] font-bold opacity-60 truncate">{userEmail}</p>
             </div>
           </div>
           
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[9px] font-bold uppercase tracking-widest opacity-60">Status</span>
-              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md border ${googleAccessToken ? 'bg-quaternary/20 text-quaternary border-quaternary/30' : 'bg-secondary/20 text-secondary border-secondary/30'}`}>
-                {googleAccessToken ? 'Online' : 'Offline'}
-              </span>
-            </div>
-            
-            <div className="h-px bg-white/10 w-full" />
-            
             <div className="space-y-2">
               <h4 className="text-[8px] font-black uppercase tracking-[0.2em] text-white/40">Remote Calendars</h4>
-              {mockGoogleCalendars.map(gc => (
-                <div key={gc.id} className="flex items-center gap-2 opacity-80">
-                  <div className={`w-1.5 h-1.5 rounded-full ${gc.color}`} />
-                  <span className="text-[9px] font-bold truncate">{gc.name}</span>
-                </div>
-              ))}
+              {googleCalendars.length > 0 ? (
+                googleCalendars.map(gc => (
+                  <div key={gc.id} className="flex items-center gap-2 opacity-80">
+                    <div className="w-1.5 h-1.5 rounded-full bg-tertiary" style={{ backgroundColor: gc.backgroundColor }} />
+                    <span className="text-[9px] font-bold truncate">{gc.summary}</span>
+                    {gc.primary && <Check size={8} className="text-quaternary ml-auto" />}
+                  </div>
+                ))
+              ) : (
+                <p className="text-[8px] italic opacity-40">No calendars found.</p>
+              )}
             </div>
 
             <button 
@@ -258,7 +249,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
         </div>
       </aside>
 
-      {/* MAIN CALENDAR GRID: Fixed corner clipping and reduced cell size */}
+      {/* MAIN CALENDAR GRID */}
       <div className="flex-1 flex flex-col min-w-0 bg-white border-4 border-slate-800 rounded-[32px] shadow-pop transition-all hover:shadow-pop-hover mb-10 overflow-hidden h-auto">
         <header className="p-4 md:p-6 border-b-4 border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 bg-white relative shrink-0">
           <div className="flex items-center gap-4 self-start">
@@ -297,7 +288,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
           ))}
         </div>
 
-        {/* Grid Cells: Reduced min-height to prevent clipping and improve visibility */}
         <div className="flex-1 grid grid-cols-7 bg-slate-100/10 auto-rows-fr">
           {calendarDays.map((date, idx) => {
             if (!date) return <div key={`empty-${idx}`} className="bg-slate-50/30 border-r border-b border-slate-100" />;
