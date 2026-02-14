@@ -12,7 +12,9 @@ import {
   Info,
   ExternalLink,
   ShieldCheck,
-  PlusCircle
+  PlusCircle,
+  Copy,
+  Check
 } from 'lucide-react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
@@ -29,6 +31,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   const [members, setMembers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [copied, setCopied] = useState(false);
   
   // Registration Form State
   const [newEmail, setNewEmail] = useState('');
@@ -63,7 +66,6 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   useEffect(() => {
     fetchMembers();
 
-    // Subscribe to realtime updates for members and users
     const memberSubscription = supabase
       .channel('workspace-members-realtime')
       .on('postgres_changes', { 
@@ -89,13 +91,20 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     };
   }, [currentWorkspace?.id]);
 
+  const handleCopyLink = () => {
+    const appUrl = window.location.origin;
+    navigator.clipboard.writeText(appUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const handleRegisterMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentWorkspace) return;
     setIsRegistering(true);
 
     try {
-      // 1. Create the Auth User (In a real app, this would be an edge function or admin API)
+      // 1. Create the Auth User
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: newEmail,
         password: newPassword,
@@ -110,7 +119,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
       if (authError) throw authError;
 
       if (authData.user) {
-        // 2. Profile record usually created by trigger, but we ensure it's here
+        // 2. Profile record
         const { error: profileError } = await supabase.from('users').upsert({
           id: authData.user.id,
           email: newEmail,
@@ -118,6 +127,8 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
           avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${newName}`,
           status: 'Active'
         });
+
+        if (profileError) throw profileError;
 
         // 3. Add to workspace
         const { error: memberError } = await supabase.from('workspace_members').insert({
@@ -132,7 +143,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
         setNewEmail('');
         setNewName('');
         setNewPassword('');
-        alert("Member registered and added to workspace successfully!");
+        alert("New User registered and added to workspace successfully!");
       }
     } catch (err: any) {
       alert("Registration failed: " + err.message);
@@ -164,7 +175,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
         {/* Onboarding Form Card */}
         <div className="lg:col-span-1 space-y-6">
           <Card 
-            title="Register New Player" 
+            title="Register New User" 
             icon={<UserPlus size={20} strokeWidth={3} />}
             variant="white"
             className="overflow-hidden"
@@ -222,22 +233,31 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                 disabled={isRegistering}
                 showArrow
               >
-                {isRegistering ? 'Processing...' : 'Add to Team'}
+                {isRegistering ? 'Creating Account...' : 'Register User'}
               </Button>
             </form>
             
-            <div className="mt-6 p-4 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-               <div className="flex gap-2 text-slate-400">
-                 <Info size={14} className="shrink-0 mt-0.5" />
-                 <p className="text-[10px] font-bold leading-relaxed">New users can login immediately using these credentials. They will see this workspace as their default home.</p>
+            <div className="mt-6 pt-6 border-t-2 border-slate-100">
+               <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Application Access</span>
                </div>
+               <button 
+                onClick={handleCopyLink}
+                className="w-full flex items-center justify-between p-3 bg-slate-50 border-2 border-slate-800 rounded-xl hover:bg-white transition-all group"
+               >
+                  <div className="flex items-center gap-2">
+                    <ExternalLink size={14} className="text-accent" />
+                    <span className="text-xs font-bold text-slate-700">App Login Page</span>
+                  </div>
+                  {copied ? <Check size={14} className="text-quaternary" /> : <Copy size={14} className="text-slate-400 group-hover:text-slate-800" />}
+               </button>
             </div>
           </Card>
 
           <Card variant="secondary" className="text-white">
              <div className="flex items-center gap-3 mb-3">
                 <PlusCircle size={20} />
-                <h3 className="font-heading text-lg">Existing Player?</h3>
+                <h3 className="font-heading text-lg">Existing User?</h3>
              </div>
              <p className="text-xs font-medium opacity-90 leading-relaxed mb-4">
                Search and invite existing TaskPlay users to join this specific workspace.

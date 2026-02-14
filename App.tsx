@@ -63,31 +63,58 @@ const App: React.FC = () => {
   const [accountRole, setAccountRole] = useState('Member');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
+  // Unified function to fetch profile that prevents Auth metadata from overwriting newer DB data
+  const fetchUserProfile = useCallback(async (userId: string, defaultData?: any) => {
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (!userError && userData) {
+      setCurrentUser(userData as User);
+      if (userData.status) setAccountRole(userData.status);
+      if (userData.app_settings) {
+        setSourceColors(userData.app_settings.sourceColors || {});
+        setVisibleSources(userData.app_settings.visibleSources || []);
+        setNotificationsEnabled(userData.app_settings.notificationsEnabled ?? true);
+      }
+    } else if (defaultData) {
+      // Fallback to Auth metadata only if DB record doesn't exist yet
+      setCurrentUser(defaultData);
+    }
+  }, []);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setIsAuthenticated(true);
         const user = session.user;
-        setCurrentUser({
+        const initialUser = {
           id: user.id,
           email: user.email || '',
           name: user.user_metadata?.name || 'User',
           avatar_url: user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
           created_at: user.created_at
-        });
+        };
+        fetchUserProfile(user.id, initialUser);
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
         setIsAuthenticated(true);
-        setCurrentUser({
-          id: session.user.id,
-          email: session.user.email || '',
-          name: session.user.user_metadata?.name || 'User',
-          avatar_url: session.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.id}`,
-          created_at: session.user.created_at
-        });
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+          const user = session.user;
+          const initialUser = {
+            id: user.id,
+            email: user.email || '',
+            name: user.user_metadata?.name || 'User',
+            avatar_url: user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
+            created_at: user.created_at
+          };
+          fetchUserProfile(user.id, initialUser);
+        }
       } else {
         setIsAuthenticated(false);
         setCurrentUser(null);
@@ -97,40 +124,14 @@ const App: React.FC = () => {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [fetchUserProfile]);
 
   const fetchData = useCallback(async () => {
     if (!currentUser) return;
     setIsFetching(true);
     try {
-      // 1. Fetch User Profile
-      let { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', currentUser.id)
-        .single();
-
-      if (userError && userError.code === 'PGRST116') {
-        // Create user profile if missing
-        const { data: newUser, error: insertError } = await supabase.from('users').insert({
-          id: currentUser.id,
-          email: currentUser.email,
-          name: currentUser.name,
-          avatar_url: currentUser.avatar_url,
-          status: 'Member'
-        }).select().single();
-        if (!insertError) userData = newUser;
-      }
-
-      if (userData) {
-        setCurrentUser(prev => prev ? { ...prev, ...userData } : null);
-        if (userData.status) setAccountRole(userData.status);
-        if (userData.app_settings) {
-          setSourceColors(userData.app_settings.sourceColors || {});
-          setVisibleSources(userData.app_settings.visibleSources || []);
-          setNotificationsEnabled(userData.app_settings.notificationsEnabled ?? true);
-        }
-      }
+      // 1. Refresh Profile First
+      await fetchUserProfile(currentUser.id);
 
       // 2. Fetch Workspaces
       let { data: wsData, error: wsError } = await supabase
@@ -171,7 +172,7 @@ const App: React.FC = () => {
     } finally {
       setTimeout(() => setIsFetching(false), 800);
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, fetchUserProfile]);
 
   const setupRealtime = useCallback(() => {
     if (!currentUser) return;
@@ -179,7 +180,7 @@ const App: React.FC = () => {
     if (channelRef.current) supabase.removeChannel(channelRef.current);
     if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
 
-    // Global Tasks Realtime (Scoped by RLS on server)
+    // Global Tasks Realtime
     channelRef.current = supabase
       .channel('tasks-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
@@ -193,6 +194,7 @@ const App: React.FC = () => {
       .channel(`user-updates-${currentUser.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}` }, (payload) => {
          const updated = payload.new as User;
+         setCurrentUser(updated); // Sync local user state immediately on DB change
          if (updated.app_settings) {
            setSourceColors(updated.app_settings.sourceColors || {});
            setVisibleSources(updated.app_settings.visibleSources || []);
@@ -219,7 +221,6 @@ const App: React.FC = () => {
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
     
-    // Ensure we have a default workspace if none selected
     const targetWsId = taskData.workspace_id || workspaces.find(w => w.type === 'personal')?.id || workspaces[0]?.id;
     
     if (editingTask) {
@@ -254,11 +255,14 @@ const App: React.FC = () => {
       visibleSources
     };
 
-    setCurrentUser(prev => prev ? { ...prev, ...userData, app_settings: nextSettings } : null);
+    // 1. Optimistic UI update
+    const updatedUser = { ...currentUser, ...userData, status: newRole, app_settings: nextSettings };
+    setCurrentUser(updatedUser);
     setAccountRole(newRole);
 
     try {
-      await supabase.from('users').upsert({
+      // 2. Persist to DB
+      const { error } = await supabase.from('users').upsert({
         id: currentUser.id,
         email: userData.email || currentUser.email,
         name: userData.name || currentUser.name,
@@ -267,8 +271,20 @@ const App: React.FC = () => {
         last_seen: new Date().toISOString(),
         app_settings: nextSettings
       });
+
+      if (error) throw error;
+      
+      // 3. Optional: Sync with Auth Metadata if needed, but DB is our source of truth now
+      await supabase.auth.updateUser({
+        data: { 
+          name: userData.name || currentUser.name, 
+          avatar_url: userData.avatar_url || currentUser.avatar_url 
+        }
+      });
+
     } catch (err) {
       console.error("Sync Profile Exception:", err);
+      // Revert on error could go here if critical
     }
   };
 
@@ -288,7 +304,7 @@ const App: React.FC = () => {
   if (!isAuthenticated || !currentUser) return <Login onLoginSuccess={() => {}} />;
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
-  const activeWorkspace = workspaces[0] || null; // Simplified: usually would have a selector
+  const activeWorkspace = workspaces[0] || null;
   const topLevelTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
   const archivedTasks = tasks.filter(t => t.is_archived);
   const statusColor = isRealtimeConnected ? 'bg-quaternary' : isApiConnected ? 'bg-tertiary' : 'bg-secondary';
