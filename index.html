@@ -1,0 +1,82 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TaskPlay</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Google Identity Services Library -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              background: '#FFFDF5',
+              foreground: '#1E293B',
+              muted: '#F1F5F9',
+              mutedForeground: '#64748B',
+              accent: '#8B5CF6',
+              accentForeground: '#FFFFFF',
+              secondary: '#F472B6',
+              tertiary: '#FBBF24',
+              quaternary: '#34D399',
+              border: '#E2E8F0',
+            },
+            fontFamily: {
+              heading: ['Outfit', 'sans-serif'],
+              sans: ['Plus Jakarta Sans', 'sans-serif'],
+            },
+            boxShadow: {
+              'pop': '4px 4px 0px 0px #1E293B',
+              'pop-hover': '6px 6px 0px 0px #1E293B',
+              'pop-active': '2px 2px 0px 0px #1E293B',
+              'sticker': '8px 8px 0px 0px #E2E8F0',
+            },
+            borderRadius: {
+              'xl': '16px',
+              '2xl': '24px',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #FFFDF5;
+        color: #1E293B;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+      }
+      h1, h2, h3, h4, h5, h6 {
+        font-family: 'Outfit', sans-serif;
+      }
+      .dot-grid {
+        background-image: radial-gradient(#E2E8F0 1px, transparent 1px);
+        background-size: 20px 20px;
+      }
+      .bounce-hover:hover {
+        transform: translateY(-2px);
+        transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@^0.564.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.41.0",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "recharts": "https://esm.sh/recharts@^3.7.0"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

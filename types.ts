@@ -1,0 +1,103 @@
+
+export enum TaskPriority {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high'
+}
+
+export enum TaskStatus {
+  TODO = 'todo',
+  IN_PROGRESS = 'in_progress',
+  DONE = 'done'
+}
+
+export enum WorkspaceType {
+  PERSONAL = 'personal',
+  TEAM = 'team'
+}
+
+export enum MemberRole {
+  OWNER = 'owner',
+  ADMIN = 'admin',
+  MEMBER = 'member'
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  avatar_url: string;
+  created_at: string;
+  last_seen?: string;
+  status?: string;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  type: WorkspaceType;
+  owner_id: string;
+  created_at: string;
+}
+
+export interface Task {
+  id: string;
+  workspace_id: string;
+  parent_id?: string;
+  title: string;
+  description?: string;
+  assigned_to?: string;
+  due_date?: string;
+  reminder_time?: string;
+  priority: TaskPriority;
+  status: TaskStatus;
+  google_event_id?: string;
+  created_by: string;
+  created_at: string;
+  completed_at?: string;
+  is_archived?: boolean;
+}
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  type: 'task_assigned' | 'due_soon' | 'overdue' | 'completed' | 'invitation';
+  reference_id: string;
+  is_read: boolean;
+  created_at: string;
+  message: string;
+}
+
+// Added to fix missing type exports in chat features
+export interface MessageReaction {
+  id: string;
+  emoji: string;
+  user_ids: string[];
+}
+
+export interface Message {
+  id: string;
+  channel_id: string;
+  sender_id: string;
+  text: string;
+  created_at: string;
+  reactions?: MessageReaction[];
+  parent_id?: string;
+  is_optimistic?: boolean;
+  reply_count?: number;
+}
+
+export interface Channel {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description?: string;
+  created_at: string;
+}
+
+export interface PresenceState {
+  [key: string]: {
+    online: boolean;
+    last_seen: string;
+  };
+}

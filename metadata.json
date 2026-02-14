@@ -1,0 +1,9 @@
+{
+  "name": "TaskPlay - Playful Task Management",
+  "description": "A robust, team-oriented task management system with Google Calendar integration, smart notifications, and a high-energy playful geometric design.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
