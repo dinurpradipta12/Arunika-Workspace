@@ -128,4 +128,41 @@ export class GoogleCalendarService {
       return null;
     }
   }
+
+  public async updateEvent(accessToken: string, eventId: string, task: any): Promise<any> {
+    try {
+      const event = {
+        summary: task.title,
+        description: task.description || 'Task updated via TaskPlay',
+        start: {
+          dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date().toISOString(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
+        end: {
+          dateTime: task.due_date 
+            ? new Date(new Date(task.due_date).getTime() + 3600000).toISOString() 
+            : new Date(Date.now() + 3600000).toISOString(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
+      };
+
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(event),
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to update Google Calendar event");
+      return await response.json();
+    } catch (error) {
+      console.error("Error updating Google Calendar event:", error);
+      return null;
+    }
+  }
 }

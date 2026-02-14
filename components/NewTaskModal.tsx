@@ -10,9 +10,10 @@ interface NewTaskModalProps {
   onClose: () => void;
   onSave: (task: Partial<Task>) => void;
   initialData?: Task | null;
+  defaultDate?: string;
 }
 
-export const NewTaskModal: React.FC<NewTaskModalProps> = ({ isOpen, onClose, onSave, initialData }) => {
+export const NewTaskModal: React.FC<NewTaskModalProps> = ({ isOpen, onClose, onSave, initialData, defaultDate }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -27,10 +28,10 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({ isOpen, onClose, onS
     } else {
       setTitle('');
       setDescription('');
-      setDueDate('');
+      setDueDate(defaultDate || '');
       setPriority(TaskPriority.MEDIUM);
     }
-  }, [initialData, isOpen]);
+  }, [initialData, isOpen, defaultDate]);
 
   if (!isOpen) return null;
 

@@ -82,6 +82,7 @@ const App: React.FC = () => {
   const [inspectedTask, setInspectedTask] = useState<Task | null>(null);
   const [reschedulingTask, setReschedulingTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [preSelectedDate, setPreSelectedDate] = useState<string | undefined>(undefined);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | 'all'>('all');
   
   // Google Auth State
@@ -111,8 +112,16 @@ const App: React.FC = () => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
   };
 
-  const handleReschedule = (id: string, newDate: string) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, due_date: new Date(newDate).toISOString() } : t));
+  const handleReschedule = async (id: string, newDate: string) => {
+    const updatedTasks = tasks.map(t => t.id === id ? { ...t, due_date: new Date(newDate).toISOString() } : t);
+    setTasks(updatedTasks);
+
+    // Sync rescheduling with Google Calendar
+    const taskToUpdate = updatedTasks.find(t => t.id === id);
+    if (googleAccessToken && taskToUpdate && taskToUpdate.google_event_id) {
+      const service = new GoogleCalendarService(() => {});
+      await service.updateEvent(googleAccessToken, taskToUpdate.google_event_id, taskToUpdate);
+    }
   };
 
   const handleRestoreTask = (id: string) => {
@@ -124,11 +133,16 @@ const App: React.FC = () => {
   };
 
   const handleSaveTask = async (taskData: Partial<Task>) => {
-    let finalTaskId = '';
-    
     if (editingTask) {
-      setTasks(prev => prev.map(t => t.id === editingTask.id ? { ...t, ...taskData } : t));
-      finalTaskId = editingTask.id;
+      const updatedTasks = tasks.map(t => t.id === editingTask.id ? { ...t, ...taskData } : t);
+      setTasks(updatedTasks);
+      
+      // Sync update with Google Calendar
+      const taskToSync = updatedTasks.find(t => t.id === editingTask.id);
+      if (googleAccessToken && taskToSync && taskToSync.google_event_id) {
+        const service = new GoogleCalendarService(() => {});
+        await service.updateEvent(googleAccessToken, taskToSync.google_event_id, taskToSync);
+      }
     } else {
       const newTask: Task = {
         id: `t-${Date.now()}`,
@@ -142,20 +156,21 @@ const App: React.FC = () => {
         description: taskData.description,
         due_date: taskData.due_date,
       };
+      
       setTasks(prev => [...prev, newTask]);
-      finalTaskId = newTask.id;
 
       // TWO-WAY SYNC: Automatically create on Google Calendar if connected
       if (googleAccessToken) {
         const service = new GoogleCalendarService(() => {});
         const googleEvent = await service.createEvent(googleAccessToken, newTask);
         if (googleEvent) {
-          setTasks(prev => prev.map(t => t.id === finalTaskId ? { ...t, google_event_id: googleEvent.id } : t));
+          setTasks(prev => prev.map(t => t.id === newTask.id ? { ...t, google_event_id: googleEvent.id } : t));
         }
       }
     }
     setIsNewTaskModalOpen(false);
     setEditingTask(null);
+    setPreSelectedDate(undefined);
   };
 
   const handleTaskClick = (task: Task) => {
@@ -165,6 +180,12 @@ const App: React.FC = () => {
     } else {
       setInspectedTask(task);
     }
+  };
+
+  const handleDayClick = (date: Date) => {
+    const formattedDate = date.toISOString().split('T')[0];
+    setPreSelectedDate(formattedDate);
+    setIsNewTaskModalOpen(true);
   };
 
   const handleUpdateUser = (userData: Partial<User>, newRole: string) => {
@@ -204,9 +225,14 @@ const App: React.FC = () => {
       <div className="h-full w-full dot-grid flex overflow-hidden text-foreground bg-background">
         <NewTaskModal 
           isOpen={isNewTaskModalOpen} 
-          onClose={() => { setIsNewTaskModalOpen(false); setEditingTask(null); }} 
+          onClose={() => { 
+            setIsNewTaskModalOpen(false); 
+            setEditingTask(null);
+            setPreSelectedDate(undefined);
+          }} 
           onSave={handleSaveTask}
           initialData={editingTask}
+          defaultDate={preSelectedDate}
         />
 
         <SettingsModal 
@@ -425,7 +451,7 @@ const App: React.FC = () => {
                 onTaskClick={(t) => setInspectedTask(t)}
                 userEmail={currentUser.email}
                 googleAccessToken={googleAccessToken}
-                onDayClick={() => setIsNewTaskModalOpen(true)}
+                onDayClick={handleDayClick}
               />
             )}
             
