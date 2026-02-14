@@ -47,6 +47,17 @@ const App: React.FC = () => {
   const [preSelectedDate, setPreSelectedDate] = useState<string | undefined>(undefined);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | 'all'>('all');
   
+  // Persistent Calendar State
+  const [sourceColors, setSourceColors] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('calendar_source_colors');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [visibleSources, setVisibleSources] = useState<string[]>(() => {
+    const saved = localStorage.getItem('calendar_visible_sources');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [googleEvents, setGoogleEvents] = useState<Task[]>([]);
+  
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [isApiConnected, setIsApiConnected] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
@@ -62,6 +73,15 @@ const App: React.FC = () => {
   const [accountRole, setAccountRole] = useState('Workspace Architect & Lead');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
+  // Sync colors/visibility to localStorage
+  useEffect(() => {
+    localStorage.setItem('calendar_source_colors', JSON.stringify(sourceColors));
+  }, [sourceColors]);
+
+  useEffect(() => {
+    localStorage.setItem('calendar_visible_sources', JSON.stringify(visibleSources));
+  }, [visibleSources]);
+
   const fetchData = useCallback(async () => {
     setIsFetching(true);
     try {
@@ -76,12 +96,19 @@ const App: React.FC = () => {
 
       const { data: tData, error: tError } = await supabase.from('tasks').select('*');
       if (tData) setTasks(tData as Task[]);
+
+      // Also try to fetch existing user profile if it exists
+      const { data: userData } = await supabase.from('users').select('*').eq('id', currentUser.id).single();
+      if (userData) {
+        setCurrentUser(prev => ({ ...prev, ...userData }));
+        if (userData.status) setAccountRole(userData.status);
+      }
     } catch (err) {
       setIsApiConnected(false);
     } finally {
       setTimeout(() => setIsFetching(false), 800);
     }
-  }, []);
+  }, [currentUser.id]);
 
   const setupRealtime = useCallback(() => {
     if (channelRef.current) supabase.removeChannel(channelRef.current);
@@ -92,9 +119,13 @@ const App: React.FC = () => {
         else if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
         else if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
       })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}` }, (payload) => {
+         setCurrentUser(prev => ({ ...prev, ...payload.new }));
+         if (payload.new.status) setAccountRole(payload.new.status);
+      })
       .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
     channelRef.current = channel;
-  }, []);
+  }, [currentUser.id]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -149,6 +180,27 @@ const App: React.FC = () => {
     setEditingTask(null);
   };
 
+  const handleSaveProfile = async (userData: Partial<User>, newRole: string) => {
+    // Update local state for immediate feedback
+    setCurrentUser(prev => ({ ...prev, ...userData }));
+    setAccountRole(newRole);
+
+    // Persist to Supabase
+    try {
+      const { error } = await supabase.from('users').upsert({
+        id: currentUser.id,
+        email: userData.email || currentUser.email,
+        name: userData.name || currentUser.name,
+        avatar_url: userData.avatar_url || currentUser.avatar_url,
+        status: newRole, // Store role in status column
+        last_seen: new Date().toISOString()
+      });
+      if (error) console.error("Error saving profile to Supabase:", error);
+    } catch (err) {
+      console.error("Failed to sync profile:", err);
+    }
+  };
+
   const handleTaskClick = (task: Task) => {
     if (!task.parent_id) {
       setSelectedTaskId(task.id);
@@ -199,6 +251,17 @@ const App: React.FC = () => {
 
         <RescheduleModal task={reschedulingTask} isOpen={!!reschedulingTask} onClose={() => setReschedulingTask(null)} onSave={handleReschedule} />
 
+        <SettingsModal 
+          isOpen={isSettingsModalOpen} 
+          onClose={() => setIsSettingsModalOpen(false)} 
+          user={currentUser} 
+          role={accountRole}
+          onSaveProfile={handleSaveProfile}
+          googleAccessToken={googleAccessToken}
+          setGoogleAccessToken={setGoogleAccessToken}
+          isRealtimeConnected={isRealtimeConnected}
+        />
+
         <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0 transition-all duration-300">
           <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b-2 border-slate-100 px-4 sm:px-8 py-4 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -221,6 +284,10 @@ const App: React.FC = () => {
                 <Button variant="ghost" className="p-2" onClick={() => setIsSettingsModalOpen(true)}><Settings size={20} /></Button>
               </div>
               <div className="flex items-center gap-3 pl-3 sm:pl-4 border-l-2 border-slate-100 cursor-pointer" onClick={() => setActiveTab('profile')}>
+                <div className="hidden lg:block text-right">
+                  <p className="text-xs font-black uppercase tracking-tight text-slate-800">{currentUser.name}</p>
+                  <p className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{currentUser.email}</p>
+                </div>
                 <img src={currentUser.avatar_url} className="w-10 h-10 rounded-full border-2 border-slate-800 bg-white" alt="Avatar" />
               </div>
             </div>
@@ -230,7 +297,22 @@ const App: React.FC = () => {
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'profile' && <ProfileView onLogout={() => setIsAuthenticated(false)} user={currentUser} role={accountRole} />}
             {activeTab === 'calendar' && (
-              <CalendarView tasks={tasks} workspaces={workspaces} onTaskClick={(t) => setInspectedTask(t)} userEmail={currentUser.email} googleAccessToken={googleAccessToken} onDayClick={(d) => setIsNewTaskModalOpen(true)} />
+              <CalendarView 
+                tasks={tasks} 
+                workspaces={workspaces} 
+                onTaskClick={(t) => setInspectedTask(t)} 
+                userEmail={currentUser.email} 
+                googleAccessToken={googleAccessToken} 
+                onDayClick={(d) => setIsNewTaskModalOpen(true)}
+                sourceColors={sourceColors}
+                setSourceColors={setSourceColors}
+                visibleSources={visibleSources}
+                setVisibleSources={setVisibleSources}
+                googleEvents={googleEvents}
+                setGoogleEvents={setGoogleEvents}
+                googleCalendars={googleCalendars}
+                setGoogleCalendars={setGoogleCalendars}
+              />
             )}
             
             {activeTab === 'archive' && (

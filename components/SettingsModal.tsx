@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, User, Settings, Bell, Calendar, Link2, 
   ChevronDown, Camera, Mail, ShieldCheck, Smartphone, RefreshCw,
-  Chrome, CheckCircle2, Unlink, Crop, Check, ZoomIn, ZoomOut
+  Chrome, CheckCircle2, Unlink, Crop, Check, ZoomIn, ZoomOut, Database
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -18,10 +18,11 @@ interface SettingsModalProps {
   onSaveProfile: (userData: Partial<UserType>, newRole: string) => void;
   googleAccessToken: string | null;
   setGoogleAccessToken: (token: string | null) => void;
+  isRealtimeConnected: boolean;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
-  isOpen, onClose, user, role, onSaveProfile, googleAccessToken, setGoogleAccessToken 
+  isOpen, onClose, user, role, onSaveProfile, googleAccessToken, setGoogleAccessToken, isRealtimeConnected 
 }) => {
   const [expandedSection, setExpandedSection] = useState<'profile' | 'app' | null>('profile');
   const [notifications, setNotifications] = useState(true);
@@ -191,6 +192,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="p-6 bg-white space-y-6 animate-in slide-in-from-top-4 duration-300">
                 <div className="space-y-4">
                   <div className="flex items-center justify-between border-b-2 border-slate-100 pb-2">
+                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Database Connection</h4>
+                    <div className="flex items-center gap-2">
+                       <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border-2 border-slate-800 text-[9px] font-black uppercase tracking-widest ${isRealtimeConnected ? 'bg-quaternary text-white' : 'bg-slate-100 text-slate-400'}`}>
+                          <Database size={10} /> {isRealtimeConnected ? 'Realtime Connected' : 'Disconnected'}
+                       </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between border-b-2 border-slate-100 pb-2 pt-2">
                     <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Google Calendar Integration</h4>
                     {googleAccessToken && (
                       <span className="flex items-center gap-1 text-[9px] font-black text-quaternary uppercase tracking-widest bg-quaternary/10 px-2 py-0.5 rounded-full border border-quaternary">

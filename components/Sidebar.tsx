@@ -160,14 +160,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Footer - Pinned at Bottom */}
-        <div className="shrink-0 p-6 bg-slate-50 border-t-2 border-slate-100 mt-auto">
+        {/* Footer - Pinned at Bottom (Clean & Compact) */}
+        <div className="shrink-0 px-6 py-4 mt-auto">
           <button 
             onClick={onLogout} 
-            className="w-full bg-secondary border-2 border-slate-800 rounded-xl py-3 px-4 shadow-pop flex items-center justify-center gap-2 transition-all hover:bg-secondary/90 hover:-translate-y-0.5 active:translate-y-0 text-white font-black uppercase"
+            className="w-full bg-secondary border-2 border-slate-800 rounded-lg py-1.5 px-3 shadow-pop-active flex items-center justify-center gap-2 transition-all hover:bg-secondary/90 hover:-translate-y-0.5 active:translate-y-0 text-white font-black uppercase text-[10px] tracking-widest"
           >
-            <LogOut size={20} strokeWidth={3} />
-            <span>Logout Account</span>
+            <LogOut size={14} strokeWidth={3} />
+            <span>Logout</span>
           </button>
         </div>
       </div>

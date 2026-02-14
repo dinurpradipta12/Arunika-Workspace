@@ -1,26 +1,16 @@
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
-  Filter, 
   Calendar as CalendarIcon, 
-  CheckCircle2, 
   Chrome,
   RefreshCw,
-  MoreHorizontal,
-  CloudLightning,
-  Check,
-  Globe,
-  Settings,
-  AlertCircle,
-  Plus,
   Zap,
-  Layout,
-  Palette
+  Layout
 } from 'lucide-react';
-import { Task, TaskStatus, Workspace, WorkspaceType, User, TaskPriority } from '../types';
-import { GoogleCalendarService, GoogleCalendarEvent, GoogleCalendar } from '../services/googleCalendarService';
+import { Task, TaskStatus, Workspace, WorkspaceType, TaskPriority } from '../types';
+import { GoogleCalendarService, GoogleCalendar } from '../services/googleCalendarService';
 
 const PRESET_COLORS = [
   '#8B5CF6', // Accent (Purple)
@@ -38,21 +28,39 @@ interface CalendarViewProps {
   userEmail: string;
   googleAccessToken: string | null;
   onDayClick: (date: Date) => void;
+  // Lifted States
+  sourceColors: Record<string, string>;
+  setSourceColors: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  visibleSources: string[];
+  setVisibleSources: React.Dispatch<React.SetStateAction<string[]>>;
+  googleEvents: Task[];
+  setGoogleEvents: React.Dispatch<React.SetStateAction<Task[]>>;
+  googleCalendars: GoogleCalendar[];
+  setGoogleCalendars: React.Dispatch<React.SetStateAction<GoogleCalendar[]>>;
 }
 
-export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, onTaskClick, userEmail, googleAccessToken, onDayClick }) => {
+export const CalendarView: React.FC<CalendarViewProps> = ({ 
+  tasks, 
+  workspaces, 
+  onTaskClick, 
+  userEmail, 
+  googleAccessToken, 
+  onDayClick,
+  sourceColors,
+  setSourceColors,
+  visibleSources,
+  setVisibleSources,
+  googleEvents,
+  setGoogleEvents,
+  googleCalendars,
+  setGoogleCalendars
+}) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
-  const [googleEvents, setGoogleEvents] = useState<Task[]>([]);
-  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
   const [syncError, setSyncError] = useState<string | null>(null);
-  
-  // Custom colors for workspaces/calendars
-  const [sourceColors, setSourceColors] = useState<Record<string, string>>({});
-  const [visibleSources, setVisibleSources] = useState<string[]>([]);
   const [activePicker, setActivePicker] = useState<string | null>(null);
 
-  // Initialize visibility and colors
+  // Initialize visibility and colors only if they don't exist
   useEffect(() => {
     const wsIds = workspaces.map(ws => ws.id);
     const gCalIds = googleCalendars.map(gc => gc.id);
@@ -60,9 +68,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
 
     setSourceColors(prev => {
       const next = { ...prev };
+      let changed = false;
       allIds.forEach((id, idx) => {
         if (!next[id]) {
-          // Assign initial colors based on source type if not already set
+          changed = true;
           const gCal = googleCalendars.find(c => c.id === id);
           if (gCal) {
             next[id] = gCal.backgroundColor || PRESET_COLORS[idx % PRESET_COLORS.length];
@@ -72,31 +81,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
           }
         }
       });
-      return next;
+      return changed ? next : prev;
     });
 
     setVisibleSources(prev => {
-      if (prev.length === 0) return allIds;
       const newIds = allIds.filter(id => !prev.includes(id));
-      return [...prev, ...newIds];
+      if (newIds.length > 0) {
+        return [...prev, ...newIds];
+      }
+      return prev;
     });
-  }, [workspaces, googleCalendars]);
+  }, [workspaces, googleCalendars, setSourceColors, setVisibleSources]);
 
-  const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
-  const firstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
-
-  const monthName = currentDate.toLocaleString('default', { month: 'long' });
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-
-  const handlePrevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
-  const handleNextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
-
-  const handleSync = async () => {
-    if (!googleAccessToken) {
-      setSyncError("Google Account not connected!");
-      return;
-    }
+  const handleSync = useCallback(async () => {
+    if (!googleAccessToken) return;
 
     setIsSyncing(true);
     setSyncError(null);
@@ -110,11 +108,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
         try {
           const events = await service.fetchEvents(googleAccessToken, cal.id);
           return events.map(event => {
-            let start = event.start.dateTime || event.start.date;
-            let end = event.end.dateTime || event.end.date;
+            let start = event.start.dateTime || event.start.date || new Date().toISOString();
+            let end = event.end.dateTime || event.end.date || new Date().toISOString();
 
-            // FIX: Google all-day events end at 00:00:00 of the FOLLOWING day.
-            // If it's a date-only (all-day) event, we subtract 1 second to keep it on the intended day.
             if (event.end.date && !event.end.dateTime) {
                 const endDate = new Date(event.end.date);
                 endDate.setSeconds(endDate.getSeconds() - 1);
@@ -133,7 +129,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
               status: TaskStatus.TODO,
               created_by: 'google',
               created_at: new Date().toISOString(),
-            };
+            } as Task;
           });
         } catch (e) {
           return [];
@@ -147,11 +143,24 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
     } finally {
       setIsSyncing(false);
     }
-  };
+  }, [googleAccessToken, setGoogleCalendars, setGoogleEvents]);
 
+  // Initial Sync Logic: Only run if we don't have events yet and have a token
   useEffect(() => {
-    if (googleAccessToken) handleSync();
-  }, [googleAccessToken]);
+    if (googleAccessToken && googleEvents.length === 0) {
+      handleSync();
+    }
+  }, [googleAccessToken, googleEvents.length, handleSync]);
+
+  const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
+  const firstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
+
+  const monthName = currentDate.toLocaleString('default', { month: 'long' });
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+
+  const handlePrevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
+  const handleNextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
 
   const toggleSource = (id: string) => {
     setVisibleSources(prev => 
@@ -173,9 +182,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
     return days;
   }, [year, month]);
 
-  const allVisibleTasks = [...tasks, ...googleEvents];
+  const allVisibleTasks = useMemo(() => [...tasks, ...googleEvents], [tasks, googleEvents]);
 
-  const getTasksForDate = (date: Date) => {
+  const getTasksForDate = useCallback((date: Date) => {
     const dStr = date.toISOString().split('T')[0];
     
     return allVisibleTasks.filter(t => {
@@ -185,10 +194,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
       const taskStartStr = (t.start_date || t.due_date).split('T')[0];
       const taskEndStr = t.due_date.split('T')[0];
 
-      // Pure string comparison for date coverage
       return dStr >= taskStartStr && dStr <= taskEndStr;
     });
-  };
+  }, [allVisibleTasks, visibleSources]);
 
   const todayTasks = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0];
@@ -200,7 +208,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
 
   const getTaskStyles = (task: Task) => {
     const bgColor = sourceColors[task.workspace_id] || '#8B5CF6';
-    // Calculate brightness to determine text color (simple version)
     const isLight = ['#FBBF24', '#34D399', '#38BDF8'].includes(bgColor.toUpperCase());
     
     return { 
