@@ -109,7 +109,19 @@ const App: React.FC = () => {
   useEffect(() => {
     if (googleAccessToken) {
       const service = new GoogleCalendarService(() => {});
-      service.fetchCalendars(googleAccessToken).then(setGoogleCalendars);
+      service.fetchCalendars(googleAccessToken).then(calendars => {
+        setGoogleCalendars(calendars);
+        
+        // Simpan ke Supabase (Mock)
+        // calendars.forEach(cal => {
+        //   supabase.from('user_calendars').upsert({
+        //     user_id: currentUser.id,
+        //     calendar_id: cal.id,
+        //     summary: cal.summary,
+        //     timezone: cal.timeZone
+        //   });
+        // });
+      });
     } else {
       setGoogleCalendars([]);
     }

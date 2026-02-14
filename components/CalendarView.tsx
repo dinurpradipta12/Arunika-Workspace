@@ -149,23 +149,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
       if (!visibleWorkspaces.includes(t.workspace_id)) return false;
       if (!t.due_date) return false;
       
-      const taskDate = new Date(t.due_date);
-      const taskStart = t.start_date ? new Date(t.start_date) : taskDate;
-      
-      // Basic check: if the event ends on this date (or starts on it)
       const d = date.getDate();
       const m = date.getMonth();
       const y = date.getFullYear();
 
-      // Check range or single day
-      const checkRange = (sd: Date, ed: Date) => {
-          const curr = new Date(y, m, d);
-          const start = new Date(sd.getFullYear(), sd.getMonth(), sd.getDate());
-          const end = new Date(ed.getFullYear(), ed.getMonth(), ed.getDate());
-          return curr >= start && curr <= end;
-      };
+      const taskEnd = new Date(t.due_date);
+      const taskStart = t.start_date ? new Date(t.start_date) : taskEnd;
 
-      return checkRange(taskStart, taskDate);
+      // Check if current calendar day is within range [start, end]
+      const currDayStart = new Date(y, m, d, 0, 0, 0);
+      const currDayEnd = new Date(y, m, d, 23, 59, 59);
+
+      // Simple overlap check
+      return taskStart <= currDayEnd && taskEnd >= currDayStart;
     });
   };
 
@@ -185,7 +181,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
     const gCal = googleCalendars.find(c => c.id === task.workspace_id);
     if (gCal) {
         bgColor = gCal.backgroundColor || '#FBBF24';
-        textColor = '#1E293B'; 
+        // Improved text contrast calculation or fixed high-contrast defaults
+        textColor = '#000000'; // Black text for high readability on most calendar colors
     } else {
         const ws = workspaces.find(w => w.id === task.workspace_id);
         if (ws?.type === WorkspaceType.PERSONAL) {
@@ -210,7 +207,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
       <aside className="w-full xl:w-64 shrink-0 space-y-4">
         
         {/* CARD 1: Task Due Today */}
-        <div className="bg-white border-4 border-slate-800 rounded-3xl p-5 shadow-pop">
+        <div className="bg-white border-4 border-slate-800 rounded-[24px] p-5 shadow-pop">
            <div className="flex items-center gap-2 mb-4">
              <Zap size={18} className="text-secondary" />
              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Due Today</h3>
@@ -234,7 +231,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
         </div>
 
         {/* CARD 2: Visibility */}
-        <div className="bg-white border-4 border-slate-800 rounded-3xl p-5 shadow-pop">
+        <div className="bg-white border-4 border-slate-800 rounded-[24px] p-5 shadow-pop">
           <div className="flex items-center gap-2 mb-4">
             <Layout size={16} className="text-accent" />
             <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Visibility</h3>
@@ -283,7 +280,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
         </div>
 
         {/* CARD 3: Sync Status */}
-        <div className="bg-slate-800 rounded-3xl p-5 text-white shadow-pop border-4 border-slate-900">
+        <div className="bg-slate-800 rounded-[24px] p-5 text-white shadow-pop border-4 border-slate-900">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center">
               <Chrome size={18} className="text-tertiary" />
@@ -300,14 +297,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
               disabled={!googleAccessToken || isSyncing}
               className="w-full mt-2 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-white/10 disabled:opacity-30"
             >
-              <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} /> Force Refresh
+              <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} /> Force Sync
             </button>
           </div>
         </div>
       </aside>
 
       {/* MAIN CALENDAR GRID */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white border-4 border-slate-800 rounded-[32px] shadow-pop transition-all mb-10 overflow-hidden h-auto">
+      <div className="flex-1 flex flex-col min-w-0 bg-white border-4 border-slate-800 rounded-[32px] shadow-pop transition-all mb-10 h-auto">
         <header className="p-4 md:p-6 border-b-4 border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 bg-white relative shrink-0">
           <div className="flex items-center gap-4 self-start">
             <div className="w-12 h-12 bg-accent rounded-2xl border-4 border-slate-800 flex items-center justify-center text-white shadow-pop-active transform -rotate-3 transition-transform hover:rotate-0">
@@ -358,7 +355,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
               <div 
                 key={date.toISOString()} 
                 onClick={() => onDayClick(date)}
-                className={`relative bg-white border-r border-b border-slate-200 p-1.5 flex flex-col gap-1 transition-colors hover:bg-slate-50/80 group cursor-pointer min-h-[120px] h-full`}
+                className={`relative bg-white border-r border-b border-slate-200 p-2 flex flex-col gap-1.5 transition-colors hover:bg-slate-50/80 group cursor-pointer min-h-[140px] h-full`}
               >
                 <div className="flex items-center justify-between mb-1 shrink-0">
                   <span className={`inline-flex items-center justify-center w-6 h-6 text-[11px] font-black rounded-lg transition-all ${isToday ? 'bg-accent text-white border-2 border-slate-800 shadow-pop-active' : 'text-slate-300 group-hover:text-slate-800'}`}>
@@ -371,7 +368,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                   )}
                 </div>
                 
-                <div className="flex-1 flex flex-col gap-1">
+                <div className="flex-1 flex flex-col gap-1.5 relative">
                   {displayTasks.map(task => {
                     const styles = getTaskStyles(task);
                     const isGoogle = task.id.toString().startsWith('google-');
@@ -380,18 +377,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                       <button
                         key={task.id}
                         onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
-                        className="w-full text-left px-1.5 py-0.5 rounded-lg border-2 border-slate-800 shadow-[2px_2px_0px_0px_#1E293B] transition-all relative hover:z-[60] hover:scale-[1.05] hover:shadow-[4px_4px_0px_0px_#1E293B] shrink-0 overflow-hidden"
+                        className="w-full text-left px-2 py-1 rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_#1E293B] transition-all relative hover:z-[99] hover:scale-[1.08] hover:shadow-[4px_4px_0px_0px_#1E293B] shrink-0"
                         style={styles}
                       >
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
                           <div className="shrink-0">
                             {task.status === TaskStatus.DONE ? (
-                              <CheckCircle2 size={9} strokeWidth={4} />
+                              <CheckCircle2 size={10} strokeWidth={4} />
                             ) : (
-                              <div className="w-1 h-1 rounded-full border border-black/20 bg-black/40" />
+                              <div className="w-1.5 h-1.5 rounded-full border border-black/20 bg-black/40" />
                             )}
                           </div>
-                          <span className="text-[8px] font-black leading-tight truncate tracking-tighter">
+                          <span className="text-[9px] font-bold leading-none truncate tracking-tight">
                             {task.title}
                           </span>
                         </div>
@@ -400,8 +397,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                   })}
                   
                   {dayTasks.length === 0 && (
-                    <div className="flex-1 flex items-center justify-center opacity-0 group-hover:opacity-20 transition-opacity">
-                       <Plus size={20} className="text-slate-400" />
+                    <div className="flex-1 flex items-center justify-center opacity-0 group-hover:opacity-10 transition-opacity pointer-events-none">
+                       <Plus size={24} className="text-slate-400" />
                     </div>
                   )}
                 </div>

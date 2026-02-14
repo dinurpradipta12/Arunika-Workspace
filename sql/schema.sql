@@ -26,6 +26,23 @@ CREATE TABLE workspaces (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- USER CALENDARS (NEW)
+CREATE TABLE user_calendars (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+  calendar_id TEXT NOT NULL,
+  summary TEXT,
+  timezone TEXT,
+  access_role TEXT,
+  is_selected BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(user_id, calendar_id)
+);
+
+ALTER TABLE user_calendars ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage their own calendar list" ON user_calendars
+  FOR ALL USING (auth.uid() = user_id);
+
 -- RLS for Workspaces
 CREATE POLICY "Users can view their own workspaces" ON workspaces
   FOR SELECT USING (auth.uid() = owner_id);
@@ -50,6 +67,7 @@ CREATE TABLE tasks (
   priority TEXT CHECK (priority IN ('low', 'medium', 'high')) DEFAULT 'medium',
   status TEXT CHECK (status IN ('todo', 'in_progress', 'done')) DEFAULT 'todo',
   google_event_id TEXT,
+  google_calendar_id TEXT,
   created_by UUID REFERENCES users(id) NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   completed_at TIMESTAMP WITH TIME ZONE

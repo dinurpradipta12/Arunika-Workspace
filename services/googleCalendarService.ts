@@ -6,6 +6,8 @@ export interface GoogleCalendar {
   summary: string;
   backgroundColor?: string;
   primary?: boolean;
+  timeZone?: string;
+  accessRole?: string;
 }
 
 export interface GoogleCalendarEvent {
@@ -52,17 +54,29 @@ export class GoogleCalendarService {
     }
   }
 
+  /**
+   * Panggil Endpoint CalendarList
+   * GET https://www.googleapis.com/calendar/v3/users/me/calendarList
+   */
   public async fetchCalendars(accessToken: string): Promise<GoogleCalendar[]> {
     try {
       const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/users/me/calendarList`,
+        "https://www.googleapis.com/calendar/v3/users/me/calendarList",
         {
-          headers: { Authorization: `Bearer ${accessToken}` },
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json"
+          }
         }
       );
+
       if (!response.ok) throw new Error("Failed to fetch calendar list");
       const data = await response.json();
-      return data.items || [];
+      
+      // Filter kalender yang bisa dibaca (accessRole !== "none")
+      const calendars: GoogleCalendar[] = data.items || [];
+      return calendars.filter(cal => cal.accessRole !== "none");
     } catch (error) {
       console.error("Error fetching calendars:", error);
       return [];
