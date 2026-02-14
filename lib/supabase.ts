@@ -1,13 +1,12 @@
 
-// In a real application, you would use createClient from @supabase/supabase-js
-// with actual environment variables. Here we provide a conceptual setup.
+import { createClient } from '@supabase/supabase-js';
 
-export const supabaseConfig = {
-  url: 'https://placeholder.supabase.co',
-  key: 'placeholder-key',
-};
+const supabaseUrl = 'https://pbheoefyraqjrctjrmzy.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBiaGVvZWZ5cmFxanJjdGpymXp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMDQxNTcsImV4cCI6MjA4NjU4MDE1N30.dtVLeKi2B50bWE0shWIvVgMBQK7y56cjykbxTHHkr4g';
 
-// Mock Supabase implementation for the demo
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// Mock data as fallback or for reference
 export const mockData = {
   user: {
     id: 'user-123',
@@ -19,22 +18,5 @@ export const mockData = {
     { id: 'ws-1', name: 'My Personal Workspace', type: 'personal', owner_id: 'user-123' },
     { id: 'ws-2', name: 'Growth Team', type: 'team', owner_id: 'user-123' }
   ],
-  tasks: [
-    { 
-      id: 't-1', 
-      workspace_id: 'ws-1', 
-      title: 'Design high-fidelity wireframes', 
-      status: 'in_progress', 
-      priority: 'high', 
-      due_date: new Date().toISOString() 
-    },
-    { 
-      id: 't-2', 
-      workspace_id: 'ws-1', 
-      title: 'Update design system documentation', 
-      status: 'todo', 
-      priority: 'medium', 
-      due_date: new Date(Date.now() + 86400000).toISOString() 
-    }
-  ]
+  tasks: []
 };

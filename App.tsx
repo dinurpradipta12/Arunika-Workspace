@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutGrid, 
   CheckSquare, 
@@ -9,26 +9,20 @@ import {
   Settings, 
   Plus, 
   Search,
-  Menu,
   ChevronRight,
   LogOut,
-  Filter,
-  User as UserIcon,
-  Smile,
-  Edit3,
-  ChevronDown,
   X,
-  Circle,
   Clock,
   CheckCircle2,
   CircleDashed,
   PanelLeftClose,
   PanelLeftOpen,
   Layers,
-  ListTodo,
   Archive,
-  RotateCcw,
-  FolderArchive
+  FolderArchive,
+  ChevronDown,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Dashboard } from './components/Dashboard';
@@ -41,39 +35,15 @@ import { TaskInspectModal } from './components/TaskInspectModal';
 import { RescheduleModal } from './components/RescheduleModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CalendarView } from './components/CalendarView';
-import { mockData } from './lib/supabase';
+import { supabase, mockData } from './lib/supabase';
 import { Task, TaskStatus, WorkspaceType, TaskPriority, Workspace, User } from './types';
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
-
-const initialTasks: Task[] = [
-  ...mockData.tasks as Task[],
-  {
-    id: 'sub-1',
-    workspace_id: 'ws-1',
-    parent_id: 't-1',
-    title: 'Define Color Palette and Visual Identity System',
-    status: TaskStatus.DONE,
-    priority: TaskPriority.MEDIUM,
-    created_by: 'user-123',
-    created_at: new Date().toISOString(),
-    description: 'Establish a cohesive color palette and typography system for the project brand identity.'
-  },
-  {
-    id: 't-cal-1',
-    workspace_id: 'ws-1',
-    title: 'Finalize Workspace Strategy',
-    status: TaskStatus.TODO,
-    priority: TaskPriority.HIGH,
-    due_date: new Date().toISOString(),
-    created_by: 'user-123',
-    created_at: new Date().toISOString(),
-  }
-];
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive'>('dashboard');
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
@@ -84,96 +54,151 @@ const App: React.FC = () => {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [preSelectedDate, setPreSelectedDate] = useState<string | undefined>(undefined);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | 'all'>('all');
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   
-  // Google Auth State
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
 
-  // Dynamic User State
   const [currentUser, setCurrentUser] = useState<User>({
     ...mockData.user,
     created_at: new Date().toISOString()
   });
   const [accountRole, setAccountRole] = useState('Workspace Architect & Lead');
-  
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Auto-close sidebar on small screens when tab changes
+  // Fetch initial data from Supabase
+  const fetchData = useCallback(async () => {
+    // 1. Fetch Workspaces
+    const { data: wsData } = await supabase.from('workspaces').select('*');
+    if (wsData) setWorkspaces(wsData as Workspace[]);
+    else setWorkspaces(mockData.workspaces as Workspace[]);
+
+    // 2. Fetch Tasks
+    const { data: tData } = await supabase.from('tasks').select('*');
+    if (tData) setTasks(tData as Task[]);
+  }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchData();
+
+      // Set up REALTIME subscription for tasks
+      const tasksSubscription = supabase
+        .channel('tasks-realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setTasks(prev => [...prev, payload.new as Task]);
+          } else if (payload.eventType === 'UPDATE') {
+            setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
+          } else if (payload.eventType === 'DELETE') {
+            setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') setIsRealtimeConnected(true);
+          if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsRealtimeConnected(false);
+        });
+
+      // Set up REALTIME subscription for workspaces
+      const workspacesSubscription = supabase
+        .channel('workspaces-realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setWorkspaces(prev => [...prev, payload.new as Workspace]);
+          } else if (payload.eventType === 'UPDATE') {
+            setWorkspaces(prev => prev.map(ws => ws.id === payload.new.id ? { ...ws, ...payload.new } : ws));
+          } else if (payload.eventType === 'DELETE') {
+            setWorkspaces(prev => prev.filter(ws => ws.id !== payload.old.id));
+          }
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(tasksSubscription);
+        supabase.removeChannel(workspacesSubscription);
+      };
+    }
+  }, [isAuthenticated, fetchData]);
+
   useEffect(() => {
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
     }
   }, [activeTab, selectedTaskId]);
 
-  // Load Google Calendars if token available
   useEffect(() => {
     if (googleAccessToken) {
       const service = new GoogleCalendarService(() => {});
       service.fetchCalendars(googleAccessToken).then(calendars => {
         setGoogleCalendars(calendars);
-        
-        // Simpan ke Supabase (Mock)
-        // calendars.forEach(cal => {
-        //   supabase.from('user_calendars').upsert({
-        //     user_id: currentUser.id,
-        //     calendar_id: cal.id,
-        //     summary: cal.summary,
-        //     timezone: cal.timeZone
-        //   });
-        // });
+        // Sync to Supabase table user_calendars
+        calendars.forEach(async (cal) => {
+          await supabase.from('user_calendars').upsert({
+            user_id: currentUser.id,
+            calendar_id: cal.id,
+            summary: cal.summary,
+            timezone: cal.timeZone,
+            access_role: cal.accessRole
+          });
+        });
       });
     } else {
       setGoogleCalendars([]);
     }
-  }, [googleAccessToken]);
+  }, [googleAccessToken, currentUser.id]);
 
   if (!isAuthenticated) {
     return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
   }
 
-  const handleStatusChange = (id: string, status: TaskStatus) => {
+  const handleStatusChange = async (id: string, status: TaskStatus) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+    await supabase.from('tasks').update({ status }).eq('id', id);
   };
 
   const handleReschedule = async (id: string, newDate: string) => {
-    const updatedTasks = tasks.map(t => t.id === id ? { ...t, due_date: new Date(newDate).toISOString() } : t);
-    setTasks(updatedTasks);
+    const isoDate = new Date(newDate).toISOString();
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, due_date: isoDate } : t));
+    await supabase.from('tasks').update({ due_date: isoDate }).eq('id', id);
 
-    // Sync rescheduling with Google Calendar
-    const taskToUpdate = updatedTasks.find(t => t.id === id);
+    const taskToUpdate = tasks.find(t => t.id === id);
     if (googleAccessToken && taskToUpdate && taskToUpdate.google_event_id) {
       const service = new GoogleCalendarService(() => {});
-      await service.updateEvent(googleAccessToken, taskToUpdate.google_event_id, taskToUpdate, taskToUpdate.google_calendar_id || 'primary');
+      await service.updateEvent(googleAccessToken, taskToUpdate.google_event_id, { ...taskToUpdate, due_date: isoDate }, taskToUpdate.google_calendar_id || 'primary');
     }
   };
 
-  const handleRestoreTask = (id: string) => {
+  const handleRestoreTask = async (id: string) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, is_archived: false } : t));
+    await supabase.from('tasks').update({ is_archived: false }).eq('id', id);
   };
 
-  const handleArchiveTask = (id: string) => {
+  const handleArchiveTask = async (id: string) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, is_archived: true } : t));
+    await supabase.from('tasks').update({ is_archived: true }).eq('id', id);
+  };
+
+  const handleDeleteTask = async (id: string) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+    await supabase.from('tasks').delete().eq('id', id);
   };
 
   const handleSaveTask = async (taskData: Partial<Task>, targetCalendarId?: string) => {
     if (editingTask) {
-      const updatedTasks = tasks.map(t => t.id === editingTask.id ? { ...t, ...taskData } : t);
-      setTasks(updatedTasks);
+      const updated = { ...editingTask, ...taskData };
+      setTasks(prev => prev.map(t => t.id === editingTask.id ? updated : t));
+      await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
       
-      // Sync update with Google Calendar
-      const taskToSync = updatedTasks.find(t => t.id === editingTask.id);
-      if (googleAccessToken && taskToSync && taskToSync.google_event_id) {
+      if (googleAccessToken && updated.google_event_id) {
         const service = new GoogleCalendarService(() => {});
-        await service.updateEvent(googleAccessToken, taskToSync.google_event_id, taskToSync, taskToSync.google_calendar_id || 'primary');
+        await service.updateEvent(googleAccessToken, updated.google_event_id, updated, updated.google_calendar_id || 'primary');
       }
     } else {
-      const newTask: Task = {
-        id: `t-${Date.now()}`,
-        workspace_id: taskData.workspace_id || 'ws-1',
+      const newTask: Partial<Task> = {
+        workspace_id: taskData.workspace_id || workspaces[0]?.id || 'ws-1',
         parent_id: selectedTaskId || undefined,
         status: TaskStatus.TODO,
         created_by: currentUser.id,
-        created_at: new Date().toISOString(),
         priority: taskData.priority || TaskPriority.MEDIUM,
         title: taskData.title || 'Untitled Task',
         description: taskData.description,
@@ -182,14 +207,16 @@ const App: React.FC = () => {
         is_all_day: taskData.is_all_day,
       };
       
-      setTasks(prev => [...prev, newTask]);
-
-      // TWO-WAY SYNC: Automatically create on Google Calendar if connected and target matches
-      if (googleAccessToken && targetCalendarId) {
+      const { data } = await supabase.from('tasks').insert(newTask).select().single();
+      
+      if (data && googleAccessToken && targetCalendarId) {
         const service = new GoogleCalendarService(() => {});
-        const googleEvent = await service.createEvent(googleAccessToken, newTask, targetCalendarId);
+        const googleEvent = await service.createEvent(googleAccessToken, data, targetCalendarId);
         if (googleEvent) {
-          setTasks(prev => prev.map(t => t.id === newTask.id ? { ...t, google_event_id: googleEvent.id, google_calendar_id: targetCalendarId } : t));
+          await supabase.from('tasks').update({ 
+            google_event_id: googleEvent.id, 
+            google_calendar_id: targetCalendarId 
+          }).eq('id', data.id);
         }
       }
     }
@@ -213,11 +240,6 @@ const App: React.FC = () => {
     setIsNewTaskModalOpen(true);
   };
 
-  const handleUpdateUser = (userData: Partial<User>, newRole: string) => {
-    setCurrentUser(prev => ({ ...prev, ...userData }));
-    setAccountRole(newRole);
-  };
-
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     const target = e.currentTarget as HTMLElement;
@@ -229,21 +251,9 @@ const App: React.FC = () => {
     target.classList.remove('bg-muted/50');
   };
 
-  const onDrop = (e: React.DragEvent, status: TaskStatus) => {
-    e.preventDefault();
-    const target = e.currentTarget as HTMLElement;
-    target.classList.remove('bg-muted/50');
-    const taskId = e.dataTransfer.getData('taskId');
-    handleStatusChange(taskId, status);
-  };
-
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const topLevelTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
   const archivedTasks = tasks.filter(t => t.is_archived);
-
-  const getSubtaskCount = (parentId: string) => {
-    return tasks.filter(t => t.parent_id === parentId && !t.is_archived).length;
-  };
 
   return (
     <div className="h-full w-full bg-background overflow-hidden flex justify-center">
@@ -258,7 +268,7 @@ const App: React.FC = () => {
           onSave={handleSaveTask}
           initialData={editingTask}
           defaultDate={preSelectedDate}
-          workspaces={mockData.workspaces as Workspace[]}
+          workspaces={workspaces}
           googleCalendars={googleCalendars}
         />
 
@@ -267,7 +277,10 @@ const App: React.FC = () => {
           onClose={() => setIsSettingsModalOpen(false)}
           user={currentUser}
           role={accountRole}
-          onSaveProfile={handleUpdateUser}
+          onSaveProfile={(userData, newRole) => {
+            setCurrentUser(prev => ({ ...prev, ...userData }));
+            setAccountRole(newRole);
+          }}
           googleAccessToken={googleAccessToken}
           setGoogleAccessToken={setGoogleAccessToken}
         />
@@ -279,7 +292,7 @@ const App: React.FC = () => {
           onStatusChange={handleStatusChange}
           onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
           onReschedule={(t) => setReschedulingTask(t)}
-          onDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
+          onDelete={handleDeleteTask}
           onArchive={handleArchiveTask}
         />
 
@@ -318,85 +331,43 @@ const App: React.FC = () => {
               </div>
 
               <nav className="space-y-2">
-                <NavItem 
-                  icon={<LayoutGrid size={20} />} 
-                  label="Dashboard" 
-                  active={activeTab === 'dashboard'} 
-                  onClick={() => { setActiveTab('dashboard'); setSelectedTaskId(null); }} 
-                />
-                
+                <NavItem icon={<LayoutGrid size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSelectedTaskId(null); }} />
                 <div className="space-y-1">
-                  <button 
-                    onClick={() => setIsTasksExpanded(!isTasksExpanded)}
-                    className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'tasks' ? 'bg-accent/5 text-accent border-2 border-slate-800/10' : 'text-mutedForeground hover:bg-muted'}`}
-                  >
+                  <button onClick={() => setIsTasksExpanded(!isTasksExpanded)} className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'tasks' ? 'bg-accent/5 text-accent border-2 border-slate-800/10' : 'text-mutedForeground hover:bg-muted'}`}>
                     <div className="flex items-center gap-3">
                       <CheckSquare size={20} className={activeTab === 'tasks' ? 'text-accent' : 'text-slate-400'} />
                       <span>My Tasks</span>
                     </div>
                     <ChevronDown size={16} className={`transition-transform duration-300 ${isTasksExpanded ? 'rotate-180' : ''}`} />
                   </button>
-                  
                   {isTasksExpanded && (
                     <div className="ml-6 space-y-1 pl-2 border-l-2 border-slate-100 animate-in slide-in-from-top-2 duration-200">
-                      <button 
-                        onClick={() => { setActiveTab('tasks'); setSelectedTaskId(null); }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-black uppercase tracking-widest transition-colors ${activeTab === 'tasks' && !selectedTaskId ? 'text-accent' : 'text-slate-400 hover:text-slate-600'}`}
-                      >
-                        <Layers size={14} />
-                        All Tasks View
+                      <button onClick={() => { setActiveTab('tasks'); setSelectedTaskId(null); }} className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-black uppercase tracking-widest transition-colors ${activeTab === 'tasks' && !selectedTaskId ? 'text-accent' : 'text-slate-400 hover:text-slate-600'}`}>
+                        <Layers size={14} /> All Tasks View
                       </button>
-                      
                       <div className="pt-2 pb-1">
                         <span className="text-[9px] font-black uppercase text-slate-400 tracking-tighter px-3">Recent Projects</span>
                       </div>
-
                       {topLevelTasks.map((task) => (
-                        <SubNavItem 
-                          key={task.id}
-                          label={task.title}
-                          active={selectedTaskId === task.id}
-                          onClick={() => handleTaskClick(task)}
-                          priority={task.priority}
-                          count={getSubtaskCount(task.id)}
-                        />
+                        <SubNavItem key={task.id} label={task.title} active={selectedTaskId === task.id} onClick={() => handleTaskClick(task)} priority={task.priority} count={tasks.filter(t => t.parent_id === task.id && !t.is_archived).length} />
                       ))}
                     </div>
                   )}
                 </div>
-
-                <NavItem 
-                  icon={<CalendarIcon size={20} />} 
-                  label="Calendar" 
-                  active={activeTab === 'calendar'} 
-                  onClick={() => { setActiveTab('calendar'); setSelectedTaskId(null); }} 
-                />
-                <NavItem 
-                  icon={<Users size={20} />} 
-                  label="Team Space" 
-                  active={activeTab === 'team'} 
-                  onClick={() => { setActiveTab('team'); setSelectedTaskId(null); }} 
-                />
-
+                <NavItem icon={<CalendarIcon size={20} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => { setActiveTab('calendar'); setSelectedTaskId(null); }} />
+                <NavItem icon={<Users size={20} />} label="Team Space" active={activeTab === 'team'} onClick={() => { setActiveTab('team'); setSelectedTaskId(null); }} />
                 <div className="pt-4 border-t-2 border-slate-50 mt-4">
-                  <NavItem 
-                    icon={<FolderArchive size={20} />} 
-                    label="Archive" 
-                    active={activeTab === 'archive'} 
-                    onClick={() => { setActiveTab('archive'); setSelectedTaskId(null); }} 
-                />
+                  <NavItem icon={<FolderArchive size={20} />} label="Archive" active={activeTab === 'archive'} onClick={() => { setActiveTab('archive'); setSelectedTaskId(null); }} />
                 </div>
               </nav>
 
               <div className="mt-12 mb-8">
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-mutedForeground px-1">Workspaces</span>
-                  <button className="text-accent hover:bg-muted p-1 rounded-md">
-                    <Plus size={16} strokeWidth={3} />
-                  </button>
+                  <button className="text-accent hover:bg-muted p-1 rounded-md"><Plus size={16} strokeWidth={3} /></button>
                 </div>
                 <div className="space-y-1">
-                  {(mockData.workspaces as Workspace[]).map(ws => (
+                  {workspaces.map(ws => (
                     <button key={ws.id} className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-semibold">
                       <div className={`w-2 h-2 rounded-full ${ws.type === WorkspaceType.PERSONAL ? 'bg-quaternary' : 'bg-secondary'}`} />
                       {ws.name}
@@ -407,10 +378,7 @@ const App: React.FC = () => {
             </div>
 
             <div className="mt-auto p-6 bg-slate-50 border-t-2 border-slate-100 space-y-4">
-              <button 
-                onClick={() => setIsAuthenticated(false)}
-                className="w-full bg-secondary border-2 border-slate-800 rounded-xl py-3 px-4 shadow-pop flex items-center justify-center gap-2 transition-all hover:bg-secondary/90 hover:-translate-y-0.5 active:translate-y-0 text-white font-black uppercase"
-              >
+              <button onClick={() => setIsAuthenticated(false)} className="w-full bg-secondary border-2 border-slate-800 rounded-xl py-3 px-4 shadow-pop flex items-center justify-center gap-2 transition-all hover:bg-secondary/90 hover:-translate-y-0.5 active:translate-y-0 text-white font-black uppercase">
                 <LogOut size={20} strokeWidth={3} />
                 <span>Logout Account</span>
               </button>
@@ -421,47 +389,35 @@ const App: React.FC = () => {
         <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0 transition-all duration-300">
           <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b-2 border-slate-100 px-4 sm:px-8 py-4 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-4 flex-1 min-w-0">
-              <button 
-                className="p-2 hover:bg-muted rounded-lg border-2 border-slate-800 shadow-pop-active bg-white transition-transform active:scale-95" 
-                onClick={() => setSidebarOpen(!isSidebarOpen)}
-              >
+              <button className="p-2 hover:bg-muted rounded-lg border-2 border-slate-800 shadow-pop-active bg-white transition-transform active:scale-95" onClick={() => setSidebarOpen(!isSidebarOpen)}>
                 {isSidebarOpen ? <PanelLeftClose size={20} strokeWidth={3} /> : <PanelLeftOpen size={20} strokeWidth={3} />}
               </button>
               <div className="max-w-md w-full relative hidden sm:block">
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-mutedForeground" />
-                <input 
-                  type="text" 
-                  placeholder="Search tasks..." 
-                  className="w-full pl-10 pr-4 py-2 bg-white border-2 border-slate-200 rounded-lg focus:border-accent focus:shadow-pop outline-none text-sm font-medium"
-                />
+                <input type="text" placeholder="Search tasks..." className="w-full pl-10 pr-4 py-2 bg-white border-2 border-slate-200 rounded-lg focus:border-accent focus:shadow-pop outline-none text-sm font-medium" />
               </div>
             </div>
             
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 sm:gap-2 mr-2">
+                <div className="flex items-center px-2 py-1 rounded-full bg-slate-50 border border-slate-200 shadow-sm mr-1">
+                   <div className={`w-2 h-2 rounded-full mr-2 ${isRealtimeConnected ? 'bg-quaternary animate-pulse' : 'bg-slate-300'}`} />
+                   <span className="text-[9px] font-black uppercase tracking-tighter text-slate-500">{isRealtimeConnected ? 'Live' : 'Offline'}</span>
+                </div>
                 <Button variant="ghost" className="relative p-2" onClick={() => setNotificationsOpen(!notificationsOpen)}>
                   <Bell size={20} />
                   <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-secondary border-2 border-white rounded-full"></span>
                 </Button>
-                <Button variant="ghost" className="p-2" onClick={() => setIsSettingsModalOpen(true)}>
-                  <Settings size={20} />
-                </Button>
+                <Button variant="ghost" className="p-2" onClick={() => setIsSettingsModalOpen(true)}><Settings size={20} /></Button>
               </div>
               
-              <div 
-                className={`flex items-center gap-3 pl-3 sm:pl-4 border-l-2 border-slate-100 cursor-pointer hover:opacity-80 transition-all group ${activeTab === 'profile' ? 'bg-muted/50 rounded-xl' : ''}`}
-                onClick={() => { setActiveTab('profile'); setSelectedTaskId(null); }}
-              >
+              <div className={`flex items-center gap-3 pl-3 sm:pl-4 border-l-2 border-slate-100 cursor-pointer hover:opacity-80 transition-all group ${activeTab === 'profile' ? 'bg-muted/50 rounded-xl' : ''}`} onClick={() => { setActiveTab('profile'); setSelectedTaskId(null); }}>
                 <div className="text-right hidden sm:block min-w-0 transition-all">
-                  <p className="text-xs font-black uppercase tracking-tight text-slate-900 truncate animate-in fade-in duration-300">{currentUser.name}</p>
-                  <p className="text-[10px] font-bold text-slate-400 lowercase truncate leading-none animate-in fade-in duration-300">{currentUser.email}</p>
+                  <p className="text-xs font-black uppercase tracking-tight text-slate-900 truncate">{currentUser.name}</p>
+                  <p className="text-[10px] font-bold text-slate-400 lowercase truncate leading-none">{currentUser.email}</p>
                 </div>
                 <div className="relative">
-                  <img 
-                    src={currentUser.avatar_url} 
-                    className="w-10 h-10 rounded-full border-2 border-slate-800 shadow-sm bg-white shrink-0 group-hover:shadow-pop transition-all object-cover" 
-                    alt="Avatar" 
-                  />
+                  <img src={currentUser.avatar_url} className="w-10 h-10 rounded-full border-2 border-slate-800 shadow-sm bg-white shrink-0 group-hover:shadow-pop transition-all object-cover" alt="Avatar" />
                   <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-quaternary border-2 border-white rounded-full"></div>
                 </div>
               </div>
@@ -472,14 +428,7 @@ const App: React.FC = () => {
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'profile' && <ProfileView onLogout={() => setIsAuthenticated(false)} user={currentUser} role={accountRole} />}
             {activeTab === 'calendar' && (
-              <CalendarView 
-                tasks={tasks} 
-                workspaces={mockData.workspaces as Workspace[]} 
-                onTaskClick={(t) => setInspectedTask(t)}
-                userEmail={currentUser.email}
-                googleAccessToken={googleAccessToken}
-                onDayClick={handleDayClick}
-              />
+              <CalendarView tasks={tasks} workspaces={workspaces} onTaskClick={(t) => setInspectedTask(t)} userEmail={currentUser.email} googleAccessToken={googleAccessToken} onDayClick={handleDayClick} />
             )}
             
             {activeTab === 'archive' && (
@@ -494,23 +443,14 @@ const App: React.FC = () => {
                     <span className="font-black text-2xl">{archivedTasks.length}</span>
                   </div>
                 </div>
-
                 {archivedTasks.length === 0 ? (
                   <div className="text-center py-20 bg-white/50 border-4 border-dashed border-slate-200 rounded-3xl flex flex-col items-center">
-                    <Smile size={48} className="text-slate-200 mb-4" />
                     <p className="text-xl font-heading text-slate-400">Your archive is empty!</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 gap-2 max-w-4xl mx-auto">
                     {archivedTasks.map(task => (
-                      <TaskItem 
-                        key={task.id} 
-                        task={task} 
-                        onStatusChange={handleStatusChange}
-                        onRestore={handleRestoreTask}
-                        onDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
-                        onClick={handleTaskClick}
-                      />
+                      <TaskItem key={task.id} task={task} onStatusChange={handleStatusChange} onRestore={handleRestoreTask} onDelete={handleDeleteTask} onClick={handleTaskClick} />
                     ))}
                   </div>
                 )}
@@ -520,18 +460,10 @@ const App: React.FC = () => {
             {activeTab === 'tasks' && (
               selectedTaskId && selectedTask ? (
                 <TaskDetailView 
-                  parentTask={selectedTask} 
-                  subTasks={tasks.filter(t => t.parent_id === selectedTaskId && !t.is_archived)} 
-                  onBack={() => setSelectedTaskId(null)}
-                  onStatusChange={handleStatusChange}
-                  onAddTask={() => setIsNewTaskModalOpen(true)}
-                  onEditTask={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
-                  onArchiveTask={handleArchiveTask}
-                  onDeleteTask={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
-                  priorityFilter={priorityFilter}
-                  onPriorityFilterChange={(p) => setPriorityFilter(p)}
-                  onInspectTask={(t) => setInspectedTask(t)}
-                  onRescheduleTask={(t) => setReschedulingTask(t)}
+                  parentTask={selectedTask} subTasks={tasks.filter(t => t.parent_id === selectedTaskId && !t.is_archived)} onBack={() => setSelectedTaskId(null)}
+                  onStatusChange={handleStatusChange} onAddTask={() => setIsNewTaskModalOpen(true)} onEditTask={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
+                  onArchiveTask={handleArchiveTask} onDeleteTask={handleDeleteTask} priorityFilter={priorityFilter} onPriorityFilterChange={(p) => setPriorityFilter(p)}
+                  onInspectTask={(t) => setInspectedTask(t)} onRescheduleTask={(t) => setReschedulingTask(t)}
                 />
               ) : (
                 <div className="space-y-6 animate-in fade-in duration-500 flex flex-col h-full">
@@ -546,54 +478,24 @@ const App: React.FC = () => {
                   </div>
                   
                   <div className="flex flex-col md:flex-row gap-8 mt-10 flex-1 min-h-0">
-                    <BoardColumn 
-                      title="Backlog" 
-                      status={TaskStatus.TODO} 
-                      color="border-slate-300"
-                      icon={<CircleDashed size={18} className="text-slate-400" />}
-                      tasks={tasks.filter(t => t.status === TaskStatus.TODO && !t.parent_id && !t.is_archived)}
-                      onDragOver={onDragOver}
-                      onDragLeave={onDragLeave}
-                      onDrop={onDrop}
-                      onStatusChange={handleStatusChange}
-                      onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
-                      onReschedule={(t) => setReschedulingTask(t)}
-                      onDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
-                      onArchive={handleArchiveTask}
-                      onClick={handleTaskClick}
-                    />
-                    <BoardColumn 
-                      title="Doing" 
-                      status={TaskStatus.IN_PROGRESS} 
-                      color="border-tertiary"
-                      icon={<Clock size={18} className="text-tertiary" />}
-                      tasks={tasks.filter(t => t.status === TaskStatus.IN_PROGRESS && !t.parent_id && !t.is_archived)}
-                      onDragOver={onDragOver}
-                      onDragLeave={onDragLeave}
-                      onDrop={onDrop}
-                      onStatusChange={handleStatusChange}
-                      onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
-                      onReschedule={(t) => setReschedulingTask(t)}
-                      onDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
-                      onArchive={handleArchiveTask}
-                      onClick={handleTaskClick}
-                    />
-                    <BoardColumn 
-                      title="Done" 
-                      status={TaskStatus.DONE} 
-                      color="border-quaternary"
-                      icon={<CheckCircle2 size={18} className="text-quaternary" />}
-                      tasks={tasks.filter(t => t.status === TaskStatus.DONE && !t.parent_id && !t.is_archived)}
-                      onDragOver={onDragOver}
-                      onDragLeave={onDragLeave}
-                      onDrop={onDrop}
-                      onStatusChange={handleStatusChange}
-                      onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
-                      onReschedule={(t) => setReschedulingTask(t)}
-                      onDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
-                      onArchive={handleArchiveTask}
-                      onClick={handleTaskClick}
-                    />
+                    {[
+                      { status: TaskStatus.TODO, title: "Backlog", color: "border-slate-300", icon: <CircleDashed size={18} className="text-slate-400" /> },
+                      { status: TaskStatus.IN_PROGRESS, title: "Doing", color: "border-tertiary", icon: <Clock size={18} className="text-tertiary" /> },
+                      { status: TaskStatus.DONE, title: "Done", color: "border-quaternary", icon: <CheckCircle2 size={18} className="text-quaternary" /> }
+                    ].map(col => (
+                      <BoardColumn 
+                        key={col.status} title={col.title} status={col.status} color={col.color} icon={col.icon} tasks={tasks.filter(t => t.status === col.status && !t.parent_id && !t.is_archived)}
+                        onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={(e, s) => {
+                          e.preventDefault();
+                          const target = e.currentTarget as HTMLElement;
+                          target.classList.remove('bg-muted/50');
+                          const taskId = e.dataTransfer.getData('taskId');
+                          handleStatusChange(taskId, s);
+                        }}
+                        onStatusChange={handleStatusChange} onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
+                        onReschedule={(t) => setReschedulingTask(t)} onDelete={handleDeleteTask} onArchive={handleArchiveTask} onClick={handleTaskClick}
+                      />
+                    ))}
                   </div>
                 </div>
               )
@@ -605,117 +507,38 @@ const App: React.FC = () => {
   );
 };
 
-interface BoardColumnProps {
-  title: string;
-  status: TaskStatus;
-  color: string;
-  icon: React.ReactNode;
-  tasks: Task[];
-  onDragOver: (e: React.DragEvent) => void;
-  onDragLeave: (e: React.DragEvent) => void;
-  onDrop: (e: React.DragEvent, status: TaskStatus) => void;
-  onStatusChange: (id: string, status: TaskStatus) => void;
-  onEdit: (task: Task) => void;
-  onReschedule: (task: Task) => void;
-  onDelete: (id: string) => void;
-  onArchive: (id: string) => void;
-  onClick: (task: Task) => void;
-}
-
-const BoardColumn: React.FC<BoardColumnProps> = ({ 
-  title, status, color, icon, tasks, onDragOver, onDragLeave, onDrop, onStatusChange, onEdit, onReschedule, onDelete, onArchive, onClick 
-}) => (
-  <div 
-    className="flex-1 flex flex-col h-full min-h-[400px] transition-all duration-200 rounded-2xl px-2"
-    onDragOver={onDragOver}
-    onDragLeave={onDragLeave}
-    onDrop={(e) => onDrop(e, status)}
-  >
+const BoardColumn: React.FC<any> = ({ title, status, color, icon, tasks, onDragOver, onDragLeave, onDrop, onStatusChange, onEdit, onReschedule, onDelete, onArchive, onClick }) => (
+  <div className="flex-1 flex flex-col h-full min-h-[400px] transition-all duration-200 rounded-2xl px-2" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={(e) => onDrop(e, status)}>
     <div className={`flex items-center justify-between mb-4 pb-2 border-b-2 ${color} shrink-0`}>
-      <div className="flex items-center gap-2">
-        {icon}
-        <h3 className="font-heading text-lg tracking-tight">{title}</h3>
-      </div>
-      <span className="text-[10px] font-black uppercase text-mutedForeground tracking-widest px-2 py-0.5 bg-muted rounded-md">
-        {tasks.length}
-      </span>
+      <div className="flex items-center gap-2">{icon}<h3 className="font-heading text-lg tracking-tight">{title}</h3></div>
+      <span className="text-[10px] font-black uppercase text-mutedForeground tracking-widest px-2 py-0.5 bg-muted rounded-md">{tasks.length}</span>
     </div>
-    
     <div className="flex-1 space-y-4 overflow-y-auto scrollbar-hide py-2">
       {tasks.length === 0 ? (
-        <div className="group h-32 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-300 transition-colors hover:border-slate-300">
-          <Plus size={20} className="mb-1 opacity-50" />
-          <span className="text-xs font-bold uppercase tracking-tighter opacity-50">Empty</span>
+        <div className="group h-32 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-300">
+          <Plus size={20} className="mb-1 opacity-50" /><span className="text-xs font-bold uppercase tracking-tighter opacity-50">Empty</span>
         </div>
       ) : (
-        tasks.map(task => (
-          <TaskItem 
-            key={task.id} 
-            task={task} 
-            onStatusChange={onStatusChange}
-            onEdit={onEdit}
-            onReschedule={onReschedule}
-            onDelete={onDelete}
-            onArchive={onArchive}
-            onClick={onClick}
-          />
-        ))
+        tasks.map((task: Task) => <TaskItem key={task.id} task={task} onStatusChange={onStatusChange} onEdit={onEdit} onReschedule={onReschedule} onDelete={onDelete} onArchive={onArchive} onClick={onClick} />)
       )}
     </div>
   </div>
 );
 
-const NavItem: React.FC<{ icon: React.ReactNode, label: string, active: boolean, onClick: () => void }> = ({ 
-  icon, label, active, onClick 
-}) => (
-  <button 
-    onClick={onClick}
-    className={`
-      w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all duration-300
-      ${active 
-        ? 'bg-accent text-white shadow-pop border-2 border-slate-800 scale-[1.02]' 
-        : 'text-mutedForeground hover:bg-muted'
-      }
-    `}
-  >
-    <span className={active ? 'text-white' : 'text-accent'}>{icon}</span>
-    {label}
-    {active && <ChevronRight size={16} className="ml-auto" />}
+const NavItem: React.FC<any> = ({ icon, label, active, onClick }) => (
+  <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all duration-300 ${active ? 'bg-accent text-white shadow-pop border-2 border-slate-800 scale-[1.02]' : 'text-mutedForeground hover:bg-muted'}`}>
+    <span className={active ? 'text-white' : 'text-accent'}>{icon}</span>{label}{active && <ChevronRight size={16} className="ml-auto" />}
   </button>
 );
 
-const SubNavItem: React.FC<{ label: string, active: boolean, onClick: () => void, priority?: TaskPriority, count?: number }> = ({
-  label, active, onClick, priority, count = 0
-}) => {
-  const getPriorityDot = (p?: TaskPriority) => {
-    switch (p) {
-      case TaskPriority.HIGH: return 'bg-secondary';
-      case TaskPriority.MEDIUM: return 'bg-tertiary';
-      case TaskPriority.LOW: return 'bg-quaternary';
-      default: return 'bg-slate-300';
-    }
-  };
-
-  return (
-    <button 
-      onClick={onClick}
-      className={`
-        w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all group
-        ${active 
-          ? 'bg-accent/10 text-accent border-l-4 border-accent pl-2' 
-          : 'text-mutedForeground hover:text-foreground hover:bg-muted'
-        }
-      `}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${getPriorityDot(priority)}`} />
-        <span className="truncate text-left">{label}</span>
-      </div>
-      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded transition-colors ${active ? 'bg-slate-800 text-white border-2 border-slate-800' : 'bg-slate-100 border border-slate-200 group-hover:bg-slate-200'}`}>
-        {count}
-      </span>
-    </button>
-  );
-};
+const SubNavItem: React.FC<any> = ({ label, active, onClick, priority, count = 0 }) => (
+  <button onClick={onClick} className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all group ${active ? 'bg-accent/10 text-accent border-l-4 border-accent pl-2' : 'text-mutedForeground hover:text-foreground hover:bg-muted'}`}>
+    <div className="flex items-center gap-2 min-w-0">
+      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${priority === 'high' ? 'bg-secondary' : priority === 'medium' ? 'bg-tertiary' : 'bg-quaternary'}`} />
+      <span className="truncate text-left">{label}</span>
+    </div>
+    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded transition-colors ${active ? 'bg-slate-800 text-white border-2 border-slate-800' : 'bg-slate-100 border border-slate-200'}`}>{count}</span>
+  </button>
+);
 
 export default App;
