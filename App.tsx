@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
@@ -32,7 +33,8 @@ import { Task, TaskStatus, TaskPriority, Workspace, User, WorkspaceType } from '
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
 
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // LOGIN DINONAKTIFKAN: Status awal diubah ke true
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive'>('dashboard');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -59,12 +61,40 @@ const App: React.FC = () => {
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
 
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [accountRole, setAccountRole] = useState('Member');
+  // PROFIL DEFAULT (MOCK) saat login dinonaktifkan
+  const [currentUser, setCurrentUser] = useState<User | null>({
+    id: 'dev-user-01',
+    email: 'dev@taskplay.io',
+    name: 'Developer Mode',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=dev',
+    status: 'Owner',
+    app_settings: {
+      appName: 'TaskPlay Dev',
+      notificationsEnabled: true,
+      visibleSources: [],
+      sourceColors: {}
+    },
+    created_at: new Date().toISOString()
+  });
+  const [accountRole, setAccountRole] = useState('Owner');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Unified function to fetch profile that prevents Auth metadata from overwriting newer DB data
-  const fetchUserProfile = useCallback(async (userId: string, defaultData?: any) => {
+  // Sync Branding ke Browser Metadata secara Realtime
+  useEffect(() => {
+    if (currentUser?.app_settings?.appName) {
+      document.title = currentUser.app_settings.appName;
+    }
+    if (currentUser?.app_settings?.appFavicon) {
+      const link: any = document.querySelector("link[rel*='icon']") || document.createElement('link');
+      link.type = 'image/png';
+      link.rel = 'shortcut icon';
+      link.href = currentUser.app_settings.appFavicon;
+      document.getElementsByTagName('head')[0].appendChild(link);
+    }
+  }, [currentUser?.app_settings?.appName, currentUser?.app_settings?.appFavicon]);
+
+  const fetchUserProfile = useCallback(async (userId: string, fallbackData?: any) => {
+    // Tetap mencoba fetch jika ada session, tapi jangan paksa logout jika gagal
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('*')
@@ -74,13 +104,6 @@ const App: React.FC = () => {
     if (!userError && userData) {
       setCurrentUser(userData as User);
       if (userData.status) setAccountRole(userData.status);
-      if (userData.app_settings) {
-        setSourceColors(userData.app_settings.sourceColors || {});
-        setVisibleSources(userData.app_settings.visibleSources || []);
-        setNotificationsEnabled(userData.app_settings.notificationsEnabled ?? true);
-      }
-    } else if (defaultData) {
-      setCurrentUser(defaultData);
     }
   }, []);
 
@@ -88,15 +111,7 @@ const App: React.FC = () => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setIsAuthenticated(true);
-        const user = session.user;
-        const initialUser = {
-          id: user.id,
-          email: user.email || '',
-          name: user.user_metadata?.name || 'User',
-          avatar_url: user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
-          created_at: user.created_at
-        };
-        fetchUserProfile(user.id, initialUser);
+        fetchUserProfile(session.user.id);
       }
     });
 
@@ -104,84 +119,41 @@ const App: React.FC = () => {
       if (session) {
         setIsAuthenticated(true);
         if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-          const user = session.user;
-          const initialUser = {
-            id: user.id,
-            email: user.email || '',
-            name: user.user_metadata?.name || 'User',
-            avatar_url: user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
-            created_at: user.created_at
-          };
-          fetchUserProfile(user.id, initialUser);
+          fetchUserProfile(session.user.id);
         }
-      } else {
-        setIsAuthenticated(false);
-        setCurrentUser(null);
-        setTasks([]);
-        setWorkspaces([]);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [fetchUserProfile]);
+  }, []);
 
   const fetchData = useCallback(async () => {
     if (!currentUser) return;
     setIsFetching(true);
     try {
-      // 1. Refresh Profile First
-      await fetchUserProfile(currentUser.id);
-
-      // 2. Fetch Workspaces
-      let { data: wsData, error: wsError } = await supabase
-        .from('workspaces')
-        .select('*')
-        .order('created_at', { ascending: true });
-
-      // If no workspaces exist, create one
-      if (!wsError && (!wsData || wsData.length === 0)) {
-        const { data: newWs, error: newWsError } = await supabase.from('workspaces').insert({
-          name: 'Personal Space',
-          type: 'personal',
-          owner_id: currentUser.id
-        }).select().single();
-        
-        if (!newWsError && newWs) {
-          wsData = [newWs];
-        }
-      }
-
+      const [{ data: wsData }, { data: tData }] = await Promise.all([
+        supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
+        supabase.from('tasks').select('*').order('created_at', { ascending: false })
+      ]);
       if (wsData) {
         setIsApiConnected(true);
         setWorkspaces(wsData as Workspace[]);
       }
-
-      // 3. Fetch Tasks
-      const { data: tData, error: tError } = await supabase
-        .from('tasks')
-        .select('*')
-        .order('created_at', { ascending: false });
-        
-      if (!tError && tData) {
+      if (tData) {
         setTasks(tData as Task[]);
       }
-
     } catch (err) {
-      console.error("Critical fetch error:", err);
+      console.error("Fetch error:", err);
       setIsApiConnected(false);
     } finally {
-      setTimeout(() => setIsFetching(false), 500);
+      setTimeout(() => setIsFetching(false), 800);
     }
-  }, [currentUser?.id, fetchUserProfile]);
+  }, [currentUser?.id]);
 
   const setupRealtime = useCallback(() => {
     if (!currentUser) return;
-    
-    // Bersihkan channel lama
     if (channelRef.current) supabase.removeChannel(channelRef.current);
-    if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
-
-    // Global Realtime Subscription - Lebih agresif
+    
     channelRef.current = supabase
       .channel('db-global-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
@@ -189,51 +161,29 @@ const App: React.FC = () => {
         else if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
         else if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, () => {
-        fetchData(); // Refresh workspaces if changed
-      })
       .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
-
-    userChannelRef.current = supabase
-      .channel(`user-updates-${currentUser.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}` }, (payload) => {
-         const updated = payload.new as User;
-         setCurrentUser(updated);
-      })
-      .subscribe();
       
-  }, [currentUser?.id, fetchData]);
+  }, [currentUser?.id]);
 
   useEffect(() => {
-    if (isAuthenticated && currentUser) {
+    if (currentUser) {
       fetchData();
       setupRealtime();
     }
-  }, [isAuthenticated, currentUser?.id]);
+  }, [currentUser?.id]);
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
-    // Optimistic Update
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-    const { error } = await supabase.from('tasks').update({ status }).eq('id', id);
-    if (error) console.error("Status update failed:", error.message);
+    await supabase.from('tasks').update({ status }).eq('id', id);
   };
 
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
-    
-    const targetWsId = taskData.workspace_id || workspaces[0]?.id;
-    if (!targetWsId) return;
-    
+    const targetWsId = taskData.workspace_id || (workspaces.length > 0 ? workspaces[0].id : 'ws-dev');
     if (editingTask) {
-      const { error } = await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
-      if (error) console.error("Task update error:", error.message);
+      await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
     } else {
-      const { error } = await supabase.from('tasks').insert({
-        ...taskData,
-        workspace_id: targetWsId,
-        created_by: currentUser.id,
-      });
-      if (error) console.error("Task insert error:", error.message);
+      await supabase.from('tasks').insert({ ...taskData, workspace_id: targetWsId, created_by: currentUser.id });
     }
     setIsNewTaskModalOpen(false);
     setEditingTask(null);
@@ -242,31 +192,37 @@ const App: React.FC = () => {
   const handleSaveProfile = async (userData: Partial<User>, newRole: string, settingsUpdate?: any) => {
     if (!currentUser) return;
     
-    const nextSettings = {
-      notificationsEnabled: settingsUpdate?.notificationsEnabled ?? notificationsEnabled,
-      sourceColors,
-      visibleSources
+    const mergedSettings = {
+      ...(currentUser.app_settings || {}),
+      ...settingsUpdate,
     };
 
-    setCurrentUser({ ...currentUser, ...userData, status: newRole, app_settings: nextSettings });
+    const finalUserObject: User = { 
+      ...currentUser, 
+      ...userData, 
+      status: newRole, 
+      app_settings: mergedSettings 
+    };
+
+    setCurrentUser(finalUserObject);
     setAccountRole(newRole);
 
     try {
-      await supabase.from('users').upsert({
-        id: currentUser.id,
-        email: userData.email || currentUser.email,
+      await supabase.from('users').update({
         name: userData.name || currentUser.name,
         avatar_url: userData.avatar_url || currentUser.avatar_url,
         status: newRole,
-        app_settings: nextSettings
-      });
+        app_settings: mergedSettings,
+        updated_at: new Date().toISOString()
+      }).eq('id', currentUser.id);
     } catch (err) {
-      console.error("Sync Profile Exception:", err);
+      console.error("Save profile error:", err);
     }
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    // Saat login dinonaktifkan, tombol logout hanya akan refresh halaman atau reset state
+    window.location.reload();
   };
 
   const handleTaskClick = (task: Task) => {
@@ -278,10 +234,8 @@ const App: React.FC = () => {
     }
   };
 
-  if (!isAuthenticated || !currentUser) return <Login onLoginSuccess={() => {}} />;
-
+  // RENDER UTAMA: Login guard dilewati agar langsung menampilkan Dashboard
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
-  // Pastikan kita mengambil workspace yang aktif secara konsisten
   const activeWorkspace = workspaces.find(w => w.type === 'team') || workspaces[0] || null;
   const topLevelTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
   const archivedTasks = tasks.filter(t => t.is_archived);
@@ -311,6 +265,10 @@ const App: React.FC = () => {
           workspaces={workspaces}
           handleTaskClick={handleTaskClick}
           onLogout={handleLogout}
+          customBranding={{
+            name: currentUser?.app_settings?.appName,
+            logo: currentUser?.app_settings?.appLogo
+          }}
         />
 
         <TaskInspectModal
@@ -341,13 +299,17 @@ const App: React.FC = () => {
         <SettingsModal 
           isOpen={isSettingsModalOpen} 
           onClose={() => setIsSettingsModalOpen(false)} 
-          user={currentUser} 
+          user={currentUser!} 
           role={accountRole}
           notificationsEnabled={notificationsEnabled}
           onSaveProfile={handleSaveProfile}
           googleAccessToken={googleAccessToken}
-          setGoogleAccessToken={setGoogleAccessToken}
-          isRealtimeConnected={isRealtimeConnected}
+          setGoogleAccessToken={(token) => {
+            setGoogleAccessToken(token);
+            if (currentUser && token) {
+              handleSaveProfile({}, accountRole, { googleAccessToken: token });
+            }
+          }}
         />
 
         <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0 transition-all duration-300">
@@ -358,13 +320,13 @@ const App: React.FC = () => {
               </button>
               <div className="max-w-md w-full relative hidden sm:block">
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-mutedForeground" />
-                <input type="text" placeholder="Search my tasks..." className="w-full pl-10 pr-4 py-2 bg-white border-2 border-slate-200 rounded-lg focus:border-accent focus:shadow-pop outline-none text-sm font-medium" />
+                <input type="text" placeholder="Cari task saya..." className="w-full pl-10 pr-4 py-2 bg-white border-2 border-slate-200 rounded-lg focus:border-accent focus:shadow-pop outline-none text-sm font-medium" />
               </div>
             </div>
             
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 sm:gap-2 mr-2">
-                <button onClick={fetchData} className={`group flex items-center px-2.5 py-1.5 rounded-full border-2 border-slate-800 shadow-pop-active bg-white hover:bg-slate-50`}>
+                <button onClick={fetchData} className={`group flex items-center px-2.5 py-1.5 rounded-full border-2 border-slate-800 shadow-pop-active bg-white hover:bg-slate-50 transition-all active:translate-y-0.5`}>
                    <div className={`w-2.5 h-2.5 rounded-full mr-2 ${statusColor}`} />
                    <span className="text-[10px] font-black uppercase tracking-tighter text-slate-800 mr-1.5">{isFetching ? 'Syncing' : isRealtimeConnected ? 'Live' : 'Cloud'}</span>
                    <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
@@ -373,24 +335,24 @@ const App: React.FC = () => {
               </div>
               <div className="flex items-center gap-3 pl-3 sm:pl-4 border-l-2 border-slate-100 cursor-pointer" onClick={() => setActiveTab('profile')}>
                 <div className="hidden lg:block text-right">
-                  <p className="text-xs font-black uppercase tracking-tight text-slate-800">{currentUser.name}</p>
-                  <p className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{currentUser.email}</p>
+                  <p className="text-xs font-black uppercase tracking-tight text-slate-800">{currentUser?.name}</p>
+                  <p className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{currentUser?.email}</p>
                 </div>
-                <img src={currentUser.avatar_url} className="w-10 h-10 rounded-full border-2 border-slate-800 bg-white" alt="Avatar" />
+                <img src={currentUser?.avatar_url} className="w-10 h-10 rounded-full border-2 border-slate-800 bg-white object-cover" alt="Avatar" />
               </div>
             </div>
           </header>
 
           <div className={`flex-1 flex flex-col min-h-0 p-4 sm:p-8 w-full mx-auto ${activeTab === 'calendar' ? 'max-w-none' : 'max-w-7xl'}`}>
             {activeTab === 'dashboard' && <Dashboard />}
-            {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
+            {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser!} role={accountRole} />}
             {activeTab === 'team' && <TeamSpace currentWorkspace={activeWorkspace} currentUser={currentUser} />}
             {activeTab === 'calendar' && (
               <CalendarView 
                 tasks={tasks} 
                 workspaces={workspaces} 
                 onTaskClick={(t) => setInspectedTask(t)} 
-                userEmail={currentUser.email} 
+                userEmail={currentUser?.email || ''} 
                 googleAccessToken={googleAccessToken} 
                 onDayClick={(d) => setIsNewTaskModalOpen(true)}
                 sourceColors={sourceColors}

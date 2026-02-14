@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { 
   LayoutGrid, 
@@ -29,6 +28,10 @@ interface SidebarProps {
   workspaces: Workspace[];
   handleTaskClick: (task: Task) => void;
   onLogout: () => void;
+  customBranding?: {
+    name?: string;
+    logo?: string;
+  };
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -44,8 +47,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   tasks,
   workspaces,
   handleTaskClick,
-  onLogout
+  onLogout,
+  customBranding
 }) => {
+  const appName = customBranding?.name || 'TaskPlay';
+  const appLogo = customBranding?.logo;
+
   return (
     <aside className={`
       fixed inset-y-0 left-0 z-[70] bg-white transition-all duration-300 ease-in-out flex flex-col h-screen border-r-4 border-slate-800
@@ -60,10 +67,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-6 shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-accent rounded-xl border-2 border-slate-800 shadow-pop flex items-center justify-center text-white shrink-0">
-                <CheckSquare size={24} strokeWidth={3} />
+              <div className="w-10 h-10 bg-accent rounded-xl border-2 border-slate-800 shadow-pop flex items-center justify-center text-white shrink-0 overflow-hidden">
+                {appLogo ? (
+                  <img src={appLogo} className="w-full h-full object-contain p-1" alt="Logo" />
+                ) : (
+                  <CheckSquare size={24} strokeWidth={3} />
+                )}
               </div>
-              <h1 className="text-2xl font-heading tracking-tight text-foreground">TaskPlay</h1>
+              <h1 className="text-2xl font-heading tracking-tight text-foreground truncate max-w-[160px]">{appName}</h1>
             </div>
             <button className="lg:hidden p-1 hover:bg-muted rounded-lg" onClick={() => setSidebarOpen(false)}>
               <X size={20} />

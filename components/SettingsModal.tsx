@@ -3,12 +3,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, User, Settings, Bell, Calendar, Link2, 
   ChevronDown, Camera, Mail, ShieldCheck, Smartphone, RefreshCw,
-  Chrome, CheckCircle2, Unlink, Crop, Check, ZoomIn, ZoomOut, Database
+  Chrome, CheckCircle2, Unlink, Key, Check, Database, Copy, Terminal,
+  ExternalLink, ZoomIn, ZoomOut, Crop, Move, Palette, Type, Image as ImageIcon, CloudSync
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { User as UserType } from '../types';
 import { GoogleCalendarService } from '../services/googleCalendarService';
+import { supabase } from '../lib/supabase';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -19,369 +21,331 @@ interface SettingsModalProps {
   onSaveProfile: (userData: Partial<UserType>, newRole: string, settingsUpdate?: any) => void;
   googleAccessToken: string | null;
   setGoogleAccessToken: (token: string | null) => void;
-  isRealtimeConnected: boolean;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
-  isOpen, onClose, user, role, notificationsEnabled, onSaveProfile, googleAccessToken, setGoogleAccessToken, isRealtimeConnected 
+  isOpen, onClose, user, role, notificationsEnabled, onSaveProfile, googleAccessToken, setGoogleAccessToken 
 }) => {
-  const [expandedSection, setExpandedSection] = useState<'profile' | 'app' | null>('profile');
+  const [expandedSection, setExpandedSection] = useState<'profile' | 'app' | 'branding' | null>('profile');
   const [tempNotifications, setTempNotifications] = useState(notificationsEnabled);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [sqlCopied, setSqlCopied] = useState(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
   
-  // Temporary State for edits
+  // Profile States
   const [tempName, setTempName] = useState(user.name);
   const [tempEmail, setTempEmail] = useState(user.email);
   const [tempAvatar, setTempAvatar] = useState(user.avatar_url);
   const [tempRole, setTempRole] = useState(role);
-  
-  // Crop Logic State
-  const [cropImage, setCropImage] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Google Service
+  // Branding States
+  const [tempAppName, setTempAppName] = useState(user.app_settings?.appName || 'TaskPlay');
+  const [tempAppLogo, setTempAppLogo] = useState(user.app_settings?.appLogo || '');
+  const [tempFavicon, setTempFavicon] = useState(user.app_settings?.appFavicon || '');
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const faviconInputRef = useRef<HTMLInputElement>(null);
   const calendarService = useRef<GoogleCalendarService | null>(null);
+
+  const SQL_INSTRUCTION = `-- CLEAN SETUP SCRIPT (Jalankan di SQL Editor Supabase)
+-- Script ini mereset kolom app_settings agar siap menampung data JSON tanpa error.
+
+ALTER TABLE public.users 
+DROP COLUMN IF EXISTS app_settings;
+
+ALTER TABLE public.users 
+ADD COLUMN app_settings JSONB DEFAULT '{
+  "appName": "TaskPlay",
+  "appLogo": "",
+  "appFavicon": "",
+  "notificationsEnabled": true,
+  "sourceColors": {},
+  "visibleSources": [],
+  "googleAccessToken": null
+}'::jsonb;
+
+-- Aktifkan RLS kembali
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;`;
 
   useEffect(() => {
     if (isOpen) {
       calendarService.current = new GoogleCalendarService((token) => {
         setGoogleAccessToken(token);
         setIsSyncing(false);
+        // Langsung simpan token ke DB secara background
+        autoSaveBranding({ googleAccessToken: token });
       });
-      // Sync local temp state with current props on open
       setTempNotifications(notificationsEnabled);
       setTempName(user.name);
       setTempEmail(user.email);
       setTempAvatar(user.avatar_url);
       setTempRole(role);
+      setTempAppName(user.app_settings?.appName || 'TaskPlay');
+      setTempAppLogo(user.app_settings?.appLogo || '');
+      setTempFavicon(user.app_settings?.appFavicon || '');
     }
-  }, [isOpen, notificationsEnabled, user, role]);
+  }, [isOpen]);
 
-  if (!isOpen) return null;
+  const autoSaveBranding = async (updates: any) => {
+    setIsAutoSaving(true);
+    
+    // Gabungkan dengan state lokal saat ini di modal
+    const nextSettings = {
+      ...(user.app_settings || {}),
+      appName: tempAppName,
+      appLogo: tempAppLogo,
+      appFavicon: tempFavicon,
+      notificationsEnabled: tempNotifications,
+      googleAccessToken: googleAccessToken,
+      ...updates
+    };
 
-  const toggleSection = (section: 'profile' | 'app') => {
-    setExpandedSection(expandedSection === section ? null : section);
+    try {
+      const { error } = await supabase.from('users').update({
+        app_settings: nextSettings,
+        updated_at: new Date().toISOString()
+      }).eq('id', user.id);
+
+      if (error) throw error;
+      
+      // Update state parent agar Sidebar & browser metadata berubah realtime
+      onSaveProfile(
+        { name: tempName, email: tempEmail, avatar_url: tempAvatar }, 
+        tempRole, 
+        updates 
+      );
+    } catch (err) {
+      console.error("Auto-save failed", err);
+    } finally {
+      setTimeout(() => setIsAutoSaving(false), 800);
+    }
   };
 
-  const handleConnectGoogle = () => {
-    if (googleAccessToken) {
-      setGoogleAccessToken(null);
-    } else {
-      setIsSyncing(true);
-      calendarService.current?.requestAccessToken();
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (event) => {
-        setCropImage(event.target?.result as string);
+      reader.onload = () => setTempAvatar(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon') => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result as string;
+        if (type === 'logo') {
+          setTempAppLogo(base64);
+          autoSaveBranding({ appLogo: base64 });
+        } else {
+          setTempFavicon(base64);
+          autoSaveBranding({ appFavicon: base64 });
+        }
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleSaveAll = () => {
-    onSaveProfile({
-      name: tempName,
-      email: tempEmail,
-      avatar_url: tempAvatar
-    }, tempRole, {
-      notificationsEnabled: tempNotifications
-    });
+  const handleFinalSave = async () => {
+    // Tombol final mengirimkan SELURUH snapshot state lokal modal
+    const finalSettingsUpdate = {
+      appName: tempAppName,
+      appLogo: tempAppLogo,
+      appFavicon: tempFavicon,
+      notificationsEnabled: tempNotifications,
+      googleAccessToken: googleAccessToken
+    };
+
+    onSaveProfile(
+      { name: tempName, email: tempEmail, avatar_url: tempAvatar }, 
+      tempRole, 
+      finalSettingsUpdate
+    );
+    
     onClose();
   };
 
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-      <div 
-        className="bg-white border-4 border-slate-800 rounded-3xl shadow-[16px_16px_0px_0px_#1E293B] w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Modal Header */}
+      <div className="bg-white border-4 border-slate-800 rounded-3xl shadow-[16px_16px_0px_0px_#1E293B] w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300">
+        
+        {/* Header */}
         <div className="p-6 bg-tertiary border-b-4 border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-white border-2 border-slate-800 rounded-2xl flex items-center justify-center shadow-pop-active">
               <Settings size={24} className="text-slate-800" strokeWidth={3} />
             </div>
             <div>
-              <h2 className="text-2xl font-heading text-slate-900">System Preferences</h2>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-800/60">Configure your TaskPlay experience</p>
+              <h2 className="text-2xl font-heading text-slate-900">Pengaturan Akun</h2>
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-800/60">Profil & Branding</p>
+                {isAutoSaving && <div className="flex items-center gap-1 text-[9px] font-black uppercase text-accent animate-pulse"><RefreshCw size={10} className="animate-spin" /> Syncing...</div>}
+              </div>
             </div>
           </div>
-          <button 
-            onClick={onClose} 
-            className="p-2 hover:bg-black/10 rounded-xl transition-colors border-2 border-transparent hover:border-slate-800"
-          >
+          <button onClick={onClose} className="p-2 hover:bg-black/10 rounded-xl transition-colors">
             <X size={24} strokeWidth={3} />
           </button>
         </div>
 
-        {/* Modal Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
           
           {/* Section: Personal Profile */}
           <div className="border-4 border-slate-800 rounded-2xl overflow-hidden shadow-pop transition-all">
             <button 
-              onClick={() => toggleSection('profile')}
+              onClick={() => setExpandedSection(expandedSection === 'profile' ? null : 'profile')}
               className={`w-full flex items-center justify-between p-4 text-left transition-colors ${expandedSection === 'profile' ? 'bg-accent text-white' : 'bg-white hover:bg-slate-50'}`}
             >
               <div className="flex items-center gap-3">
                 <User size={20} strokeWidth={3} />
-                <span className="font-heading text-lg">Personal Profile</span>
+                <span className="font-heading text-lg">Profil Personal</span>
               </div>
               <ChevronDown className={`transition-transform duration-300 ${expandedSection === 'profile' ? 'rotate-180' : ''}`} />
             </button>
 
             {expandedSection === 'profile' && (
               <div className="p-6 bg-white space-y-6 animate-in slide-in-from-top-4 duration-300">
-                <div className="flex flex-col sm:flex-row gap-6 items-start">
+                <div className="flex flex-col sm:flex-row gap-8 items-center sm:items-start">
                   <div className="relative group shrink-0">
-                    <div className="w-24 h-24 rounded-full border-4 border-slate-800 overflow-hidden bg-slate-100 shadow-sm">
+                    <div className="w-32 h-32 rounded-3xl border-4 border-slate-800 overflow-hidden bg-slate-100 shadow-sticker transition-transform group-hover:rotate-2">
                       <img src={tempAvatar} className="w-full h-full object-cover" alt="Avatar" />
                     </div>
                     <button 
-                      onClick={() => fileInputRef.current?.click()}
-                      className="absolute -bottom-1 -right-1 p-2 bg-secondary text-white border-2 border-slate-800 rounded-full shadow-sm hover:scale-110 transition-transform active:scale-95"
+                      onClick={() => fileInputRef.current?.click()} 
+                      className="absolute -bottom-2 -right-2 p-3 bg-secondary text-white border-2 border-slate-800 rounded-2xl shadow-pop-active hover:scale-110 transition-transform active:translate-y-0"
                     >
-                      <Camera size={16} strokeWidth={3} />
+                      <Camera size={18} strokeWidth={3} />
                     </button>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef} 
-                      className="hidden" 
-                      accept="image/*" 
-                      onChange={handleFileChange} 
-                    />
+                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
                   </div>
-                  <div className="flex-1 w-full space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <Input 
-                        label="Display Name" 
-                        value={tempName} 
-                        onChange={(e) => setTempName(e.target.value)} 
-                      />
-                      <Input 
-                        label="Email Contact" 
-                        value={tempEmail} 
-                        onChange={(e) => setTempEmail(e.target.value)}
-                        icon={<Mail size={16} />} 
-                      />
+                  <div className="flex-1 w-full space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <Input label="Nama Lengkap" value={tempName} onChange={(e) => setTempName(e.target.value)} icon={<User size={16} />} />
+                      <Input label="Role Pekerjaan" value={tempRole} onChange={(e) => setTempRole(e.target.value)} icon={<ShieldCheck size={18} />} />
                     </div>
-                    <Input 
-                      label="Custom Account Role" 
-                      value={tempRole} 
-                      onChange={(e) => setTempRole(e.target.value)}
-                      placeholder="e.g. Lead Designer, Manager, Solo Player"
-                      icon={<ShieldCheck size={18} className="text-quaternary" />} 
-                    />
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter ml-1">Customize how your role appears in team workspaces</p>
+                    <Input label="Email Address" value={tempEmail} onChange={(e) => setTempEmail(e.target.value)} icon={<Mail size={16} />} />
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Section: App Settings */}
+          {/* Section: Branding App Setting */}
           <div className="border-4 border-slate-800 rounded-2xl overflow-hidden shadow-pop transition-all">
             <button 
-              onClick={() => toggleSection('app')}
-              className={`w-full flex items-center justify-between p-4 text-left transition-colors ${expandedSection === 'app' ? 'bg-secondary text-white' : 'bg-white hover:bg-slate-50'}`}
+              onClick={() => setExpandedSection(expandedSection === 'branding' ? null : 'branding')}
+              className={`w-full flex items-center justify-between p-4 text-left transition-colors ${expandedSection === 'branding' ? 'bg-secondary text-white' : 'bg-white hover:bg-slate-50'}`}
             >
               <div className="flex items-center gap-3">
-                <Smartphone size={20} strokeWidth={3} />
-                <span className="font-heading text-lg">App Configuration</span>
+                <Palette size={20} strokeWidth={3} />
+                <span className="font-heading text-lg">Branding Aplikasi</span>
+              </div>
+              <ChevronDown className={`transition-transform duration-300 ${expandedSection === 'branding' ? 'rotate-180' : ''}`} />
+            </button>
+
+            {expandedSection === 'branding' && (
+              <div className="p-6 bg-white space-y-6 animate-in slide-in-from-top-4 duration-300">
+                <Input 
+                  label="Nama Aplikasi" 
+                  value={tempAppName} 
+                  onChange={(e) => setTempAppName(e.target.value)} 
+                  onBlur={() => autoSaveBranding({ appName: tempAppName })}
+                  icon={<Type size={18} />} 
+                />
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Logo */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Logo Aplikasi</label>
+                    <div onClick={() => logoInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 hover:border-secondary cursor-pointer">
+                      <div className="w-16 h-16 bg-white border-2 border-slate-800 rounded-xl flex items-center justify-center overflow-hidden shadow-sm">
+                        {tempAppLogo ? <img src={tempAppLogo} className="w-full h-full object-contain p-1" /> : <ImageIcon size={24} className="text-slate-300" />}
+                      </div>
+                      <span className="text-[10px] font-black uppercase text-secondary">Ganti Logo</span>
+                      <input type="file" ref={logoInputRef} className="hidden" accept="image/png" onChange={(e) => handleLogoUpload(e, 'logo')} />
+                    </div>
+                  </div>
+
+                  {/* Favicon */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Favicon</label>
+                    <div onClick={() => faviconInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 hover:border-secondary cursor-pointer">
+                      <div className="w-12 h-12 bg-white border-2 border-slate-800 rounded-lg flex items-center justify-center overflow-hidden shadow-sm">
+                        {tempFavicon ? <img src={tempFavicon} className="w-full h-full object-contain p-1" /> : <Chrome size={20} className="text-slate-300" />}
+                      </div>
+                      <span className="text-[10px] font-black uppercase text-secondary">Ganti Favicon</span>
+                      <input type="file" ref={faviconInputRef} className="hidden" accept="image/png" onChange={(e) => handleLogoUpload(e, 'favicon')} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Section: App Config & SQL */}
+          <div className="border-4 border-slate-800 rounded-2xl overflow-hidden shadow-pop transition-all">
+            <button 
+              onClick={() => setExpandedSection(expandedSection === 'app' ? null : 'app')}
+              className={`w-full flex items-center justify-between p-4 text-left transition-colors ${expandedSection === 'app' ? 'bg-quaternary text-white' : 'bg-white hover:bg-slate-50'}`}
+            >
+              <div className="flex items-center gap-3">
+                <Database size={20} strokeWidth={3} />
+                <span className="font-heading text-lg">System Configuration</span>
               </div>
               <ChevronDown className={`transition-transform duration-300 ${expandedSection === 'app' ? 'rotate-180' : ''}`} />
             </button>
 
             {expandedSection === 'app' && (
               <div className="p-6 bg-white space-y-6 animate-in slide-in-from-top-4 duration-300">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between border-b-2 border-slate-100 pb-2">
-                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Database Connection</h4>
+                <div className="bg-slate-50 border-2 border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Chrome size={20} className="text-accent" />
+                    <div>
+                       <p className="text-xs font-black uppercase text-slate-800">Google Calendar</p>
+                       <p className="text-[9px] font-bold text-slate-400">Persistence Cloud Connection</p>
+                    </div>
+                  </div>
+                  {googleAccessToken ? (
                     <div className="flex items-center gap-2">
-                       <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border-2 border-slate-800 text-[9px] font-black uppercase tracking-widest ${isRealtimeConnected ? 'bg-quaternary text-white' : 'bg-slate-100 text-slate-400'}`}>
-                          <Database size={10} /> {isRealtimeConnected ? 'Realtime Connected' : 'Disconnected'}
-                       </div>
+                      <span className="px-3 py-1 bg-quaternary text-white text-[9px] font-black rounded-full border border-slate-800">Connected</span>
+                      <button onClick={() => calendarService.current?.requestAccessToken()} className="p-2 hover:bg-slate-200 rounded-lg"><RefreshCw size={12} /></button>
                     </div>
-                  </div>
-
-                  <div className="flex items-center justify-between border-b-2 border-slate-100 pb-2 pt-2">
-                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Google Calendar Integration</h4>
-                    {googleAccessToken && (
-                      <span className="flex items-center gap-1 text-[9px] font-black text-quaternary uppercase tracking-widest bg-quaternary/10 px-2 py-0.5 rounded-full border border-quaternary">
-                         <CheckCircle2 size={10} /> Live Connection
-                      </span>
-                    )}
-                  </div>
-                  
-                  <div className="bg-slate-50 p-5 border-2 border-slate-800 rounded-2xl space-y-4 shadow-sm">
-                    <div className="flex items-center gap-4 mb-2">
-                       <div className={`w-12 h-12 rounded-xl border-2 border-slate-800 flex items-center justify-center transition-colors ${googleAccessToken ? 'bg-white' : 'bg-slate-200'}`}>
-                          <Chrome size={24} className={googleAccessToken ? 'text-accent' : 'text-slate-400'} />
-                       </div>
-                       <div className="flex-1 min-w-0">
-                          <p className="font-bold text-slate-800 leading-none">Google Account Connection</p>
-                          <p className="text-[10px] text-slate-400 font-medium mt-1">Sync your tasks directly to Google Calendar</p>
-                       </div>
-                    </div>
-                    
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <Input 
-                        placeholder="your-google@gmail.com" 
-                        defaultValue={tempEmail}
-                        className="flex-1"
-                        icon={<Mail size={16} />}
-                        disabled={!!googleAccessToken}
-                      />
-                      <button 
-                        onClick={handleConnectGoogle}
-                        disabled={isSyncing}
-                        className={`h-[52px] px-6 rounded-xl font-black uppercase text-xs tracking-widest border-2 border-slate-800 transition-all flex items-center justify-center gap-2 ${
-                          googleAccessToken 
-                            ? 'bg-secondary text-white shadow-pop-active hover:bg-secondary/90' 
-                            : 'bg-accent text-white shadow-pop hover:-translate-y-0.5 active:translate-y-0'
-                        } ${isSyncing ? 'opacity-70 grayscale' : ''}`}
-                      >
-                        {isSyncing ? (
-                          <RefreshCw size={18} className="animate-spin" />
-                        ) : googleAccessToken ? (
-                          <><Unlink size={18} /> Disconnect</>
-                        ) : (
-                          <><Link2 size={18} /> Connect Account</>
-                        )}
-                      </button>
-                    </div>
-                  </div>
+                  ) : (
+                    <Button variant="primary" className="text-[9px] py-1 px-4" onClick={() => calendarService.current?.requestAccessToken()} disabled={isSyncing}>Connect</Button>
+                  )}
                 </div>
 
-                <div className="space-y-4">
-                  <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-400 border-b-2 border-slate-100 pb-2">Notifications</h4>
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border-2 border-slate-200">
-                    <div className="flex items-center gap-3">
-                      <Bell size={20} className="text-accent" />
-                      <div>
-                        <p className="font-bold text-slate-800">Push Notifications</p>
-                        <p className="text-[10px] text-slate-400 font-medium">Real-time alerts for deadlines</p>
-                      </div>
-                    </div>
-                    <Toggle active={tempNotifications} onToggle={() => setTempNotifications(!tempNotifications)} />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Reset Database Settings (Optional)</h4>
+                    <button onClick={() => { navigator.clipboard.writeText(SQL_INSTRUCTION); setSqlCopied(true); setTimeout(() => setSqlCopied(false), 2000); }} className="text-[9px] font-black uppercase text-accent hover:underline">{sqlCopied ? 'Copied!' : 'Copy Script'}</button>
                   </div>
+                  <pre className="p-4 bg-slate-900 text-slate-300 rounded-2xl text-[9px] font-mono overflow-x-auto max-h-32 scrollbar-hide">
+                    {SQL_INSTRUCTION}
+                  </pre>
                 </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Modal Footer */}
+        {/* Footer */}
         <div className="p-6 bg-slate-50 border-t-4 border-slate-800 flex items-center justify-end gap-3 shrink-0">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={handleSaveAll} className="px-10">Save Settings</Button>
-        </div>
-      </div>
-
-      {/* Image Crop Modal Overlay */}
-      {cropImage && (
-        <ImageCropModal 
-          image={cropImage} 
-          onClose={() => setCropImage(null)} 
-          onCrop={(cropped) => {
-            setTempAvatar(cropped);
-            setCropImage(null);
-          }} 
-        />
-      )}
-    </div>
-  );
-};
-
-const ImageCropModal: React.FC<{ image: string, onClose: () => void, onCrop: (base64: string) => void }> = ({ image, onClose, onCrop }) => {
-  const [zoom, setZoom] = useState(1);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true);
-    setDragStart({ x: e.clientX - pos.x, y: e.clientY - pos.y });
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
-    setPos({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
-  };
-
-  const handleMouseUp = () => setIsDragging(false);
-
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl animate-in fade-in duration-300">
-      <div className="bg-white border-4 border-slate-800 rounded-3xl w-full max-w-lg overflow-hidden flex flex-col shadow-[20px_20px_0px_0px_#1E293B] animate-in zoom-in-95">
-        <div className="p-6 border-b-4 border-slate-800 flex items-center justify-between bg-accent text-white">
-          <div className="flex items-center gap-2">
-            <Crop size={20} strokeWidth={3} />
-            <h3 className="text-xl font-heading">Optimize Avatar</h3>
-          </div>
-          <button onClick={onClose} className="hover:bg-black/10 p-1 rounded-lg"><X /></button>
-        </div>
-
-        <div className="p-10 flex flex-col items-center bg-slate-100">
-          <div 
-            className="w-64 h-64 border-4 border-slate-800 rounded-full overflow-hidden bg-white shadow-inner relative cursor-move"
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
+          <Button variant="secondary" onClick={onClose}>Batal</Button>
+          <Button 
+            variant="primary" 
+            className="px-10 shadow-pop" 
+            onClick={handleFinalSave}
           >
-            <img 
-              src={image} 
-              className="absolute pointer-events-none transition-transform duration-75"
-              style={{
-                transform: `translate(${pos.x}px, ${pos.y}px) scale(${zoom})`,
-                maxWidth: 'none'
-              }}
-              alt="Crop area"
-            />
-            {/* Guide grid overlay */}
-            <div className="absolute inset-0 border-2 border-accent/20 rounded-full pointer-events-none"></div>
-          </div>
-
-          <div className="mt-8 w-full space-y-4">
-             <div className="flex items-center gap-4">
-                <ZoomOut size={18} className="text-slate-400" />
-                <input 
-                  type="range" 
-                  min="0.5" 
-                  max="3" 
-                  step="0.1" 
-                  value={zoom} 
-                  onChange={(e) => setZoom(parseFloat(e.target.value))}
-                  className="flex-1 accent-accent"
-                />
-                <ZoomIn size={18} className="text-slate-400" />
-             </div>
-             <p className="text-[10px] text-center font-black uppercase tracking-widest text-slate-400">Drag image to center your profile</p>
-          </div>
-        </div>
-
-        <div className="p-6 border-t-4 border-slate-800 bg-white flex gap-3">
-          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" className="flex-1 gap-2" onClick={() => onCrop(image)}>
-            <Check size={18} strokeWidth={3} /> Done Cropping
+            Selesai & Tutup
           </Button>
         </div>
       </div>
     </div>
   );
 };
-
-const Toggle: React.FC<{ active: boolean, onToggle: () => void }> = ({ active, onToggle }) => (
-  <button 
-    onClick={onToggle}
-    className={`w-14 h-8 rounded-full border-2 border-slate-800 relative transition-colors ${active ? 'bg-quaternary' : 'bg-slate-200 shadow-inner'}`}
-  >
-    <div className={`absolute top-1 w-5 h-5 rounded-full border-2 border-slate-800 bg-white transition-all shadow-sm ${active ? 'left-7' : 'left-1'}`} />
-  </button>
-);

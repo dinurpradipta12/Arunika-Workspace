@@ -31,9 +31,13 @@ export interface User {
   last_seen?: string;
   status?: string;
   app_settings?: {
+    appName?: string;
+    appLogo?: string;
+    appFavicon?: string;
     notificationsEnabled?: boolean;
     sourceColors?: Record<string, string>;
     visibleSources?: string[];
+    googleAccessToken?: string; // Menyimpan token di DB
   };
 }
 

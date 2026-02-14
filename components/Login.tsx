@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { CheckSquare, Lock, User as UserIcon, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from './ui/Button';
@@ -10,8 +9,8 @@ interface LoginProps {
 }
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
-  const [email, setEmail] = useState('arunika@taskplay.com');
-  const [password, setPassword] = useState('ar4925');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -21,8 +20,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setError('');
 
     try {
+      // Mengonversi username menjadi email format untuk Supabase Auth di latar belakang
+      const loginEmail = username.includes('@') ? username : `${username}@taskplay.com`;
+      
       const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.includes('@') ? email : `${email}@taskplay.com`,
+        email: loginEmail,
         password: password,
       });
 
@@ -34,7 +36,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         onLoginSuccess();
       }
     } catch (err: any) {
-      setError(err.message || 'Invalid login credentials. Please check your Supabase Auth dashboard.');
+      setError(err.message || 'Kredensial login tidak valid. Silakan periksa dashboard Supabase Auth Anda.');
     } finally {
       setIsLoading(false);
     }
@@ -51,8 +53,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           <div className="w-16 h-16 bg-accent rounded-2xl border-4 border-slate-800 shadow-pop flex items-center justify-center text-white mb-4 rotate-3">
             <CheckSquare size={32} strokeWidth={3} />
           </div>
-          <h1 className="text-4xl font-heading tracking-tight">TaskPlay</h1>
-          <p className="text-mutedForeground font-bold uppercase tracking-widest text-[10px] mt-2">Authenticated Realtime Sync</p>
+          <h1 className="text-4xl font-heading tracking-tight text-slate-900">TaskPlay</h1>
+          <p className="text-mutedForeground font-bold uppercase tracking-widest text-[10px] mt-2 text-center leading-relaxed">
+            Sistem Manajemen Task & Penjadwalan <br/>
+            <span className="text-accent">Personal Productivity</span>
+          </p>
         </div>
 
         <div className="bg-white border-4 border-slate-800 rounded-2xl shadow-[12px_12px_0px_0px_#1E293B] p-8 relative overflow-hidden">
@@ -62,11 +67,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             <div className="relative">
               <UserIcon size={18} className="absolute left-3 top-11 text-mutedForeground" />
               <Input 
-                label="Email or Username" 
-                placeholder="arunika@taskplay.com" 
+                label="Username" 
+                placeholder="Contoh: arunika" 
                 className="pl-10"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 required
               />
             </div>
@@ -92,14 +97,16 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             )}
 
             <Button variant="primary" className="w-full text-lg py-4" type="submit" disabled={isLoading}>
-              {isLoading ? <Loader2 className="animate-spin" /> : "Let's Go"}
+              {isLoading ? <Loader2 className="animate-spin" /> : "Masuk Sekarang"}
             </Button>
           </form>
 
-          <p className="text-center mt-8 text-[10px] text-mutedForeground font-medium leading-relaxed">
-            Note: Uses Supabase Auth. Make sure the user exists in your dashboard.<br/>
-            Default Sync ID: <span className="font-bold text-accent">arunika@taskplay.com / ar4925</span>
-          </p>
+          <div className="mt-8 pt-6 border-t-2 border-slate-100 text-center">
+            <p className="text-[10px] text-mutedForeground font-medium leading-relaxed">
+              Gunakan akun lama untuk mengakses:<br/>
+              User: <span className="font-bold text-accent">arunika</span> | Pass: <span className="font-bold text-accent">ar4925</span>
+            </p>
+          </div>
         </div>
       </div>
     </div>
