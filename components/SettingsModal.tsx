@@ -29,37 +29,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [expandedSection, setExpandedSection] = useState<'profile' | 'app' | 'branding' | null>('profile');
   const [tempNotifications, setTempNotifications] = useState(notificationsEnabled);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [sqlCopied, setSqlCopied] = useState(false);
-  const [isAutoSaving, setIsAutoSaving] = useState(false);
   
-  // Profile States Lokal (Snapshot)
+  // Profile Snapshots
   const [tempName, setTempName] = useState(user.name);
   const [tempEmail, setTempEmail] = useState(user.email);
   const [tempAvatar, setTempAvatar] = useState(user.avatar_url);
   const [tempRole, setTempRole] = useState(role);
 
-  // Branding States Lokal (Snapshot)
+  // Branding Snapshots
   const [tempAppName, setTempAppName] = useState(user.app_settings?.appName || 'TaskPlay');
   const [tempAppLogo, setTempAppLogo] = useState(user.app_settings?.appLogo || '');
-  const [tempFavicon, setTempFavicon] = useState(user.app_settings?.appFavicon || '');
+  const [tempFavicon, setTempAppFavicon] = useState(user.app_settings?.appFavicon || '');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const faviconInputRef = useRef<HTMLInputElement>(null);
   const calendarService = useRef<GoogleCalendarService | null>(null);
 
-  const SQL_INSTRUCTION = `-- SETUP DATABASE COLUMN
-ALTER TABLE public.users 
-ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
-
   useEffect(() => {
     if (isOpen) {
       calendarService.current = new GoogleCalendarService((token) => {
         setGoogleAccessToken(token);
-        setIsSyncing(false);
-        // Langsung auto-save token baru
+        // Auto-sync token ke cloud saat didapat
         onSaveProfile({}, tempRole, { googleAccessToken: token });
       });
+      // Sync local state dengan prop terbaru dari App.tsx (Data Cloud)
       setTempNotifications(notificationsEnabled);
       setTempName(user.name);
       setTempEmail(user.email);
@@ -67,9 +61,9 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
       setTempRole(role);
       setTempAppName(user.app_settings?.appName || 'TaskPlay');
       setTempAppLogo(user.app_settings?.appLogo || '');
-      setTempFavicon(user.app_settings?.appFavicon || '');
+      setTempAppFavicon(user.app_settings?.appFavicon || '');
     }
-  }, [isOpen, notificationsEnabled, user, role]);
+  }, [isOpen, user, role, notificationsEnabled]);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -80,14 +74,14 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
     }
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon') => {
+  const handleBrandingUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon') => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = () => {
         const base64 = reader.result as string;
         if (type === 'logo') setTempAppLogo(base64);
-        else setTempFavicon(base64);
+        else setTempAppFavicon(base64);
       };
       reader.readAsDataURL(file);
     }
@@ -96,23 +90,24 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
   const handleFinalSave = async () => {
     setIsSyncing(true);
     
-    // Gabungkan seluruh data dari modal (Branding + Profil + Config)
-    const finalSettingsUpdate = {
+    // Siapkan payload sinkronisasi lengkap
+    const finalSettings = {
       appName: tempAppName,
       appLogo: tempAppLogo,
+      // Memperbaiki pemanggilan variabel dari tempAppFavicon menjadi tempFavicon sesuai definisi state di baris 53
       appFavicon: tempFavicon,
       notificationsEnabled: tempNotifications,
       googleAccessToken: googleAccessToken
     };
 
-    const finalUserData = {
+    const finalProfile = {
       name: tempName,
       email: tempEmail,
       avatar_url: tempAvatar
     };
 
-    // Jalankan sinkronisasi database
-    await onSaveProfile(finalUserData, tempRole, finalSettingsUpdate);
+    // Panggil fungsi sinkronisasi utama di App.tsx
+    await onSaveProfile(finalProfile, tempRole, finalSettings);
     
     setIsSyncing(false);
     onClose();
@@ -131,8 +126,8 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
               <Settings size={24} className="text-slate-800" strokeWidth={3} />
             </div>
             <div>
-              <h2 className="text-2xl font-heading text-slate-900">Pengaturan Akun</h2>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-800/60">Cloud Persistence Sync</p>
+              <h2 className="text-2xl font-heading text-slate-900">Konfigurasi Sistem</h2>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-800/60">Semua perubahan disinkronkan ke Cloud</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-black/10 rounded-xl transition-colors">
@@ -142,7 +137,7 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
           
-          {/* Section: Personal Profile */}
+          {/* Section: Profil */}
           <div className="border-4 border-slate-800 rounded-2xl overflow-hidden shadow-pop transition-all">
             <button 
               onClick={() => setExpandedSection(expandedSection === 'profile' ? null : 'profile')}
@@ -150,7 +145,7 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
             >
               <div className="flex items-center gap-3">
                 <User size={20} strokeWidth={3} />
-                <span className="font-heading text-lg">Profil Personal</span>
+                <span className="font-heading text-lg">Data Personal</span>
               </div>
               <ChevronDown className={`transition-transform duration-300 ${expandedSection === 'profile' ? 'rotate-180' : ''}`} />
             </button>
@@ -173,16 +168,16 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
                   <div className="flex-1 w-full space-y-5">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <Input label="Nama Lengkap" value={tempName} onChange={(e) => setTempName(e.target.value)} icon={<User size={16} />} />
-                      <Input label="Role" value={tempRole} onChange={(e) => setTempRole(e.target.value)} icon={<ShieldCheck size={18} />} />
+                      <Input label="Role Jabatan" value={tempRole} onChange={(e) => setTempRole(e.target.value)} icon={<ShieldCheck size={18} />} />
                     </div>
-                    <Input label="Email" value={tempEmail} onChange={(e) => setTempEmail(e.target.value)} icon={<Mail size={16} />} />
+                    <Input label="Email Sync" value={tempEmail} onChange={(e) => setTempEmail(e.target.value)} icon={<Mail size={16} />} />
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Section: Branding App Setting */}
+          {/* Section: Branding */}
           <div className="border-4 border-slate-800 rounded-2xl overflow-hidden shadow-pop transition-all">
             <button 
               onClick={() => setExpandedSection(expandedSection === 'branding' ? null : 'branding')}
@@ -198,7 +193,7 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
             {expandedSection === 'branding' && (
               <div className="p-6 bg-white space-y-6 animate-in slide-in-from-top-4 duration-300">
                 <Input 
-                  label="Nama Aplikasi" 
+                  label="Nama Custom Dashboard" 
                   value={tempAppName} 
                   onChange={(e) => setTempAppName(e.target.value)} 
                   icon={<Type size={18} />} 
@@ -206,23 +201,23 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-slate-400">Logo App</label>
+                    <label className="text-[10px] font-black uppercase text-slate-400">Logo Dashboard</label>
                     <div onClick={() => logoInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 cursor-pointer hover:bg-slate-100">
                       <div className="w-16 h-16 bg-white border-2 border-slate-800 rounded-xl flex items-center justify-center overflow-hidden">
                         {tempAppLogo ? <img src={tempAppLogo} className="w-full h-full object-contain p-1" /> : <ImageIcon size={24} className="text-slate-300" />}
                       </div>
-                      <span className="text-[9px] font-black uppercase text-slate-400">Ganti Logo</span>
-                      <input type="file" ref={logoInputRef} className="hidden" accept="image/png" onChange={(e) => handleLogoUpload(e, 'logo')} />
+                      <span className="text-[9px] font-black uppercase text-slate-400">Pilih Logo</span>
+                      <input type="file" ref={logoInputRef} className="hidden" accept="image/png" onChange={(e) => handleBrandingUpload(e, 'logo')} />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-slate-400">Favicon</label>
+                    <label className="text-[10px] font-black uppercase text-slate-400">Browser Favicon</label>
                     <div onClick={() => faviconInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 cursor-pointer hover:bg-slate-100">
                       <div className="w-12 h-12 bg-white border-2 border-slate-800 rounded-lg flex items-center justify-center overflow-hidden">
                         {tempFavicon ? <img src={tempFavicon} className="w-full h-full object-contain p-1" /> : <Chrome size={20} className="text-slate-300" />}
                       </div>
-                      <span className="text-[9px] font-black uppercase text-slate-400">Ganti Favicon</span>
-                      <input type="file" ref={faviconInputRef} className="hidden" accept="image/png" onChange={(e) => handleLogoUpload(e, 'favicon')} />
+                      <span className="text-[9px] font-black uppercase text-slate-400">Pilih Favicon</span>
+                      <input type="file" ref={faviconInputRef} className="hidden" accept="image/png" onChange={(e) => handleBrandingUpload(e, 'favicon')} />
                     </div>
                   </div>
                 </div>
@@ -230,7 +225,7 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
             )}
           </div>
 
-          {/* Section: Sync Control */}
+          {/* Section: Google Sync */}
           <div className="border-4 border-slate-800 rounded-2xl overflow-hidden shadow-pop transition-all">
             <button 
               onClick={() => setExpandedSection(expandedSection === 'app' ? null : 'app')}
@@ -238,7 +233,7 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
             >
               <div className="flex items-center gap-3">
                 <Database size={20} strokeWidth={3} />
-                <span className="font-heading text-lg">Sinkronisasi Cloud</span>
+                <span className="font-heading text-lg">Integrasi & Cloud</span>
               </div>
               <ChevronDown className={`transition-transform duration-300 ${expandedSection === 'app' ? 'rotate-180' : ''}`} />
             </button>
@@ -250,18 +245,18 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
                     <Chrome size={20} className="text-accent" />
                     <div>
                        <p className="text-xs font-black uppercase text-slate-800">Google Calendar</p>
-                       <p className="text-[9px] font-bold text-slate-400">{googleAccessToken ? 'Cloud Connected' : 'Not Connected'}</p>
+                       <p className="text-[9px] font-bold text-slate-400">{googleAccessToken ? 'Koneksi Berhasil' : 'Belum Terhubung'}</p>
                     </div>
                   </div>
                   <Button variant="primary" className="text-[9px] py-1 px-4" onClick={() => calendarService.current?.requestAccessToken()}>
-                    {googleAccessToken ? 'Re-connect' : 'Connect'}
+                    {googleAccessToken ? 'Hubungkan Kembali' : 'Hubungkan'}
                   </Button>
                 </div>
                 
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Bell size={18} className="text-slate-400" />
-                    <span className="text-xs font-bold text-slate-700">Notifikasi Push</span>
+                    <span className="text-xs font-bold text-slate-700">Notifikasi Realtime</span>
                   </div>
                   <button 
                     onClick={() => setTempNotifications(!tempNotifications)}
@@ -284,7 +279,7 @@ ADD COLUMN IF NOT EXISTS app_settings JSONB DEFAULT '{}'::jsonb;`;
             onClick={handleFinalSave}
             disabled={isSyncing}
           >
-            {isSyncing ? <RefreshCw size={18} className="animate-spin" /> : 'Selesai & Simpan'}
+            {isSyncing ? <RefreshCw size={18} className="animate-spin" /> : 'Terapkan & Sinkronkan'}
           </Button>
         </div>
       </div>

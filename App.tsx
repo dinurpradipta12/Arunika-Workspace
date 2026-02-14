@@ -33,7 +33,6 @@ import { Task, TaskStatus, TaskPriority, Workspace, User, WorkspaceType } from '
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
 
 const App: React.FC = () => {
-  // Mode Developer: Bypass Login Sementara
   const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive'>('dashboard');
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -55,18 +54,20 @@ const App: React.FC = () => {
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [isApiConnected, setIsApiConnected] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
-  const channelRef = useRef<any>(null);
+  
+  // Ref untuk mengelola subscription agar tidak terjadi memory leak/multiple listeners
+  const taskChannelRef = useRef<any>(null);
   const userChannelRef = useRef<any>(null);
   
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
 
-  // User State Utama
+  // User State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [accountRole, setAccountRole] = useState('Owner');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Sync Branding (Title & Favicon) dari DB ke Browser
+  // Sync Branding secara realtime ke Browser
   useEffect(() => {
     if (currentUser?.app_settings?.appName) {
       document.title = currentUser.app_settings.appName;
@@ -80,49 +81,44 @@ const App: React.FC = () => {
     }
   }, [currentUser?.app_settings?.appName, currentUser?.app_settings?.appFavicon]);
 
-  const fetchUserProfile = useCallback(async (userId: string) => {
-    const { data: userData, error: userError } = await supabase
+  // FUNGSI UTAMA: Ambil data user dan setup listener realtime
+  const fetchAndSubscribeUser = useCallback(async (userId: string) => {
+    // 1. Fetch data awal
+    const { data: userData, error } = await supabase
       .from('users')
       .select('*')
       .eq('id', userId)
       .single();
 
-    if (!userError && userData) {
+    if (!error && userData) {
       setCurrentUser(userData as User);
-      setAccountRole(userData.status || 'Member');
-      if (userData.app_settings) {
-        setNotificationsEnabled(userData.app_settings.notificationsEnabled ?? true);
-        setGoogleAccessToken(userData.app_settings.googleAccessToken || null);
-        setSourceColors(userData.app_settings.sourceColors || {});
-        setVisibleSources(userData.app_settings.visibleSources || []);
-      }
+      setAccountRole(userData.status || 'Owner');
     } else {
-      // Fallback jika user baru (Pastikan user ID sesuai session)
-      setCurrentUser({
+      // Jika user belum ada di DB (misal dev mode baru), set state default
+      const defaultUser = {
         id: userId,
-        email: 'user@taskplay.io',
-        name: 'New User',
+        email: 'dev@taskplay.io',
+        name: 'Developer Mode',
         avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
         status: 'Owner',
         app_settings: { appName: 'TaskPlay' },
         created_at: new Date().toISOString()
-      });
+      };
+      setCurrentUser(defaultUser);
     }
-  }, []);
 
-  // Setup Realtime untuk Profil User & Sinkronisasi Antar Device
-  const setupUserRealtime = useCallback((userId: string) => {
+    // 2. Setup Realtime Listener untuk User ini (Sinkronisasi antar device)
     if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
-
+    
     userChannelRef.current = supabase
-      .channel(`user-sync-${userId}`)
+      .channel(`user-row-${userId}`)
       .on('postgres_changes', { 
         event: 'UPDATE', 
         schema: 'public', 
         table: 'users', 
         filter: `id=eq.${userId}` 
       }, (payload) => {
-        console.log("Remote changes detected, syncing UI...");
+        console.log("☁️ Data Cloud Diperbarui, Sinkronisasi UI...");
         const updated = payload.new as User;
         setCurrentUser(prev => ({ ...prev, ...updated }));
       })
@@ -131,28 +127,21 @@ const App: React.FC = () => {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setIsAuthenticated(true);
-        fetchUserProfile(session.user.id);
-        setupUserRealtime(session.user.id);
-      } else {
-        // Fallback untuk bypass login dev mode
-        const devId = 'dev-user-01'; 
-        fetchUserProfile(devId);
-        setupUserRealtime(devId);
-      }
+      const targetId = session?.user.id || 'dev-user-01'; // Fallback ke dev id
+      fetchAndSubscribeUser(targetId);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        setIsAuthenticated(true);
-        fetchUserProfile(session.user.id);
-        setupUserRealtime(session.user.id);
+        fetchAndSubscribeUser(session.user.id);
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, [fetchUserProfile, setupUserRealtime]);
+    return () => {
+      subscription.unsubscribe();
+      if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
+    };
+  }, [fetchAndSubscribeUser]);
 
   const fetchData = useCallback(async () => {
     if (!currentUser) return;
@@ -179,10 +168,10 @@ const App: React.FC = () => {
 
   const setupTaskRealtime = useCallback(() => {
     if (!currentUser) return;
-    if (channelRef.current) supabase.removeChannel(channelRef.current);
+    if (taskChannelRef.current) supabase.removeChannel(taskChannelRef.current);
     
-    channelRef.current = supabase
-      .channel('tasks-global')
+    taskChannelRef.current = supabase
+      .channel('global-tasks')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
         if (payload.eventType === 'INSERT') setTasks(prev => [payload.new as Task, ...prev]);
         else if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
@@ -206,9 +195,7 @@ const App: React.FC = () => {
 
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
-    const targetWsId = taskData.workspace_id || (workspaces.length > 0 ? workspaces[0].id : null);
-    if (!targetWsId) return;
-
+    const targetWsId = taskData.workspace_id || (workspaces.length > 0 ? workspaces[0].id : 'ws-1');
     if (editingTask) {
       await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
     } else {
@@ -218,41 +205,45 @@ const App: React.FC = () => {
     setEditingTask(null);
   };
 
-  // SINKRONISASI DATABASE UTAMA
+  // SINKRONISASI CLOUD UTAMA
   const handleSaveProfile = async (userData: Partial<User>, newRole: string, settingsUpdate?: any) => {
     if (!currentUser) return;
     
-    // Merge Settings: Ambil data lama + update baru
+    setIsFetching(true);
     const mergedSettings = {
       ...(currentUser.app_settings || {}),
       ...settingsUpdate,
     };
 
-    // Update state lokal untuk transisi instan
-    const updatedUser = { 
+    const finalUserObject = { 
       ...currentUser, 
       ...userData, 
       status: newRole, 
       app_settings: mergedSettings 
     };
 
-    setCurrentUser(updatedUser);
+    // Update Lokal instan (Optimistic)
+    setCurrentUser(finalUserObject);
     setAccountRole(newRole);
 
-    // Kirim ke Database (Source of Truth)
     try {
-      const { error } = await supabase.from('users').update({
+      // Menggunakan UPSERT agar data tersimpan meski user belum terdaftar secara resmi di auth
+      const { error } = await supabase.from('users').upsert({
+        id: currentUser.id,
+        email: userData.email || currentUser.email,
         name: userData.name || currentUser.name,
         avatar_url: userData.avatar_url || currentUser.avatar_url,
         status: newRole,
         app_settings: mergedSettings,
         updated_at: new Date().toISOString()
-      }).eq('id', currentUser.id);
+      }, { onConflict: 'id' });
 
       if (error) throw error;
-      console.log("Settings synced to cloud!");
+      console.log("✅ Data berhasil disinkronkan ke Supabase Cloud");
     } catch (err) {
-      console.error("Cloud sync failed:", err);
+      console.error("❌ Gagal sinkronisasi cloud:", err);
+    } finally {
+      setIsFetching(false);
     }
   };
 
@@ -270,7 +261,7 @@ const App: React.FC = () => {
     }
   };
 
-  if (!currentUser) return <div className="h-screen flex items-center justify-center font-heading text-xl">Loading Session...</div>;
+  if (!currentUser) return <div className="h-screen flex items-center justify-center font-heading text-xl">Menghubungkan ke Cloud...</div>;
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const activeWorkspace = workspaces.find(w => w.type === 'team') || workspaces[0] || null;
@@ -460,5 +451,4 @@ const App: React.FC = () => {
   );
 };
 
-// Menambahkan export default agar komponen App dapat diimpor di index.tsx
 export default App;
