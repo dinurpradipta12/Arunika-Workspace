@@ -27,43 +27,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen, onClose, user, role, notificationsEnabled, onSaveProfile, googleAccessToken, setGoogleAccessToken 
 }) => {
   const [expandedSection, setExpandedSection] = useState<'profile' | 'app' | 'branding' | null>('profile');
-  const [tempNotifications, setTempNotifications] = useState(notificationsEnabled);
   const [isSyncing, setIsSyncing] = useState(false);
   
-  // Profile Snapshots
-  const [tempName, setTempName] = useState(user.name);
-  const [tempEmail, setTempEmail] = useState(user.email);
-  const [tempAvatar, setTempAvatar] = useState(user.avatar_url);
-  const [tempRole, setTempRole] = useState(role);
-
-  // Branding Snapshots
-  const [tempAppName, setTempAppName] = useState(user.app_settings?.appName || 'TaskPlay');
-  const [tempAppLogo, setTempAppLogo] = useState(user.app_settings?.appLogo || '');
-  const [tempFavicon, setTempAppFavicon] = useState(user.app_settings?.appFavicon || '');
+  // State sementara untuk Batch Saving
+  const [tempName, setTempName] = useState('');
+  const [tempEmail, setTempEmail] = useState('');
+  const [tempAvatar, setTempAvatar] = useState('');
+  const [tempRole, setTempRole] = useState('');
+  const [tempAppName, setTempAppName] = useState('');
+  const [tempAppLogo, setTempAppLogo] = useState('');
+  const [tempFavicon, setTempFavicon] = useState('');
+  const [tempNotifications, setTempNotifications] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const faviconInputRef = useRef<HTMLInputElement>(null);
   const calendarService = useRef<GoogleCalendarService | null>(null);
 
+  // Inisialisasi state sementara dari data asli saat modal dibuka
   useEffect(() => {
     if (isOpen) {
       calendarService.current = new GoogleCalendarService((token) => {
         setGoogleAccessToken(token);
-        // Auto-sync token ke cloud saat didapat
-        onSaveProfile({}, tempRole, { googleAccessToken: token });
       });
-      // Sync local state dengan prop terbaru dari App.tsx (Data Cloud)
-      setTempNotifications(notificationsEnabled);
-      setTempName(user.name);
-      setTempEmail(user.email);
-      setTempAvatar(user.avatar_url);
-      setTempRole(role);
+      
+      setTempName(user.name || '');
+      setTempEmail(user.email || '');
+      setTempAvatar(user.avatar_url || '');
+      setTempRole(role || 'Owner');
       setTempAppName(user.app_settings?.appName || 'TaskPlay');
       setTempAppLogo(user.app_settings?.appLogo || '');
-      setTempAppFavicon(user.app_settings?.appFavicon || '');
+      setTempFavicon(user.app_settings?.appFavicon || '');
+      setTempNotifications(user.app_settings?.notificationsEnabled ?? true);
     }
-  }, [isOpen, user, role, notificationsEnabled]);
+  }, [isOpen, user, role]);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -81,7 +78,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       reader.onload = () => {
         const base64 = reader.result as string;
         if (type === 'logo') setTempAppLogo(base64);
-        else setTempAppFavicon(base64);
+        else setTempFavicon(base64);
       };
       reader.readAsDataURL(file);
     }
@@ -90,14 +87,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleFinalSave = async () => {
     setIsSyncing(true);
     
-    // Siapkan payload sinkronisasi lengkap
+    // Kumpulkan semua perubahan ke dalam satu objek settings
     const finalSettings = {
       appName: tempAppName,
       appLogo: tempAppLogo,
-      // Memperbaiki pemanggilan variabel dari tempAppFavicon menjadi tempFavicon sesuai definisi state di baris 53
       appFavicon: tempFavicon,
       notificationsEnabled: tempNotifications,
-      googleAccessToken: googleAccessToken
+      googleAccessToken: googleAccessToken // Simpan token juga jika ada
     };
 
     const finalProfile = {
@@ -106,11 +102,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       avatar_url: tempAvatar
     };
 
-    // Panggil fungsi sinkronisasi utama di App.tsx
-    await onSaveProfile(finalProfile, tempRole, finalSettings);
-    
-    setIsSyncing(false);
-    onClose();
+    try {
+      // Panggil fungsi sinkronisasi utama (App.tsx handleSaveProfile)
+      await onSaveProfile(finalProfile, tempRole, finalSettings);
+      onClose();
+    } catch (error) {
+      console.error("Save error:", error);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -127,7 +127,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             <div>
               <h2 className="text-2xl font-heading text-slate-900">Konfigurasi Sistem</h2>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-800/60">Semua perubahan disinkronkan ke Cloud</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-800/60">Simpan semua perubahan ke Cloud</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-black/10 rounded-xl transition-colors">
@@ -279,7 +279,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             onClick={handleFinalSave}
             disabled={isSyncing}
           >
-            {isSyncing ? <RefreshCw size={18} className="animate-spin" /> : 'Terapkan & Sinkronkan'}
+            {isSyncing ? <RefreshCw size={18} className="animate-spin" /> : 'Simpan & Terapkan'}
           </Button>
         </div>
       </div>

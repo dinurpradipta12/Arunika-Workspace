@@ -61,7 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  const appName = customBranding?.name || 'TaskPlay';
+  const appName = customBranding?.name || 'TaskPlay Management';
   const appLogo = customBranding?.logo;
 
   const getGreeting = () => {
@@ -91,26 +91,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex flex-col h-full w-72 shrink-0">
         {/* Branding & Profil Section */}
         <div className="p-6 shrink-0 space-y-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               {appLogo ? (
-                <div className="w-12 h-12 shrink-0 overflow-hidden rounded-xl">
-                  <img src={appLogo} className="w-full h-full object-contain" alt="App Logo" />
+                <div className="w-16 h-16 shrink-0 flex items-center justify-center">
+                  <img src={appLogo} className="max-w-full max-h-full object-contain" alt="App Logo" />
                 </div>
               ) : (
-                <div className="w-12 h-12 bg-accent rounded-xl border-2 border-slate-800 shadow-pop flex items-center justify-center text-white shrink-0">
-                  <CheckSquare size={26} strokeWidth={3} />
+                <div className="w-14 h-14 bg-accent rounded-2xl border-2 border-slate-800 shadow-pop flex items-center justify-center text-white shrink-0">
+                  <CheckSquare size={30} strokeWidth={3} />
                 </div>
               )}
               
               <div className="min-w-0 flex-1">
-                <h1 className="text-xl font-heading tracking-tight text-foreground leading-tight whitespace-normal break-words overflow-hidden">
+                <h1 className="text-3xl font-heading tracking-tighter text-foreground leading-[1] whitespace-normal break-words overflow-hidden">
                   {appName}
                 </h1>
-                <p className="text-[10px] font-black uppercase text-accent tracking-widest mt-0.5">Workspace</p>
               </div>
             </div>
-            <button className="lg:hidden p-1 hover:bg-muted rounded-lg" onClick={() => setSidebarOpen(false)}>
+            <button className="lg:hidden p-1 hover:bg-muted rounded-lg ml-2" onClick={() => setSidebarOpen(false)}>
               <X size={20} />
             </button>
           </div>

@@ -52,12 +52,12 @@ const App: React.FC = () => {
   
   const [sourceColors, setSourceColors] = useState<Record<string, string>>({});
   const [visibleSources, setVisibleSources] = useState<string[]>([]);
-  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(true);
   
   const [googleEvents, setGoogleEvents] = useState<Task[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [isApiConnected, setIsApiConnected] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   
   const taskChannelRef = useRef<any>(null);
   const userChannelRef = useRef<any>(null);
@@ -69,7 +69,27 @@ const App: React.FC = () => {
   const [accountRole, setAccountRole] = useState('Owner');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Sync Branding ke Browser Metadata
+  // Connection Quality Logic
+  const getConnectionStatus = () => {
+    if (!isOnline) return { color: 'text-secondary', label: 'Offline', icon: <WifiOff size={16} /> };
+    if (isFetching) return { color: 'text-tertiary', label: 'Sinkronisasi...', icon: <Wifi size={16} className="animate-pulse" /> };
+    if (isApiConnected && isRealtimeConnected) return { color: 'text-quaternary', label: 'Sangat Baik', icon: <Wifi size={16} /> };
+    if (isApiConnected) return { color: 'text-tertiary', label: 'Cukup Baik', icon: <Wifi size={16} /> };
+    return { color: 'text-secondary', label: 'Buruk', icon: <WifiOff size={16} /> };
+  };
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => { setIsOnline(false); setIsApiConnected(false); setIsRealtimeConnected(false); };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Sinkronisasi Branding
   useEffect(() => {
     if (currentUser?.app_settings?.appName) {
       document.title = currentUser.app_settings.appName;
@@ -83,41 +103,46 @@ const App: React.FC = () => {
 
   const fetchAndSubscribeUser = useCallback(async (userId: string) => {
     setIsFetching(true);
-    const { data: userData, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .single();
+    try {
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-    if (!error && userData) {
-      setCurrentUser(userData as User);
-      setAccountRole(userData.status || 'Owner');
-    } else {
-      console.warn("User not found in DB, creating local session for ID:", userId);
-      const defaultUser = {
-        id: userId,
-        email: 'user@taskplay.io',
-        name: 'New Player',
-        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
-        status: 'Owner',
-        app_settings: { appName: 'TaskPlay' },
-        created_at: new Date().toISOString()
-      };
-      setCurrentUser(defaultUser);
+      if (!error && userData) {
+        setCurrentUser(userData as User);
+        setAccountRole(userData.status || 'Owner');
+        setIsApiConnected(true);
+      } else {
+        // Fallback default user if not in DB yet
+        const defaultUser = {
+          id: userId,
+          email: 'user@taskplay.io',
+          name: 'New Player',
+          avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
+          status: 'Owner',
+          app_settings: { appName: 'TaskPlay' },
+          created_at: new Date().toISOString()
+        };
+        setCurrentUser(defaultUser as any);
+      }
+
+      if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
+      userChannelRef.current = supabase
+        .channel(`sync-user-${userId}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${userId}` }, (payload) => {
+          setCurrentUser(payload.new as User);
+          if (payload.new.status) setAccountRole(payload.new.status);
+        })
+        .subscribe();
+    } catch (e) {
+      setIsApiConnected(false);
+    } finally {
+      setIsFetching(false);
     }
-
-    if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
-    userChannelRef.current = supabase
-      .channel(`sync-user-${userId}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${userId}` }, (payload) => {
-        console.log("☁️ Realtime Sync: Data profil diperbarui dari cloud");
-        setCurrentUser(payload.new as User);
-      })
-      .subscribe();
-    setIsFetching(false);
   }, []);
 
-  // Auth Effect: Cek Session saat start
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
@@ -148,14 +173,18 @@ const App: React.FC = () => {
     if (!currentUser) return;
     setIsFetching(true);
     try {
+      // Mencoba akses tabel ringan untuk test koneksi API
       const [{ data: wsData }, { data: tData }] = await Promise.all([
         supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false })
       ]);
-      if (wsData) { setIsApiConnected(true); setWorkspaces(wsData as Workspace[]); }
-      if (tData) { setTasks(tData as Task[]); }
+      
+      // Jika salah satu berhasil, berarti API terhubung
+      setIsApiConnected(true);
+      if (wsData) setWorkspaces(wsData as Workspace[]);
+      if (tData) setTasks(tData as Task[]);
     } catch (err) {
-      console.error("Fetch error:", err);
+      console.error("Supabase connection failed:", err);
       setIsApiConnected(false);
     } finally {
       setIsFetching(false);
@@ -165,28 +194,25 @@ const App: React.FC = () => {
   useEffect(() => {
     if (currentUser && isAuthenticated) {
       fetchData();
+      
       if (taskChannelRef.current) supabase.removeChannel(taskChannelRef.current);
       taskChannelRef.current = supabase
-        .channel('tasks-live')
+        .channel('tasks-live-main')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
           if (payload.eventType === 'INSERT') setTasks(prev => [payload.new as Task, ...prev]);
           else if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
           else if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
         })
-        .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
+        .subscribe((status) => {
+          setIsRealtimeConnected(status === 'SUBSCRIBED');
+        });
     }
   }, [currentUser?.id, isAuthenticated]);
 
   const handleSaveProfile = async (userData: Partial<User>, newRole: string, settingsUpdate?: any) => {
     if (!currentUser) return;
-    
     setIsFetching(true);
     const mergedSettings = { ...currentUser.app_settings, ...settingsUpdate };
-    const finalUser = { ...currentUser, ...userData, status: newRole, app_settings: mergedSettings };
-
-    setCurrentUser(finalUser);
-    setAccountRole(newRole);
-
     try {
       const { data, error } = await supabase.from('users').upsert({
         id: currentUser.id,
@@ -196,11 +222,11 @@ const App: React.FC = () => {
         status: newRole,
         app_settings: mergedSettings,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'id' }).select();
-
-      if (error) throw error;
-    } catch (err) {
-      console.error("❌ Gagal Sinkronisasi Cloud:", err);
+      }).select();
+      if (!error && data) {
+        setCurrentUser(data[0] as User);
+        setAccountRole(data[0].status || 'Owner');
+      }
     } finally {
       setIsFetching(false);
     }
@@ -211,41 +237,25 @@ const App: React.FC = () => {
     await supabase.from('tasks').update({ status }).eq('id', id);
   };
 
-  const handleSaveTask = async (taskData: Partial<Task>) => {
-    if (!currentUser) return;
-    const wsId = taskData.workspace_id || (workspaces[0]?.id || 'ws-1');
-    if (editingTask) await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
-    else await supabase.from('tasks').insert({ ...taskData, workspace_id: wsId, created_by: currentUser.id });
-    setIsNewTaskModalOpen(false);
-    setEditingTask(null);
-  };
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setIsAuthenticated(false);
-    setCurrentUser(null);
   };
 
-  // Loading Screen saat cek Auth
   if (isAuthLoading) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
         <div className="w-16 h-16 border-4 border-slate-800 border-t-accent rounded-full animate-spin mb-4" />
-        <h2 className="font-heading text-xl">Mengecek Sesi...</h2>
+        <h2 className="font-heading text-xl">Inisialisasi Sistem...</h2>
       </div>
     );
   }
 
-  // Auth Guard
-  if (!isAuthenticated) {
-    return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
-  }
-
-  if (!currentUser) return <div className="h-screen flex items-center justify-center font-heading text-xl">Memuat Profil...</div>;
+  if (!isAuthenticated) return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
+  if (!currentUser) return null;
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
-  const activeWorkspace = workspaces.find(w => w.type === 'team') || workspaces[0] || null;
-  const statusColor = isRealtimeConnected ? 'bg-quaternary' : isApiConnected ? 'bg-tertiary' : 'bg-secondary';
+  const connStatus = getConnectionStatus();
 
   return (
     <div className="h-full w-full bg-background overflow-hidden flex justify-center">
@@ -253,27 +263,20 @@ const App: React.FC = () => {
         <NewTaskModal 
           isOpen={isNewTaskModalOpen} 
           onClose={() => setIsNewTaskModalOpen(false)} 
-          onSave={handleSaveTask} 
+          onSave={async (task) => {
+             const { data } = await supabase.from('tasks').insert({ ...task, created_by: currentUser.id });
+             setIsNewTaskModalOpen(false);
+          }} 
           workspaces={workspaces} 
           googleCalendars={googleCalendars}
           initialData={editingTask}
         />
 
         <Sidebar 
-          isOpen={isSidebarOpen}
-          setSidebarOpen={setSidebarOpen}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          selectedTaskId={selectedTaskId}
-          setSelectedTaskId={setSelectedTaskId}
-          isTasksExpanded={isTasksExpanded}
-          setIsTasksExpanded={setIsTasksExpanded}
-          topLevelTasks={tasks.filter(t => !t.parent_id && !t.is_archived)}
-          tasks={tasks}
-          workspaces={workspaces}
-          handleTaskClick={(t) => { setSelectedTaskId(t.id); setActiveTab('tasks'); }}
-          onLogout={handleLogout}
-          currentUser={currentUser}
+          isOpen={isSidebarOpen} setSidebarOpen={setSidebarOpen} activeTab={activeTab} setActiveTab={setActiveTab}
+          selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} isTasksExpanded={isTasksExpanded} setIsTasksExpanded={setIsTasksExpanded}
+          topLevelTasks={tasks.filter(t => !t.parent_id && !t.is_archived)} tasks={tasks} workspaces={workspaces}
+          handleTaskClick={(t) => { setSelectedTaskId(t.id); setActiveTab('tasks'); }} onLogout={handleLogout} currentUser={currentUser}
           customBranding={{ name: currentUser.app_settings?.appName, logo: currentUser.app_settings?.appLogo }}
         />
 
@@ -282,21 +285,16 @@ const App: React.FC = () => {
           onStatusChange={handleStatusChange} 
           onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
           onReschedule={(t) => setReschedulingTask(t)}
-          onDelete={async (id) => { setTasks(prev => prev.filter(t => t.id !== id)); await supabase.from('tasks').delete().eq('id', id); }}
-          onArchive={async (id) => { setTasks(prev => prev.map(t => t.id === id ? { ...t, is_archived: true } : t)); await supabase.from('tasks').update({ is_archived: true }).eq('id', id); }}
+          onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); }}
+          onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); }}
         />
 
         <RescheduleModal task={reschedulingTask} isOpen={!!reschedulingTask} onClose={() => setReschedulingTask(null)} onSave={async (id, date) => { await supabase.from('tasks').update({ due_date: new Date(date).toISOString() }).eq('id', id); }} />
 
         <SettingsModal 
-          isOpen={isSettingsModalOpen} 
-          onClose={() => setIsSettingsModalOpen(false)} 
-          user={currentUser} 
-          role={accountRole}
-          notificationsEnabled={notificationsEnabled}
-          onSaveProfile={handleSaveProfile}
-          googleAccessToken={googleAccessToken}
-          setGoogleAccessToken={setGoogleAccessToken}
+          isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} user={currentUser} role={accountRole}
+          notificationsEnabled={currentUser.app_settings?.notificationsEnabled ?? true} onSaveProfile={handleSaveProfile}
+          googleAccessToken={googleAccessToken} setGoogleAccessToken={setGoogleAccessToken}
         />
 
         <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0">
@@ -308,14 +306,22 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex items-center gap-4">
-              <button onClick={fetchData} className="group flex items-center px-3 py-1.5 rounded-full border-2 border-slate-800 shadow-pop-active bg-white">
-                 <div className={`w-2.5 h-2.5 rounded-full mr-2 ${statusColor}`} />
-                 <span className="text-[10px] font-black uppercase tracking-tighter text-slate-800 mr-1.5">{isFetching ? 'Syncing' : 'Connected'}</span>
-                 <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
+              <button 
+                onClick={fetchData} 
+                className="group flex items-center px-4 py-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-none"
+              >
+                 <div className={`${connStatus.color} mr-2 transition-colors duration-300`}>
+                   {connStatus.icon}
+                 </div>
+                 <div className="flex flex-col items-start leading-none pr-3">
+                   <span className="text-[9px] font-black tracking-tighter text-slate-400">Koneksi</span>
+                   <span className={`text-[10px] font-bold ${connStatus.color} whitespace-nowrap`}>{connStatus.label}</span>
+                 </div>
+                 <RefreshCw size={12} className={`text-slate-300 group-hover:text-accent transition-all ${isFetching ? 'animate-spin text-accent' : ''}`} />
               </button>
               <Button variant="ghost" className="p-2" onClick={() => setIsSettingsModalOpen(true)}><Settings size={20} /></Button>
               <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer" onClick={() => setActiveTab('profile')}>
-                <div className="text-right">
+                <div className="text-right hidden sm:block">
                   <p className="text-xs font-black text-slate-800 leading-none">{currentUser.name}</p>
                   <p className="text-[10px] font-bold text-slate-400 mt-0.5">{currentUser.email}</p>
                 </div>
@@ -327,7 +333,7 @@ const App: React.FC = () => {
           <div className="flex-1 p-8 max-w-7xl mx-auto w-full">
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
-            {activeTab === 'team' && <TeamSpace currentWorkspace={activeWorkspace} currentUser={currentUser} />}
+            {activeTab === 'team' && <TeamSpace currentWorkspace={workspaces.find(w => w.type === 'team') || null} currentUser={currentUser} />}
             {activeTab === 'calendar' && (
               <CalendarView 
                 tasks={tasks} workspaces={workspaces} onTaskClick={setInspectedTask} userEmail={currentUser.email} googleAccessToken={googleAccessToken} onDayClick={() => setIsNewTaskModalOpen(true)}
@@ -354,7 +360,7 @@ const App: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-10">
                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.DONE].map(status => (
                       <div key={status} className="space-y-4">
-                        <h3 className="font-heading text-lg pb-2 border-b-2 border-slate-200">{status.replace('_', ' ')}</h3>
+                        <h3 className="font-heading text-lg pb-2 border-b-2 border-slate-200 uppercase tracking-widest">{status.replace('_', ' ')}</h3>
                         {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).map(task => <TaskItem key={task.id} task={task} onStatusChange={handleStatusChange} onClick={setInspectedTask} />)}
                       </div>
                     ))}
