@@ -33,7 +33,7 @@ import { Task, TaskStatus, TaskPriority, Workspace, User, WorkspaceType } from '
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
 
 const App: React.FC = () => {
-  // LOGIN DINONAKTIFKAN: Status awal diubah ke true
+  // Mode Developer: Bypass Login Sementara
   const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive'>('dashboard');
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -61,25 +61,12 @@ const App: React.FC = () => {
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
 
-  // PROFIL DEFAULT (MOCK) saat login dinonaktifkan
-  const [currentUser, setCurrentUser] = useState<User | null>({
-    id: 'dev-user-01',
-    email: 'dev@taskplay.io',
-    name: 'Developer Mode',
-    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=dev',
-    status: 'Owner',
-    app_settings: {
-      appName: 'TaskPlay Dev',
-      notificationsEnabled: true,
-      visibleSources: [],
-      sourceColors: {}
-    },
-    created_at: new Date().toISOString()
-  });
+  // User State Utama
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [accountRole, setAccountRole] = useState('Owner');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Sync Branding ke Browser Metadata secara Realtime
+  // Sync Branding (Title & Favicon) dari DB ke Browser
   useEffect(() => {
     if (currentUser?.app_settings?.appName) {
       document.title = currentUser.app_settings.appName;
@@ -93,8 +80,7 @@ const App: React.FC = () => {
     }
   }, [currentUser?.app_settings?.appName, currentUser?.app_settings?.appFavicon]);
 
-  const fetchUserProfile = useCallback(async (userId: string, fallbackData?: any) => {
-    // Tetap mencoba fetch jika ada session, tapi jangan paksa logout jika gagal
+  const fetchUserProfile = useCallback(async (userId: string) => {
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('*')
@@ -103,8 +89,44 @@ const App: React.FC = () => {
 
     if (!userError && userData) {
       setCurrentUser(userData as User);
-      if (userData.status) setAccountRole(userData.status);
+      setAccountRole(userData.status || 'Member');
+      if (userData.app_settings) {
+        setNotificationsEnabled(userData.app_settings.notificationsEnabled ?? true);
+        setGoogleAccessToken(userData.app_settings.googleAccessToken || null);
+        setSourceColors(userData.app_settings.sourceColors || {});
+        setVisibleSources(userData.app_settings.visibleSources || []);
+      }
+    } else {
+      // Fallback jika user baru (Pastikan user ID sesuai session)
+      setCurrentUser({
+        id: userId,
+        email: 'user@taskplay.io',
+        name: 'New User',
+        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
+        status: 'Owner',
+        app_settings: { appName: 'TaskPlay' },
+        created_at: new Date().toISOString()
+      });
     }
+  }, []);
+
+  // Setup Realtime untuk Profil User & Sinkronisasi Antar Device
+  const setupUserRealtime = useCallback((userId: string) => {
+    if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
+
+    userChannelRef.current = supabase
+      .channel(`user-sync-${userId}`)
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'users', 
+        filter: `id=eq.${userId}` 
+      }, (payload) => {
+        console.log("Remote changes detected, syncing UI...");
+        const updated = payload.new as User;
+        setCurrentUser(prev => ({ ...prev, ...updated }));
+      })
+      .subscribe();
   }, []);
 
   useEffect(() => {
@@ -112,20 +134,25 @@ const App: React.FC = () => {
       if (session) {
         setIsAuthenticated(true);
         fetchUserProfile(session.user.id);
+        setupUserRealtime(session.user.id);
+      } else {
+        // Fallback untuk bypass login dev mode
+        const devId = 'dev-user-01'; 
+        fetchUserProfile(devId);
+        setupUserRealtime(devId);
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
         setIsAuthenticated(true);
-        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-          fetchUserProfile(session.user.id);
-        }
+        fetchUserProfile(session.user.id);
+        setupUserRealtime(session.user.id);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [fetchUserProfile, setupUserRealtime]);
 
   const fetchData = useCallback(async () => {
     if (!currentUser) return;
@@ -150,12 +177,12 @@ const App: React.FC = () => {
     }
   }, [currentUser?.id]);
 
-  const setupRealtime = useCallback(() => {
+  const setupTaskRealtime = useCallback(() => {
     if (!currentUser) return;
     if (channelRef.current) supabase.removeChannel(channelRef.current);
     
     channelRef.current = supabase
-      .channel('db-global-sync')
+      .channel('tasks-global')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
         if (payload.eventType === 'INSERT') setTasks(prev => [payload.new as Task, ...prev]);
         else if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
@@ -168,7 +195,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (currentUser) {
       fetchData();
-      setupRealtime();
+      setupTaskRealtime();
     }
   }, [currentUser?.id]);
 
@@ -179,7 +206,9 @@ const App: React.FC = () => {
 
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
-    const targetWsId = taskData.workspace_id || (workspaces.length > 0 ? workspaces[0].id : 'ws-dev');
+    const targetWsId = taskData.workspace_id || (workspaces.length > 0 ? workspaces[0].id : null);
+    if (!targetWsId) return;
+
     if (editingTask) {
       await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
     } else {
@@ -189,39 +218,46 @@ const App: React.FC = () => {
     setEditingTask(null);
   };
 
+  // SINKRONISASI DATABASE UTAMA
   const handleSaveProfile = async (userData: Partial<User>, newRole: string, settingsUpdate?: any) => {
     if (!currentUser) return;
     
+    // Merge Settings: Ambil data lama + update baru
     const mergedSettings = {
       ...(currentUser.app_settings || {}),
       ...settingsUpdate,
     };
 
-    const finalUserObject: User = { 
+    // Update state lokal untuk transisi instan
+    const updatedUser = { 
       ...currentUser, 
       ...userData, 
       status: newRole, 
       app_settings: mergedSettings 
     };
 
-    setCurrentUser(finalUserObject);
+    setCurrentUser(updatedUser);
     setAccountRole(newRole);
 
+    // Kirim ke Database (Source of Truth)
     try {
-      await supabase.from('users').update({
+      const { error } = await supabase.from('users').update({
         name: userData.name || currentUser.name,
         avatar_url: userData.avatar_url || currentUser.avatar_url,
         status: newRole,
         app_settings: mergedSettings,
         updated_at: new Date().toISOString()
       }).eq('id', currentUser.id);
+
+      if (error) throw error;
+      console.log("Settings synced to cloud!");
     } catch (err) {
-      console.error("Save profile error:", err);
+      console.error("Cloud sync failed:", err);
     }
   };
 
   const handleLogout = async () => {
-    // Saat login dinonaktifkan, tombol logout hanya akan refresh halaman atau reset state
+    await supabase.auth.signOut();
     window.location.reload();
   };
 
@@ -234,7 +270,8 @@ const App: React.FC = () => {
     }
   };
 
-  // RENDER UTAMA: Login guard dilewati agar langsung menampilkan Dashboard
+  if (!currentUser) return <div className="h-screen flex items-center justify-center font-heading text-xl">Loading Session...</div>;
+
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const activeWorkspace = workspaces.find(w => w.type === 'team') || workspaces[0] || null;
   const topLevelTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
@@ -265,9 +302,10 @@ const App: React.FC = () => {
           workspaces={workspaces}
           handleTaskClick={handleTaskClick}
           onLogout={handleLogout}
+          currentUser={currentUser}
           customBranding={{
-            name: currentUser?.app_settings?.appName,
-            logo: currentUser?.app_settings?.appLogo
+            name: currentUser.app_settings?.appName,
+            logo: currentUser.app_settings?.appLogo
           }}
         />
 
@@ -299,7 +337,7 @@ const App: React.FC = () => {
         <SettingsModal 
           isOpen={isSettingsModalOpen} 
           onClose={() => setIsSettingsModalOpen(false)} 
-          user={currentUser!} 
+          user={currentUser} 
           role={accountRole}
           notificationsEnabled={notificationsEnabled}
           onSaveProfile={handleSaveProfile}
@@ -335,24 +373,24 @@ const App: React.FC = () => {
               </div>
               <div className="flex items-center gap-3 pl-3 sm:pl-4 border-l-2 border-slate-100 cursor-pointer" onClick={() => setActiveTab('profile')}>
                 <div className="hidden lg:block text-right">
-                  <p className="text-xs font-black uppercase tracking-tight text-slate-800">{currentUser?.name}</p>
-                  <p className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{currentUser?.email}</p>
+                  <p className="text-xs font-black uppercase tracking-tight text-slate-800">{currentUser.name}</p>
+                  <p className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{currentUser.email}</p>
                 </div>
-                <img src={currentUser?.avatar_url} className="w-10 h-10 rounded-full border-2 border-slate-800 bg-white object-cover" alt="Avatar" />
+                <img src={currentUser.avatar_url} className="w-10 h-10 rounded-full border-2 border-slate-800 bg-white object-cover" alt="Avatar" />
               </div>
             </div>
           </header>
 
           <div className={`flex-1 flex flex-col min-h-0 p-4 sm:p-8 w-full mx-auto ${activeTab === 'calendar' ? 'max-w-none' : 'max-w-7xl'}`}>
             {activeTab === 'dashboard' && <Dashboard />}
-            {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser!} role={accountRole} />}
+            {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
             {activeTab === 'team' && <TeamSpace currentWorkspace={activeWorkspace} currentUser={currentUser} />}
             {activeTab === 'calendar' && (
               <CalendarView 
                 tasks={tasks} 
                 workspaces={workspaces} 
                 onTaskClick={(t) => setInspectedTask(t)} 
-                userEmail={currentUser?.email || ''} 
+                userEmail={currentUser.email} 
                 googleAccessToken={googleAccessToken} 
                 onDayClick={(d) => setIsNewTaskModalOpen(true)}
                 sourceColors={sourceColors}
@@ -422,4 +460,5 @@ const App: React.FC = () => {
   );
 };
 
+// Menambahkan export default agar komponen App dapat diimpor di index.tsx
 export default App;

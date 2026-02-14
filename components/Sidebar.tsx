@@ -1,4 +1,5 @@
-import React from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { 
   LayoutGrid, 
   CheckSquare, 
@@ -10,9 +11,10 @@ import {
   X, 
   Layers, 
   FolderArchive, 
-  ChevronDown 
+  ChevronDown,
+  Clock as ClockIcon
 } from 'lucide-react';
-import { Task, Workspace, WorkspaceType, TaskPriority } from '../types';
+import { Task, Workspace, WorkspaceType, User } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -28,6 +30,7 @@ interface SidebarProps {
   workspaces: Workspace[];
   handleTaskClick: (task: Task) => void;
   onLogout: () => void;
+  currentUser: User | null;
   customBranding?: {
     name?: string;
     logo?: string;
@@ -48,10 +51,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
   workspaces,
   handleTaskClick,
   onLogout,
+  currentUser,
   customBranding
 }) => {
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Update jam setiap detik
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const appName = customBranding?.name || 'TaskPlay';
   const appLogo = customBranding?.logo;
+
+  // Logika Ucapan Waktu
+  const getGreeting = () => {
+    const hour = currentTime.getHours();
+    if (hour >= 5 && hour < 11) return 'Pagi';
+    if (hour >= 11 && hour < 15) return 'Siang';
+    if (hour >= 15 && hour < 18) return 'Sore';
+    return 'Malam';
+  };
+
+  // Format Jam 12-Jam
+  const formattedTime = currentTime.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
 
   return (
     <aside className={`
@@ -63,23 +92,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
       lg:sticky lg:top-0 shrink-0
     `}>
       <div className="flex flex-col h-full w-72 shrink-0">
-        {/* Header - Fixed Height */}
-        <div className="p-6 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-accent rounded-xl border-2 border-slate-800 shadow-pop flex items-center justify-center text-white shrink-0 overflow-hidden">
-                {appLogo ? (
-                  <img src={appLogo} className="w-full h-full object-contain p-1" alt="Logo" />
-                ) : (
-                  <CheckSquare size={24} strokeWidth={3} />
-                )}
+        {/* Branding & Profil Section */}
+        <div className="p-6 shrink-0 space-y-4">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              {/* Logo Area: Jika ada logo kustom, hilangkan background accent */}
+              {appLogo ? (
+                <div className="w-12 h-12 shrink-0 overflow-hidden rounded-xl">
+                  <img src={appLogo} className="w-full h-full object-contain" alt="App Logo" />
+                </div>
+              ) : (
+                <div className="w-12 h-12 bg-accent rounded-xl border-2 border-slate-800 shadow-pop flex items-center justify-center text-white shrink-0">
+                  <CheckSquare size={26} strokeWidth={3} />
+                </div>
+              )}
+              
+              <div className="min-w-0 flex-1">
+                <h1 className="text-xl font-heading tracking-tight text-foreground leading-tight whitespace-normal break-words">
+                  {appName}
+                </h1>
+                <p className="text-[10px] font-black uppercase text-accent tracking-widest mt-0.5">Workspace</p>
               </div>
-              <h1 className="text-2xl font-heading tracking-tight text-foreground truncate max-w-[160px]">{appName}</h1>
             </div>
             <button className="lg:hidden p-1 hover:bg-muted rounded-lg" onClick={() => setSidebarOpen(false)}>
               <X size={20} />
             </button>
           </div>
+
+          {/* User Greeting Area */}
+          <div className="bg-slate-50 border-2 border-slate-800 rounded-2xl p-4 shadow-pop-active transition-all hover:bg-white group">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">Halo, {currentUser?.name?.split(' ')[0]}!</span>
+              <span className="text-lg font-heading text-slate-800 leading-none mt-1">Selamat {getGreeting()}</span>
+              
+              <div className="flex items-center gap-2 mt-3 pt-3 border-t-2 border-slate-100 group-hover:border-slate-800/10 transition-colors">
+                <ClockIcon size={14} className="text-secondary" />
+                <span className="text-sm font-black font-mono text-slate-600 tracking-wider">
+                  {formattedTime}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Divider Utama */}
+        <div className="px-6">
+          <div className="h-1 bg-slate-800 rounded-full w-full mb-4 opacity-10" />
         </div>
 
         {/* Navigation - Scrollable Area */}
@@ -171,7 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Footer - Pinned at Bottom (Clean & Compact) */}
+        {/* Footer */}
         <div className="shrink-0 px-6 py-4 mt-auto">
           <button 
             onClick={onLogout} 
