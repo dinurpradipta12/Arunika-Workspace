@@ -23,7 +23,12 @@ export class GoogleCalendarService {
       this.tokenClient = window.google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
         scope: 'https://www.googleapis.com/auth/calendar.events.readonly',
+        prompt: 'consent', // Explicitly request consent to avoid access_denied errors
         callback: (response: any) => {
+          if (response.error) {
+            console.error("Google Auth Error:", response.error);
+            return;
+          }
           if (response.access_token) {
             onTokenReceived(response.access_token);
           }
@@ -52,7 +57,7 @@ export class GoogleCalendarService {
       );
       
       if (!response.ok) {
-        throw new Error('Failed to fetch calendar events');
+        throw new Error(`Failed to fetch calendar events: ${response.statusText}`);
       }
 
       const data = await response.json();
