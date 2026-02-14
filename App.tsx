@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   CircleDashed,
   Archive,
+  Loader2
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -33,6 +34,10 @@ import { Task, TaskStatus, TaskPriority, Workspace, User, WorkspaceType } from '
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
 
 const App: React.FC = () => {
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive'>('dashboard');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -88,11 +93,11 @@ const App: React.FC = () => {
       setCurrentUser(userData as User);
       setAccountRole(userData.status || 'Owner');
     } else {
-      console.warn("User not found in DB, creating local session...");
+      console.warn("User not found in DB, creating local session for ID:", userId);
       const defaultUser = {
         id: userId,
-        email: 'dev@taskplay.io',
-        name: 'Developer User',
+        email: 'user@taskplay.io',
+        name: 'New Player',
         avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
         status: 'Owner',
         app_settings: { appName: 'TaskPlay' },
@@ -112,10 +117,31 @@ const App: React.FC = () => {
     setIsFetching(false);
   }, []);
 
+  // Auth Effect: Cek Session saat start
   useEffect(() => {
-    const targetId = 'dev-user-01'; // Selalu gunakan ID dev yang sama agar sinkron
-    fetchAndSubscribeUser(targetId);
-    return () => { if (userChannelRef.current) supabase.removeChannel(userChannelRef.current); };
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setIsAuthenticated(true);
+        fetchAndSubscribeUser(session.user.id);
+      }
+      setIsAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        setIsAuthenticated(true);
+        fetchAndSubscribeUser(session.user.id);
+      } else {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+      }
+      setIsAuthLoading(false);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
+    };
   }, [fetchAndSubscribeUser]);
 
   const fetchData = useCallback(async () => {
@@ -137,7 +163,7 @@ const App: React.FC = () => {
   }, [currentUser?.id]);
 
   useEffect(() => {
-    if (currentUser) {
+    if (currentUser && isAuthenticated) {
       fetchData();
       if (taskChannelRef.current) supabase.removeChannel(taskChannelRef.current);
       taskChannelRef.current = supabase
@@ -149,9 +175,8 @@ const App: React.FC = () => {
         })
         .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, isAuthenticated]);
 
-  // SINKRONISASI CLOUD (Upsert Logic)
   const handleSaveProfile = async (userData: Partial<User>, newRole: string, settingsUpdate?: any) => {
     if (!currentUser) return;
     
@@ -159,7 +184,6 @@ const App: React.FC = () => {
     const mergedSettings = { ...currentUser.app_settings, ...settingsUpdate };
     const finalUser = { ...currentUser, ...userData, status: newRole, app_settings: mergedSettings };
 
-    // Update Lokal (Instan)
     setCurrentUser(finalUser);
     setAccountRole(newRole);
 
@@ -175,10 +199,8 @@ const App: React.FC = () => {
       }, { onConflict: 'id' }).select();
 
       if (error) throw error;
-      console.log("✅ Berhasil Sinkronisasi Cloud:", data);
     } catch (err) {
-      console.error("❌ Gagal Sinkronisasi Cloud. Cek RLS Policy di Supabase.", err);
-      alert("Gagal menyimpan ke cloud. Pastikan tabel 'users' mengizinkan UPSERT.");
+      console.error("❌ Gagal Sinkronisasi Cloud:", err);
     } finally {
       setIsFetching(false);
     }
@@ -198,9 +220,28 @@ const App: React.FC = () => {
     setEditingTask(null);
   };
 
-  const handleLogout = () => window.location.reload();
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+  };
 
-  if (!currentUser) return <div className="h-screen flex items-center justify-center font-heading text-xl">Connecting...</div>;
+  // Loading Screen saat cek Auth
+  if (isAuthLoading) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
+        <div className="w-16 h-16 border-4 border-slate-800 border-t-accent rounded-full animate-spin mb-4" />
+        <h2 className="font-heading text-xl">Mengecek Sesi...</h2>
+      </div>
+    );
+  }
+
+  // Auth Guard
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
+  }
+
+  if (!currentUser) return <div className="h-screen flex items-center justify-center font-heading text-xl">Memuat Profil...</div>;
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const activeWorkspace = workspaces.find(w => w.type === 'team') || workspaces[0] || null;
@@ -275,7 +316,8 @@ const App: React.FC = () => {
               <Button variant="ghost" className="p-2" onClick={() => setIsSettingsModalOpen(true)}><Settings size={20} /></Button>
               <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer" onClick={() => setActiveTab('profile')}>
                 <div className="text-right">
-                  <p className="text-xs font-black uppercase text-slate-800">{currentUser.name}</p>
+                  <p className="text-xs font-black text-slate-800 leading-none">{currentUser.name}</p>
+                  <p className="text-[10px] font-bold text-slate-400 mt-0.5">{currentUser.email}</p>
                 </div>
                 <img src={currentUser.avatar_url} className="w-10 h-10 rounded-full border-2 border-slate-800 bg-white" alt="Avatar" />
               </div>
