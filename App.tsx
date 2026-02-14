@@ -76,16 +76,13 @@ const App: React.FC = () => {
   // Fetch initial data from Supabase
   const fetchData = useCallback(async () => {
     setIsFetching(true);
-    console.log("Supabase: Attempting to connect...");
     try {
-      // Test basic connectivity by fetching workspaces
       const { data: wsData, error: wsError } = await supabase.from('workspaces').select('*');
       
       if (wsError) {
         console.error("Supabase API Error:", wsError.message);
         setIsApiConnected(false);
       } else {
-        console.log("Supabase: API Connected successfully.");
         setIsApiConnected(true);
         if (wsData && wsData.length > 0) setWorkspaces(wsData as Workspace[]);
         else setWorkspaces(mockData.workspaces as Workspace[]);
@@ -108,11 +105,9 @@ const App: React.FC = () => {
       supabase.removeChannel(channelRef.current);
     }
 
-    console.log("Supabase: Initializing Realtime Channels...");
     const channel = supabase
       .channel('db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-        console.log("Realtime Task Change:", payload.eventType);
         if (payload.eventType === 'INSERT') {
           setTasks(prev => [...prev, payload.new as Task]);
         } else if (payload.eventType === 'UPDATE') {
@@ -131,7 +126,6 @@ const App: React.FC = () => {
         }
       })
       .subscribe((status) => {
-        console.log("Supabase Realtime Status:", status);
         if (status === 'SUBSCRIBED') {
           setIsRealtimeConnected(true);
         } else {
@@ -354,10 +348,11 @@ const App: React.FC = () => {
             ? 'w-72 translate-x-0 border-r-4 border-slate-800 shadow-2xl lg:shadow-none' 
             : 'w-72 -translate-x-full lg:w-0 lg:translate-x-0 lg:border-r-0'
           }
-          lg:relative lg:translate-x-0 overflow-hidden
+          lg:relative lg:translate-x-0 h-full overflow-hidden
         `}>
-          <div className="flex flex-col h-full w-72 overflow-y-auto scrollbar-hide shrink-0">
-            <div className="p-6">
+          <div className="flex flex-col h-full w-72 shrink-0">
+            {/* Top Section: Nav and Content (Scrollable) */}
+            <div className="flex-1 overflow-y-auto scrollbar-hide p-6">
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-accent rounded-xl border-2 border-slate-800 shadow-pop flex items-center justify-center text-white shrink-0">
@@ -408,7 +403,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="space-y-1">
                   {workspaces.map(ws => (
-                    <button key={ws.id} className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-semibold">
+                    <button key={ws.id} className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-semibold text-left">
                       <div className={`w-2 h-2 rounded-full ${ws.type === WorkspaceType.PERSONAL ? 'bg-quaternary' : 'bg-secondary'}`} />
                       {ws.name}
                     </button>
@@ -417,7 +412,8 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-auto p-6 bg-slate-50 border-t-2 border-slate-100 space-y-4">
+            {/* Bottom Section: Logout (Fixed) */}
+            <div className="shrink-0 p-6 bg-slate-50 border-t-2 border-slate-100">
               <button onClick={() => setIsAuthenticated(false)} className="w-full bg-secondary border-2 border-slate-800 rounded-xl py-3 px-4 shadow-pop flex items-center justify-center gap-2 transition-all hover:bg-secondary/90 hover:-translate-y-0.5 active:translate-y-0 text-white font-black uppercase">
                 <LogOut size={20} strokeWidth={3} />
                 <span>Logout Account</span>
@@ -440,7 +436,6 @@ const App: React.FC = () => {
             
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 sm:gap-2 mr-2">
-                {/* Improved Connection Indicator & Sync Button */}
                 <button 
                   onClick={handleForceSync}
                   disabled={isFetching}
@@ -590,12 +585,12 @@ const NavItem: React.FC<any> = ({ icon, label, active, onClick }) => (
 );
 
 const SubNavItem: React.FC<any> = ({ label, active, onClick, priority, count = 0 }) => (
-  <button onClick={onClick} className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all group ${active ? 'bg-accent/10 text-accent border-l-4 border-accent pl-2' : 'text-mutedForeground hover:text-foreground hover:bg-muted'}`}>
+  <button onClick={onClick} className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all group text-left ${active ? 'bg-accent/10 text-accent border-l-4 border-accent pl-2' : 'text-mutedForeground hover:text-foreground hover:bg-muted'}`}>
     <div className="flex items-center gap-2 min-w-0">
       <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${priority === 'high' ? 'bg-secondary' : priority === 'medium' ? 'bg-tertiary' : 'bg-quaternary'}`} />
-      <span className="truncate text-left">{label}</span>
+      <span className="truncate">{label}</span>
     </div>
-    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded transition-colors ${active ? 'bg-slate-800 text-white border-2 border-slate-800' : 'bg-slate-100 border border-slate-200'}`}>{count}</span>
+    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded transition-colors shrink-0 ${active ? 'bg-slate-800 text-white border-2 border-slate-800' : 'bg-slate-100 border border-slate-200'}`}>{count}</span>
   </button>
 );
 
