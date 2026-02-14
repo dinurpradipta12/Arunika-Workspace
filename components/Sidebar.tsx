@@ -56,7 +56,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Update jam setiap detik
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -65,7 +64,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const appName = customBranding?.name || 'TaskPlay';
   const appLogo = customBranding?.logo;
 
-  // Logika Ucapan Waktu
   const getGreeting = () => {
     const hour = currentTime.getHours();
     if (hour >= 5 && hour < 11) return 'Pagi';
@@ -74,7 +72,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return 'Malam';
   };
 
-  // Format Jam 12-Jam
   const formattedTime = currentTime.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
@@ -96,7 +93,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-6 shrink-0 space-y-4">
           <div className="flex items-start justify-between">
             <div className="flex items-start gap-3 min-w-0 flex-1">
-              {/* Logo Area: Jika ada logo kustom, hilangkan background accent */}
               {appLogo ? (
                 <div className="w-12 h-12 shrink-0 overflow-hidden rounded-xl">
                   <img src={appLogo} className="w-full h-full object-contain" alt="App Logo" />
@@ -108,7 +104,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
               
               <div className="min-w-0 flex-1">
-                <h1 className="text-xl font-heading tracking-tight text-foreground leading-tight whitespace-normal break-words">
+                <h1 className="text-xl font-heading tracking-tight text-foreground leading-tight whitespace-normal break-words overflow-hidden">
                   {appName}
                 </h1>
                 <p className="text-[10px] font-black uppercase text-accent tracking-widest mt-0.5">Workspace</p>
@@ -136,106 +132,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Divider Utama */}
-        <div className="px-6">
-          <div className="h-1 bg-slate-800 rounded-full w-full mb-4 opacity-10" />
+        <div className="px-6 mb-4">
+          <div className="h-1 bg-slate-800 rounded-full w-full opacity-10" />
         </div>
 
         {/* Navigation - Scrollable Area */}
         <div className="flex-1 overflow-y-auto scrollbar-hide px-6 pb-6">
           <nav className="space-y-2">
-            <NavItem 
-              icon={<LayoutGrid size={20} />} 
-              label="Dashboard" 
-              active={activeTab === 'dashboard'} 
-              onClick={() => { setActiveTab('dashboard'); setSelectedTaskId(null); }} 
-            />
+            <NavItem icon={<LayoutGrid size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
             
             <div className="space-y-1">
               <button 
                 onClick={() => setIsTasksExpanded(!isTasksExpanded)} 
-                className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'tasks' ? 'bg-accent/5 text-accent border-2 border-slate-800/10' : 'text-mutedForeground hover:bg-muted'}`}
+                className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'tasks' ? 'bg-accent/5 text-accent' : 'text-mutedForeground hover:bg-muted'}`}
               >
                 <div className="flex items-center gap-3">
                   <CheckSquare size={20} className={activeTab === 'tasks' ? 'text-accent' : 'text-slate-400'} />
                   <span>My Tasks</span>
                 </div>
-                <ChevronDown size={16} className={`transition-transform duration-300 ${isTasksExpanded ? 'rotate-180' : ''}`} />
+                <ChevronDown size={16} className={`transition-transform ${isTasksExpanded ? 'rotate-180' : ''}`} />
               </button>
               
               {isTasksExpanded && (
                 <div className="ml-6 space-y-1 pl-2 border-l-2 border-slate-100 animate-in slide-in-from-top-2 duration-200">
-                  <button 
-                    onClick={() => { setActiveTab('tasks'); setSelectedTaskId(null); }} 
-                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-black uppercase tracking-widest transition-colors ${activeTab === 'tasks' && !selectedTaskId ? 'text-accent' : 'text-slate-400 hover:text-slate-600'}`}
-                  >
-                    <Layers size={14} /> All Tasks View
-                  </button>
-                  <div className="pt-2 pb-1">
-                    <span className="text-[9px] font-black uppercase text-slate-400 tracking-tighter px-3">Recent Projects</span>
-                  </div>
+                  <button onClick={() => { setActiveTab('tasks'); setSelectedTaskId(null); }} className="w-full text-left px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600">All Tasks</button>
                   {topLevelTasks.map((task) => (
-                    <SubNavItem 
-                      key={task.id} 
-                      label={task.title} 
-                      active={selectedTaskId === task.id} 
-                      onClick={() => handleTaskClick(task)} 
-                      priority={task.priority} 
-                      count={tasks.filter(t => t.parent_id === task.id && !t.is_archived).length} 
-                    />
+                    <SubNavItem key={task.id} label={task.title} active={selectedTaskId === task.id} onClick={() => { setSelectedTaskId(task.id); setActiveTab('tasks'); }} priority={task.priority} />
                   ))}
                 </div>
               )}
             </div>
 
-            <NavItem 
-              icon={<CalendarIcon size={20} />} 
-              label="Calendar" 
-              active={activeTab === 'calendar'} 
-              onClick={() => { setActiveTab('calendar'); setSelectedTaskId(null); }} 
-            />
-            
-            <NavItem 
-              icon={<Users size={20} />} 
-              label="Team Space" 
-              active={activeTab === 'team'} 
-              onClick={() => { setActiveTab('team'); setSelectedTaskId(null); }} 
-            />
-            
+            <NavItem icon={<CalendarIcon size={20} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
+            <NavItem icon={<Users size={20} />} label="Team Space" active={activeTab === 'team'} onClick={() => setActiveTab('team')} />
             <div className="pt-4 border-t-2 border-slate-50 mt-4">
-              <NavItem 
-                icon={<FolderArchive size={20} />} 
-                label="Archive" 
-                active={activeTab === 'archive'} 
-                onClick={() => { setActiveTab('archive'); setSelectedTaskId(null); }} 
-              />
+              <NavItem icon={<FolderArchive size={20} />} label="Archive" active={activeTab === 'archive'} onClick={() => setActiveTab('archive')} />
             </div>
           </nav>
-
-          <div className="mt-12 mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-mutedForeground px-1">Workspaces</span>
-              <button className="text-accent hover:bg-muted p-1 rounded-md">
-                <Plus size={16} strokeWidth={3} />
-              </button>
-            </div>
-            <div className="space-y-1">
-              {workspaces.map(ws => (
-                <button key={ws.id} className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-semibold text-left">
-                  <div className={`w-2 h-2 rounded-full ${ws.type === WorkspaceType.PERSONAL ? 'bg-quaternary' : 'bg-secondary'}`} />
-                  {ws.name}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Footer */}
         <div className="shrink-0 px-6 py-4 mt-auto">
-          <button 
-            onClick={onLogout} 
-            className="w-full bg-secondary border-2 border-slate-800 rounded-lg py-1.5 px-3 shadow-pop-active flex items-center justify-center gap-2 transition-all hover:bg-secondary/90 hover:-translate-y-0.5 active:translate-y-0 text-white font-black uppercase text-[10px] tracking-widest"
-          >
-            <LogOut size={14} strokeWidth={3} />
+          <button onClick={onLogout} className="w-full bg-secondary border-2 border-slate-800 rounded-lg py-2 px-3 shadow-pop-active flex items-center justify-center gap-2 text-white font-black uppercase text-[10px] tracking-widest">
+            <LogOut size={14} />
             <span>Logout</span>
           </button>
         </div>
@@ -245,17 +184,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 };
 
 const NavItem: React.FC<any> = ({ icon, label, active, onClick }) => (
-  <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all duration-300 ${active ? 'bg-accent text-white shadow-pop border-2 border-slate-800 scale-[1.02]' : 'text-mutedForeground hover:bg-muted'}`}>
-    <span className={active ? 'text-white' : 'text-accent'}>{icon}</span>{label}{active && <ChevronRight size={16} className="ml-auto" />}
+  <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${active ? 'bg-accent text-white shadow-pop border-2 border-slate-800' : 'text-mutedForeground hover:bg-muted'}`}>
+    {icon} {label}
   </button>
 );
 
-const SubNavItem: React.FC<any> = ({ label, active, onClick, priority, count = 0 }) => (
-  <button onClick={onClick} className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all group text-left ${active ? 'bg-accent/10 text-accent border-l-4 border-accent pl-2' : 'text-mutedForeground hover:text-foreground hover:bg-muted'}`}>
-    <div className="flex items-center gap-2 min-w-0 flex-1">
-      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${priority === 'high' ? 'bg-secondary' : priority === 'medium' ? 'bg-tertiary' : 'bg-quaternary'}`} />
-      <span className="truncate">{label}</span>
-    </div>
-    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded transition-colors shrink-0 ${active ? 'bg-slate-800 text-white border-2 border-slate-800' : 'bg-slate-100 border border-slate-200'}`}>{count}</span>
+const SubNavItem: React.FC<any> = ({ label, active, onClick, priority }) => (
+  <button onClick={onClick} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all text-left ${active ? 'text-accent' : 'text-mutedForeground hover:text-foreground'}`}>
+    <div className={`w-1.5 h-1.5 rounded-full ${priority === 'high' ? 'bg-secondary' : 'bg-tertiary'}`} />
+    <span className="truncate">{label}</span>
   </button>
 );
