@@ -92,25 +92,26 @@ export class GoogleCalendarService {
     }
   }
 
-  public async createEvent(accessToken: string, task: any): Promise<any> {
+  public async createEvent(accessToken: string, task: any, calendarId: string = 'primary'): Promise<any> {
     try {
+      const isAllDay = task.is_all_day;
+      const start = isAllDay 
+        ? { date: task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0] }
+        : { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
+      
+      const end = isAllDay 
+        ? { date: task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0] }
+        : { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
+
       const event = {
         summary: task.title,
         description: task.description || 'Task created via TaskPlay',
-        start: {
-          dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date().toISOString(),
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        },
-        end: {
-          dateTime: task.due_date 
-            ? new Date(new Date(task.due_date).getTime() + 3600000).toISOString() 
-            : new Date(Date.now() + 3600000).toISOString(),
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        },
+        start,
+        end,
       };
 
       const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
         {
           method: 'POST',
           headers: {
@@ -129,25 +130,26 @@ export class GoogleCalendarService {
     }
   }
 
-  public async updateEvent(accessToken: string, eventId: string, task: any): Promise<any> {
+  public async updateEvent(accessToken: string, eventId: string, task: any, calendarId: string = 'primary'): Promise<any> {
     try {
+      const isAllDay = task.is_all_day;
+      const start = isAllDay 
+        ? { date: task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0] }
+        : { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
+      
+      const end = isAllDay 
+        ? { date: task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0] }
+        : { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
+
       const event = {
         summary: task.title,
         description: task.description || 'Task updated via TaskPlay',
-        start: {
-          dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date().toISOString(),
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        },
-        end: {
-          dateTime: task.due_date 
-            ? new Date(new Date(task.due_date).getTime() + 3600000).toISOString() 
-            : new Date(Date.now() + 3600000).toISOString(),
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        },
+        start,
+        end,
       };
 
       const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
         {
           method: 'PATCH',
           headers: {

@@ -46,10 +46,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
     const gCalIds = googleCalendars.map(gc => gc.id);
     
     setVisibleWorkspaces(prev => {
-        // Only set if currently empty or if we have new IDs to add
         const allIds = [...new Set([...wsIds, ...gCalIds])];
         if (prev.length === 0) return allIds;
-        // Check for new IDs that aren't in prev
         const newIds = allIds.filter(id => !prev.includes(id));
         if (newIds.length > 0) return [...prev, ...newIds];
         return prev;
@@ -78,11 +76,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
     try {
       const service = new GoogleCalendarService(() => {});
       
-      // 1. Fetch all available calendars
+      // 1. Fetch ALL available calendars
       const calendars = await service.fetchCalendars(googleAccessToken);
       setGoogleCalendars(calendars);
 
-      // 2. Fetch events from ALL calendars
+      // 2. Fetch events from EVERY calendar found
       const allEventsPromises = calendars.map(async (cal) => {
         try {
           const events = await service.fetchEvents(googleAccessToken, cal.id);
@@ -91,7 +89,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
             workspace_id: cal.id, 
             title: event.summary,
             description: event.description || `From Google Calendar: ${cal.summary}`,
-            due_date: event.start.dateTime || event.start.date,
+            due_date: event.end.dateTime || event.end.date,
+            start_date: event.start.dateTime || event.start.date,
+            is_all_day: !!event.start.date,
             priority: TaskPriority.LOW,
             status: TaskStatus.TODO,
             created_by: 'google',
@@ -142,21 +142,30 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
     return days;
   }, [year, month]);
 
-  // Merge local tasks with google events
   const allVisibleTasks = [...tasks, ...googleEvents];
 
   const getTasksForDate = (date: Date) => {
     return allVisibleTasks.filter(t => {
-      // Must be in visible workspace list
       if (!visibleWorkspaces.includes(t.workspace_id)) return false;
       if (!t.due_date) return false;
       
       const taskDate = new Date(t.due_date);
-      return (
-        taskDate.getDate() === date.getDate() &&
-        taskDate.getMonth() === date.getMonth() &&
-        taskDate.getFullYear() === date.getFullYear()
-      );
+      const taskStart = t.start_date ? new Date(t.start_date) : taskDate;
+      
+      // Basic check: if the event ends on this date (or starts on it)
+      const d = date.getDate();
+      const m = date.getMonth();
+      const y = date.getFullYear();
+
+      // Check range or single day
+      const checkRange = (sd: Date, ed: Date) => {
+          const curr = new Date(y, m, d);
+          const start = new Date(sd.getFullYear(), sd.getMonth(), sd.getDate());
+          const end = new Date(ed.getFullYear(), ed.getMonth(), ed.getDate());
+          return curr >= start && curr <= end;
+      };
+
+      return checkRange(taskStart, taskDate);
     });
   };
 
@@ -170,23 +179,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
   }, [allVisibleTasks]);
 
   const getTaskStyles = (task: Task) => {
-    // Determine the background color
-    let bgColor = '#8B5CF6'; // Default Accent
+    let bgColor = '#8B5CF6'; 
     let textColor = '#FFFFFF';
 
     const gCal = googleCalendars.find(c => c.id === task.workspace_id);
     if (gCal) {
         bgColor = gCal.backgroundColor || '#FBBF24';
-        // For Google Calendar colors, we often want dark text for readability
-        // as the backgrounds can be bright or pastel.
-        textColor = '#1E293B';
+        textColor = '#1E293B'; 
     } else {
         const ws = workspaces.find(w => w.id === task.workspace_id);
         if (ws?.type === WorkspaceType.PERSONAL) {
-            bgColor = '#34D399'; // Quaternary
+            bgColor = '#34D399'; 
             textColor = '#1E293B';
         } else {
-            bgColor = '#F472B6'; // Secondary
+            bgColor = '#F472B6'; 
             textColor = '#FFFFFF';
         }
     }
@@ -227,7 +233,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
            </div>
         </div>
 
-        {/* CARD 2: Visibility (Now includes Google Calendar List) */}
+        {/* CARD 2: Visibility */}
         <div className="bg-white border-4 border-slate-800 rounded-3xl p-5 shadow-pop">
           <div className="flex items-center gap-2 mb-4">
             <Layout size={16} className="text-accent" />
@@ -235,7 +241,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
           </div>
           
           <div className="space-y-4">
-            {/* Local Workspaces */}
             <div className="space-y-2">
                 <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100 pb-1">Workspaces</p>
                 {workspaces.map(ws => (
@@ -254,10 +259,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                 ))}
             </div>
 
-            {/* Google Calendars List (Integrated here) */}
             {googleAccessToken && googleCalendars.length > 0 && (
                 <div className="space-y-2 pt-2 border-t border-slate-100">
-                    <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100 pb-1">Google Calendars</p>
+                    <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100 pb-1">Google Accounts</p>
                     {googleCalendars.map(gc => (
                         <label key={gc.id} className="flex items-center justify-between group cursor-pointer hover:translate-x-1 transition-transform">
                             <div className="flex items-center gap-2 min-w-0">
@@ -278,7 +282,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
           </div>
         </div>
 
-        {/* CARD 3: Sync Status & Action */}
+        {/* CARD 3: Sync Status */}
         <div className="bg-slate-800 rounded-3xl p-5 text-white shadow-pop border-4 border-slate-900">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center">
@@ -286,33 +290,24 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
             </div>
             <div className="min-w-0">
               <h3 className="text-[10px] font-black uppercase tracking-widest text-tertiary">Cloud Sync</h3>
-              <p className="text-[9px] font-bold opacity-60 truncate">{googleAccessToken ? userEmail : 'Account Offline'}</p>
+              <p className="text-[9px] font-bold opacity-60 truncate">{googleAccessToken ? userEmail : 'Offline'}</p>
             </div>
           </div>
           
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[9px] font-bold uppercase tracking-widest opacity-60">Connection</span>
-              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md border ${googleAccessToken ? 'bg-quaternary/20 text-quaternary border-quaternary/30' : 'bg-secondary/20 text-secondary border-secondary/30'}`}>
-                {googleAccessToken ? 'Live' : 'No Access'}
-              </span>
-            </div>
-            
-            <div className="h-px bg-white/10 w-full" />
-            
             <button 
               onClick={handleSync}
               disabled={!googleAccessToken || isSyncing}
               className="w-full mt-2 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-white/10 disabled:opacity-30"
             >
-              <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} /> Force Sync
+              <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} /> Force Refresh
             </button>
           </div>
         </div>
       </aside>
 
       {/* MAIN CALENDAR GRID */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white border-4 border-slate-800 rounded-[32px] shadow-pop transition-all hover:shadow-pop-hover mb-10 overflow-hidden h-auto">
+      <div className="flex-1 flex flex-col min-w-0 bg-white border-4 border-slate-800 rounded-[32px] shadow-pop transition-all mb-10 overflow-hidden h-auto">
         <header className="p-4 md:p-6 border-b-4 border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 bg-white relative shrink-0">
           <div className="flex items-center gap-4 self-start">
             <div className="w-12 h-12 bg-accent rounded-2xl border-4 border-slate-800 flex items-center justify-center text-white shadow-pop-active transform -rotate-3 transition-transform hover:rotate-0">
@@ -334,7 +329,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
             <button 
               onClick={handleSync}
               disabled={isSyncing || !googleAccessToken}
-              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-4 border-slate-800 font-black uppercase text-[9px] tracking-widest transition-all ${isSyncing ? 'bg-slate-100 text-slate-400' : 'bg-tertiary text-slate-900 shadow-pop hover:-translate-y-1 active:translate-y-0 disabled:shadow-none disabled:bg-slate-50 disabled:translate-y-0'}`}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-4 border-slate-800 font-black uppercase text-[9px] tracking-widest transition-all ${isSyncing ? 'bg-slate-100 text-slate-400' : 'bg-tertiary text-slate-900 shadow-pop hover:-translate-y-1 active:translate-y-0 disabled:shadow-none disabled:bg-slate-50'}`}
             >
               {isSyncing ? <RefreshCw size={14} className="animate-spin" /> : <CloudLightning size={14} strokeWidth={3} />}
               {isSyncing ? 'Syncing...' : 'Sync All'}
@@ -356,14 +351,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
             
             const isToday = new Date().toDateString() === date.toDateString();
             const dayTasks = getTasksForDate(date);
-            const displayTasks = dayTasks.slice(0, 4); 
+            const displayTasks = dayTasks.slice(0, 5); 
             const remainingCount = dayTasks.length - displayTasks.length;
 
             return (
               <div 
                 key={date.toISOString()} 
                 onClick={() => onDayClick(date)}
-                className={`relative bg-white border-r border-b border-slate-200 p-1.5 flex flex-col gap-1 transition-colors hover:bg-slate-50/80 group cursor-pointer min-h-[110px] h-full overflow-hidden`}
+                className={`relative bg-white border-r border-b border-slate-200 p-1.5 flex flex-col gap-1 transition-colors hover:bg-slate-50/80 group cursor-pointer min-h-[120px] h-full`}
               >
                 <div className="flex items-center justify-between mb-1 shrink-0">
                   <span className={`inline-flex items-center justify-center w-6 h-6 text-[11px] font-black rounded-lg transition-all ${isToday ? 'bg-accent text-white border-2 border-slate-800 shadow-pop-active' : 'text-slate-300 group-hover:text-slate-800'}`}>
@@ -376,7 +371,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                   )}
                 </div>
                 
-                <div className="flex-1 flex flex-col gap-1 overflow-hidden">
+                <div className="flex-1 flex flex-col gap-1">
                   {displayTasks.map(task => {
                     const styles = getTaskStyles(task);
                     const isGoogle = task.id.toString().startsWith('google-');
@@ -385,7 +380,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                       <button
                         key={task.id}
                         onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
-                        className="w-full text-left px-1.5 py-0.5 rounded-lg border-2 shadow-[2px_2px_0px_0px_#1E293B] transition-all hover:-translate-y-0.5 active:translate-y-0 shrink-0 overflow-hidden"
+                        className="w-full text-left px-1.5 py-0.5 rounded-lg border-2 border-slate-800 shadow-[2px_2px_0px_0px_#1E293B] transition-all relative hover:z-[60] hover:scale-[1.05] hover:shadow-[4px_4px_0px_0px_#1E293B] shrink-0 overflow-hidden"
                         style={styles}
                       >
                         <div className="flex items-center gap-1">
@@ -396,7 +391,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                               <div className="w-1 h-1 rounded-full border border-black/20 bg-black/40" />
                             )}
                           </div>
-                          <span className={`text-[8px] font-black leading-tight truncate tracking-tighter ${isGoogle ? '' : 'uppercase'}`}>
+                          <span className="text-[8px] font-black leading-tight truncate tracking-tighter">
                             {task.title}
                           </span>
                         </div>

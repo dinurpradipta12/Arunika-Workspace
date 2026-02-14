@@ -47,11 +47,13 @@ export interface Task {
   title: string;
   description?: string;
   assigned_to?: string;
-  due_date?: string;
-  reminder_time?: string;
+  due_date?: string; // This will act as end date
+  start_date?: string;
+  is_all_day?: boolean;
   priority: TaskPriority;
   status: TaskStatus;
   google_event_id?: string;
+  google_calendar_id?: string;
   created_by: string;
   created_at: string;
   completed_at?: string;
@@ -68,7 +70,6 @@ export interface Notification {
   message: string;
 }
 
-// Added to fix missing type exports in chat features
 export interface MessageReaction {
   id: string;
   emoji: string;

@@ -43,7 +43,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { CalendarView } from './components/CalendarView';
 import { mockData } from './lib/supabase';
 import { Task, TaskStatus, WorkspaceType, TaskPriority, Workspace, User } from './types';
-import { GoogleCalendarService } from './services/googleCalendarService';
+import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
 
 const initialTasks: Task[] = [
   ...mockData.tasks as Task[],
@@ -87,6 +87,7 @@ const App: React.FC = () => {
   
   // Google Auth State
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
 
   // Dynamic User State
   const [currentUser, setCurrentUser] = useState<User>({
@@ -104,6 +105,16 @@ const App: React.FC = () => {
     }
   }, [activeTab, selectedTaskId]);
 
+  // Load Google Calendars if token available
+  useEffect(() => {
+    if (googleAccessToken) {
+      const service = new GoogleCalendarService(() => {});
+      service.fetchCalendars(googleAccessToken).then(setGoogleCalendars);
+    } else {
+      setGoogleCalendars([]);
+    }
+  }, [googleAccessToken]);
+
   if (!isAuthenticated) {
     return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
   }
@@ -120,7 +131,7 @@ const App: React.FC = () => {
     const taskToUpdate = updatedTasks.find(t => t.id === id);
     if (googleAccessToken && taskToUpdate && taskToUpdate.google_event_id) {
       const service = new GoogleCalendarService(() => {});
-      await service.updateEvent(googleAccessToken, taskToUpdate.google_event_id, taskToUpdate);
+      await service.updateEvent(googleAccessToken, taskToUpdate.google_event_id, taskToUpdate, taskToUpdate.google_calendar_id || 'primary');
     }
   };
 
@@ -132,7 +143,7 @@ const App: React.FC = () => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, is_archived: true } : t));
   };
 
-  const handleSaveTask = async (taskData: Partial<Task>) => {
+  const handleSaveTask = async (taskData: Partial<Task>, targetCalendarId?: string) => {
     if (editingTask) {
       const updatedTasks = tasks.map(t => t.id === editingTask.id ? { ...t, ...taskData } : t);
       setTasks(updatedTasks);
@@ -141,12 +152,12 @@ const App: React.FC = () => {
       const taskToSync = updatedTasks.find(t => t.id === editingTask.id);
       if (googleAccessToken && taskToSync && taskToSync.google_event_id) {
         const service = new GoogleCalendarService(() => {});
-        await service.updateEvent(googleAccessToken, taskToSync.google_event_id, taskToSync);
+        await service.updateEvent(googleAccessToken, taskToSync.google_event_id, taskToSync, taskToSync.google_calendar_id || 'primary');
       }
     } else {
       const newTask: Task = {
         id: `t-${Date.now()}`,
-        workspace_id: 'ws-1',
+        workspace_id: taskData.workspace_id || 'ws-1',
         parent_id: selectedTaskId || undefined,
         status: TaskStatus.TODO,
         created_by: currentUser.id,
@@ -155,16 +166,18 @@ const App: React.FC = () => {
         title: taskData.title || 'Untitled Task',
         description: taskData.description,
         due_date: taskData.due_date,
+        start_date: taskData.start_date,
+        is_all_day: taskData.is_all_day,
       };
       
       setTasks(prev => [...prev, newTask]);
 
-      // TWO-WAY SYNC: Automatically create on Google Calendar if connected
-      if (googleAccessToken) {
+      // TWO-WAY SYNC: Automatically create on Google Calendar if connected and target matches
+      if (googleAccessToken && targetCalendarId) {
         const service = new GoogleCalendarService(() => {});
-        const googleEvent = await service.createEvent(googleAccessToken, newTask);
+        const googleEvent = await service.createEvent(googleAccessToken, newTask, targetCalendarId);
         if (googleEvent) {
-          setTasks(prev => prev.map(t => t.id === newTask.id ? { ...t, google_event_id: googleEvent.id } : t));
+          setTasks(prev => prev.map(t => t.id === newTask.id ? { ...t, google_event_id: googleEvent.id, google_calendar_id: targetCalendarId } : t));
         }
       }
     }
@@ -233,6 +246,8 @@ const App: React.FC = () => {
           onSave={handleSaveTask}
           initialData={editingTask}
           defaultDate={preSelectedDate}
+          workspaces={mockData.workspaces as Workspace[]}
+          googleCalendars={googleCalendars}
         />
 
         <SettingsModal 
@@ -357,7 +372,7 @@ const App: React.FC = () => {
                     label="Archive" 
                     active={activeTab === 'archive'} 
                     onClick={() => { setActiveTab('archive'); setSelectedTaskId(null); }} 
-                  />
+                />
                 </div>
               </nav>
 
