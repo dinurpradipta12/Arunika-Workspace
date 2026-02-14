@@ -351,7 +351,7 @@ const App: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 flex flex-col h-full overflow-y-auto overflow-x-hidden min-w-0 transition-all duration-300">
+        <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0 transition-all duration-300">
           <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b-2 border-slate-100 px-4 sm:px-8 py-4 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-4 flex-1 min-w-0">
               <button 
@@ -401,7 +401,7 @@ const App: React.FC = () => {
             </div>
           </header>
 
-          <div className="flex-1 flex flex-col min-h-0 p-4 sm:p-8 max-w-7xl w-full mx-auto overflow-x-hidden">
+          <div className={`flex-1 flex flex-col min-h-0 p-4 sm:p-8 w-full mx-auto ${activeTab === 'calendar' ? 'max-w-none px-4 sm:px-6' : 'max-w-7xl'}`}>
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'profile' && <ProfileView onLogout={() => setIsAuthenticated(false)} user={currentUser} role={accountRole} />}
             {activeTab === 'calendar' && (
@@ -411,6 +411,7 @@ const App: React.FC = () => {
                 onTaskClick={(t) => setInspectedTask(t)}
                 userEmail={currentUser.email}
                 googleAccessToken={googleAccessToken}
+                onDayClick={() => setIsNewTaskModalOpen(true)}
               />
             )}
             
