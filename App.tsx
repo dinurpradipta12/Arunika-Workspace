@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   LayoutGrid, 
   CheckSquare, 
@@ -22,7 +22,9 @@ import {
   FolderArchive,
   ChevronDown,
   Wifi,
-  WifiOff
+  WifiOff,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Dashboard } from './components/Dashboard';
@@ -54,7 +56,12 @@ const App: React.FC = () => {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [preSelectedDate, setPreSelectedDate] = useState<string | undefined>(undefined);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | 'all'>('all');
+  
+  // Realtime & Sync State
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [isApiConnected, setIsApiConnected] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
+  const channelRef = useRef<any>(null);
   
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
@@ -68,57 +75,87 @@ const App: React.FC = () => {
 
   // Fetch initial data from Supabase
   const fetchData = useCallback(async () => {
-    // 1. Fetch Workspaces
-    const { data: wsData } = await supabase.from('workspaces').select('*');
-    if (wsData) setWorkspaces(wsData as Workspace[]);
-    else setWorkspaces(mockData.workspaces as Workspace[]);
+    setIsFetching(true);
+    console.log("Supabase: Attempting to connect...");
+    try {
+      // Test basic connectivity by fetching workspaces
+      const { data: wsData, error: wsError } = await supabase.from('workspaces').select('*');
+      
+      if (wsError) {
+        console.error("Supabase API Error:", wsError.message);
+        setIsApiConnected(false);
+      } else {
+        console.log("Supabase: API Connected successfully.");
+        setIsApiConnected(true);
+        if (wsData && wsData.length > 0) setWorkspaces(wsData as Workspace[]);
+        else setWorkspaces(mockData.workspaces as Workspace[]);
+      }
 
-    // 2. Fetch Tasks
-    const { data: tData } = await supabase.from('tasks').select('*');
-    if (tData) setTasks(tData as Task[]);
+      const { data: tData, error: tError } = await supabase.from('tasks').select('*');
+      if (tError) console.error("Supabase Tasks Error:", tError.message);
+      else if (tData) setTasks(tData as Task[]);
+
+    } catch (err) {
+      console.error("Supabase: Fatal connection error:", err);
+      setIsApiConnected(false);
+    } finally {
+      setTimeout(() => setIsFetching(false), 800);
+    }
   }, []);
+
+  const setupRealtime = useCallback(() => {
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+    }
+
+    console.log("Supabase: Initializing Realtime Channels...");
+    const channel = supabase
+      .channel('db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
+        console.log("Realtime Task Change:", payload.eventType);
+        if (payload.eventType === 'INSERT') {
+          setTasks(prev => [...prev, payload.new as Task]);
+        } else if (payload.eventType === 'UPDATE') {
+          setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
+        } else if (payload.eventType === 'DELETE') {
+          setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setWorkspaces(prev => [...prev, payload.new as Workspace]);
+        } else if (payload.eventType === 'UPDATE') {
+          setWorkspaces(prev => prev.map(ws => ws.id === payload.new.id ? { ...ws, ...payload.new } : ws));
+        } else if (payload.eventType === 'DELETE') {
+          setWorkspaces(prev => prev.filter(ws => ws.id !== payload.old.id));
+        }
+      })
+      .subscribe((status) => {
+        console.log("Supabase Realtime Status:", status);
+        if (status === 'SUBSCRIBED') {
+          setIsRealtimeConnected(true);
+        } else {
+          setIsRealtimeConnected(false);
+        }
+      });
+    
+    channelRef.current = channel;
+  }, []);
+
+  const handleForceSync = () => {
+    fetchData();
+    setupRealtime();
+  };
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchData();
-
-      // Set up REALTIME subscription for tasks
-      const tasksSubscription = supabase
-        .channel('tasks-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setTasks(prev => [...prev, payload.new as Task]);
-          } else if (payload.eventType === 'UPDATE') {
-            setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
-          } else if (payload.eventType === 'DELETE') {
-            setTasks(prev => prev.filter(t => t.id !== payload.old.id));
-          }
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') setIsRealtimeConnected(true);
-          if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsRealtimeConnected(false);
-        });
-
-      // Set up REALTIME subscription for workspaces
-      const workspacesSubscription = supabase
-        .channel('workspaces-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setWorkspaces(prev => [...prev, payload.new as Workspace]);
-          } else if (payload.eventType === 'UPDATE') {
-            setWorkspaces(prev => prev.map(ws => ws.id === payload.new.id ? { ...ws, ...payload.new } : ws));
-          } else if (payload.eventType === 'DELETE') {
-            setWorkspaces(prev => prev.filter(ws => ws.id !== payload.old.id));
-          }
-        })
-        .subscribe();
-
+      setupRealtime();
       return () => {
-        supabase.removeChannel(tasksSubscription);
-        supabase.removeChannel(workspacesSubscription);
+        if (channelRef.current) supabase.removeChannel(channelRef.current);
       };
     }
-  }, [isAuthenticated, fetchData]);
+  }, [isAuthenticated, fetchData, setupRealtime]);
 
   useEffect(() => {
     if (window.innerWidth < 1024) {
@@ -131,7 +168,6 @@ const App: React.FC = () => {
       const service = new GoogleCalendarService(() => {});
       service.fetchCalendars(googleAccessToken).then(calendars => {
         setGoogleCalendars(calendars);
-        // Sync to Supabase table user_calendars
         calendars.forEach(async (cal) => {
           await supabase.from('user_calendars').upsert({
             user_id: currentUser.id,
@@ -254,6 +290,10 @@ const App: React.FC = () => {
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const topLevelTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
   const archivedTasks = tasks.filter(t => t.is_archived);
+
+  // Status Indicator logic
+  const connectionStatus = isRealtimeConnected ? 'Live' : isApiConnected ? 'Connected' : 'Offline';
+  const statusColor = isRealtimeConnected ? 'bg-quaternary' : isApiConnected ? 'bg-tertiary' : 'bg-secondary';
 
   return (
     <div className="h-full w-full bg-background overflow-hidden flex justify-center">
@@ -400,10 +440,28 @@ const App: React.FC = () => {
             
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 sm:gap-2 mr-2">
-                <div className="flex items-center px-2 py-1 rounded-full bg-slate-50 border border-slate-200 shadow-sm mr-1">
-                   <div className={`w-2 h-2 rounded-full mr-2 ${isRealtimeConnected ? 'bg-quaternary animate-pulse' : 'bg-slate-300'}`} />
-                   <span className="text-[9px] font-black uppercase tracking-tighter text-slate-500">{isRealtimeConnected ? 'Live' : 'Offline'}</span>
-                </div>
+                {/* Improved Connection Indicator & Sync Button */}
+                <button 
+                  onClick={handleForceSync}
+                  disabled={isFetching}
+                  title="Click to re-sync & reconnect"
+                  className={`group flex items-center px-2.5 py-1.5 rounded-full border-2 border-slate-800 shadow-pop-active transition-all active:translate-y-0.5 ${isFetching ? 'bg-slate-100' : 'bg-white hover:bg-slate-50'}`}
+                >
+                   <div className={`w-2.5 h-2.5 rounded-full mr-2 transition-colors ${statusColor} ${isRealtimeConnected ? 'animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.6)]' : ''}`} />
+                   <span className="text-[10px] font-black uppercase tracking-tighter text-slate-800 mr-1.5">
+                     {isFetching ? 'Syncing' : connectionStatus}
+                   </span>
+                   {isFetching ? (
+                     <RefreshCw size={12} className="animate-spin text-slate-500" />
+                   ) : isRealtimeConnected ? (
+                     <Wifi size={12} className="text-quaternary" />
+                   ) : isApiConnected ? (
+                     <Wifi size={12} className="text-tertiary" />
+                   ) : (
+                     <WifiOff size={12} className="text-secondary" />
+                   )}
+                </button>
+
                 <Button variant="ghost" className="relative p-2" onClick={() => setNotificationsOpen(!notificationsOpen)}>
                   <Bell size={20} />
                   <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-secondary border-2 border-white rounded-full"></span>

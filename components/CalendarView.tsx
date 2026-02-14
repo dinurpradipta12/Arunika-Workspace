@@ -181,8 +181,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
     const gCal = googleCalendars.find(c => c.id === task.workspace_id);
     if (gCal) {
         bgColor = gCal.backgroundColor || '#FBBF24';
-        // Improved text contrast calculation or fixed high-contrast defaults
-        textColor = '#000000'; // Black text for high readability on most calendar colors
+        textColor = '#000000';
     } else {
         const ws = workspaces.find(w => w.id === task.workspace_id);
         if (ws?.type === WorkspaceType.PERSONAL) {
@@ -207,7 +206,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
       <aside className="w-full xl:w-64 shrink-0 space-y-4">
         
         {/* CARD 1: Task Due Today */}
-        <div className="bg-white border-4 border-slate-800 rounded-[24px] p-5 shadow-pop">
+        <div className="bg-white border-2 border-slate-800 rounded-[24px] p-5 shadow-pop">
            <div className="flex items-center gap-2 mb-4">
              <Zap size={18} className="text-secondary" />
              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Due Today</h3>
@@ -231,7 +230,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
         </div>
 
         {/* CARD 2: Visibility */}
-        <div className="bg-white border-4 border-slate-800 rounded-[24px] p-5 shadow-pop">
+        <div className="bg-white border-2 border-slate-800 rounded-[24px] p-5 shadow-pop">
           <div className="flex items-center gap-2 mb-4">
             <Layout size={16} className="text-accent" />
             <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Visibility</h3>
@@ -280,7 +279,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
         </div>
 
         {/* CARD 3: Sync Status */}
-        <div className="bg-slate-800 rounded-[24px] p-5 text-white shadow-pop border-4 border-slate-900">
+        <div className="bg-slate-800 rounded-[24px] p-5 text-white shadow-pop border-2 border-slate-900">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center">
               <Chrome size={18} className="text-tertiary" />
@@ -304,10 +303,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
       </aside>
 
       {/* MAIN CALENDAR GRID */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white border-4 border-slate-800 rounded-[32px] shadow-pop transition-all mb-10 h-auto">
-        <header className="p-4 md:p-6 border-b-4 border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 bg-white relative shrink-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-white border-2 border-slate-800 rounded-[32px] shadow-pop transition-all mb-10 h-auto overflow-hidden">
+        <header className="p-4 md:p-6 border-b-2 border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 bg-white relative shrink-0">
           <div className="flex items-center gap-4 self-start">
-            <div className="w-12 h-12 bg-accent rounded-2xl border-4 border-slate-800 flex items-center justify-center text-white shadow-pop-active transform -rotate-3 transition-transform hover:rotate-0">
+            <div className="w-12 h-12 bg-accent rounded-2xl border-2 border-slate-800 flex items-center justify-center text-white shadow-pop-active transform -rotate-3 transition-transform hover:rotate-0">
               <CalendarIcon size={24} strokeWidth={3} />
             </div>
             <div>
@@ -326,7 +325,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
             <button 
               onClick={handleSync}
               disabled={isSyncing || !googleAccessToken}
-              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-4 border-slate-800 font-black uppercase text-[9px] tracking-widest transition-all ${isSyncing ? 'bg-slate-100 text-slate-400' : 'bg-tertiary text-slate-900 shadow-pop hover:-translate-y-1 active:translate-y-0 disabled:shadow-none disabled:bg-slate-50'}`}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-slate-800 font-black uppercase text-[9px] tracking-widest transition-all ${isSyncing ? 'bg-slate-100 text-slate-400' : 'bg-tertiary text-slate-900 shadow-pop hover:-translate-y-1 active:translate-y-0 disabled:shadow-none disabled:bg-slate-50'}`}
             >
               {isSyncing ? <RefreshCw size={14} className="animate-spin" /> : <CloudLightning size={14} strokeWidth={3} />}
               {isSyncing ? 'Syncing...' : 'Sync All'}
@@ -334,9 +333,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
           </div>
         </header>
 
-        <div className="grid grid-cols-7 border-b-2 border-slate-100 bg-slate-50/50 shrink-0">
+        <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/50 shrink-0">
           {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-            <div key={day} className="py-2 text-center text-[9px] font-black uppercase tracking-[0.15em] text-slate-400 border-r border-slate-100 last:border-r-0">
+            <div key={day} className="py-2 text-center text-[9px] font-black uppercase tracking-[0.15em] text-slate-400 border-r border-slate-200 last:border-r-0">
               {day}
             </div>
           ))}
@@ -344,7 +343,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
 
         <div className="flex-1 grid grid-cols-7 bg-slate-100/10 auto-rows-fr">
           {calendarDays.map((date, idx) => {
-            if (!date) return <div key={`empty-${idx}`} className="bg-slate-50/30 border-r border-b border-slate-100" />;
+            if (!date) return <div key={`empty-${idx}`} className="bg-slate-50/30 border-r border-b border-slate-200" />;
             
             const isToday = new Date().toDateString() === date.toDateString();
             const dayTasks = getTasksForDate(date);
@@ -371,8 +370,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, workspaces, o
                 <div className="flex-1 flex flex-col gap-1.5 relative">
                   {displayTasks.map(task => {
                     const styles = getTaskStyles(task);
-                    const isGoogle = task.id.toString().startsWith('google-');
-                    
                     return (
                       <button
                         key={task.id}
