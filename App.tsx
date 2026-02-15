@@ -156,22 +156,45 @@ const App: React.FC = () => {
     }
   }, [currentUser?.id, visibleSources.length]);
 
+  // SELF-HEALING USER FETCH
+  // Jika data user tidak ada di tabel 'users', kita buatkan langsung dari session
   const fetchOrCreateUser = useCallback(async (sessionUser: any) => {
     setIsProfileLoading(true);
     try {
       let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
       
+      // Jika error atau data kosong, artinya user belum terdaftar di public.users (tapi sudah di Auth)
+      // Lakukan Self-Healing: Insert data baru
       if (error || !data) {
+        console.warn("User profile not found in DB, attempting self-healing...", error);
+        
+        const generatedUsername = sessionUser.email?.split('@')[0] || `user_${sessionUser.id.substring(0,6)}`;
+        const generatedName = sessionUser.user_metadata?.name || generatedUsername;
+        
         const newUser = {
           id: sessionUser.id,
           email: sessionUser.email,
-          name: sessionUser.user_metadata?.name || sessionUser.email.split('@')[0],
+          username: sessionUser.user_metadata?.username || generatedUsername,
+          name: generatedName,
           avatar_url: sessionUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${sessionUser.id}`,
-          status: 'Owner',
+          status: 'Member', // Default role aman
           app_settings: { appName: 'TaskPlay' }
         };
-        const { data: createdData, error: createError } = await supabase.from('users').upsert(newUser).select().single();
-        if (!createError) data = createdData;
+
+        const { data: createdData, error: createError } = await supabase
+          .from('users')
+          .upsert(newUser)
+          .select()
+          .single();
+        
+        if (createError) {
+          console.error("Self-healing failed:", createError);
+          // FALLBACK TERAKHIR: Gunakan objek sementara di memori agar user tetap bisa masuk UI
+          // meskipun insert DB gagal (misal karena RLS super ketat)
+          data = newUser; 
+        } else {
+          data = createdData;
+        }
       }
 
       if (data) {
@@ -180,7 +203,17 @@ const App: React.FC = () => {
         setAccountRole(role);
       }
     } catch (e) {
-      console.error("Error profile sync:", e);
+      console.error("Critical error profile sync:", e);
+      // Fallback emergency agar tidak blank screen
+      if (sessionUser) {
+         setCurrentUser({
+            id: sessionUser.id,
+            email: sessionUser.email,
+            name: 'User',
+            avatar_url: '',
+            created_at: new Date().toISOString()
+         } as User);
+      }
     } finally {
       setIsProfileLoading(false);
     }
@@ -351,6 +384,7 @@ const App: React.FC = () => {
 
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
 
+  // Jika session aktif tapi profile loading, tampilkan loader
   if (isAuthLoading || (isAuthenticated && isProfileLoading)) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
@@ -360,14 +394,27 @@ const App: React.FC = () => {
             <Loader2 className="animate-pulse text-accent" size={28} />
           </div>
         </div>
-        <h2 className="mt-10 font-heading text-3xl text-slate-800">Sinkronisasi Cloud...</h2>
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mt-4 animate-pulse">Menyiapkan Workspace TaskPlay</p>
+        <h2 className="mt-10 font-heading text-3xl text-slate-800">Menyiapkan Profil...</h2>
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mt-4 animate-pulse">Syncing User Data</p>
       </div>
     );
   }
 
   if (!isAuthenticated) return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
-  if (!currentUser) return null;
+  
+  // FAIL-SAFE: Jika currentUser masih null (sangat jarang terjadi karena logic fetchOrCreateUser), 
+  // jangan return null (layar putih). Tampilkan pesan error atau tombol reload.
+  if (!currentUser) {
+     return (
+        <div className="h-screen w-full flex flex-col items-center justify-center bg-background p-4 text-center">
+           <AlertTriangle size={48} className="text-secondary mb-4" />
+           <h2 className="text-2xl font-heading text-slate-900">Gagal Memuat Profil</h2>
+           <p className="text-sm text-slate-500 mb-6">Sesi login terdeteksi, tetapi data user tidak dapat diambil.</p>
+           <Button variant="primary" onClick={() => window.location.reload()}>Muat Ulang Halaman</Button>
+           <button onClick={handleLogout} className="mt-4 text-xs font-bold text-slate-400 hover:text-secondary uppercase">Logout & Login Ulang</button>
+        </div>
+     );
+  }
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const connStatus = getConnectionStatus();

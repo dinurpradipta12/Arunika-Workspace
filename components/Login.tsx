@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { CheckSquare, Lock, User as UserIcon, AlertCircle, Loader2 } from 'lucide-react';
+import { CheckSquare, Lock, User as UserIcon, AlertCircle, Loader2, HelpCircle, Eye, EyeOff, Mail } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { supabase } from '../lib/supabase';
@@ -10,21 +10,32 @@ interface LoginProps {
 }
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
-  const [username, setUsername] = useState('');
+  const [identifier, setIdentifier] = useState(''); // Bisa Username atau Email
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [errorState, setErrorState] = useState<{message: string, isConfirmationError: boolean} | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+  const [rawError, setRawError] = useState<any>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setError('');
+    setErrorState(null);
+    setRawError(null);
 
     try {
-      // Otomatis convert username ke format email internal
-      // Hapus spasi dan lowercase untuk konsistensi
-      const cleanUsername = username.trim().toLowerCase().replace(/\s+/g, '');
-      const loginEmail = `${cleanUsername}@taskplay.com`;
+      let loginEmail = '';
+      
+      // LOGIKA CERDAS: Deteksi apakah input adalah Email atau Username
+      if (identifier.includes('@')) {
+        // Jika user memasukkan email lengkap (misal: user@gmail.com atau user@taskplay.com)
+        loginEmail = identifier.trim().toLowerCase();
+      } else {
+        // Jika user memasukkan username (misal: user123), kita format ke email internal
+        const cleanUsername = identifier.trim().toLowerCase().replace(/\s+/g, '');
+        loginEmail = `${cleanUsername}@taskplay.com`;
+      }
       
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: loginEmail,
@@ -32,14 +43,37 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       });
 
       if (authError) {
-        throw new Error(authError.message);
+        throw authError;
       }
 
       if (data.session) {
         onLoginSuccess();
+      } else {
+        throw new Error("Login berhasil tetapi sesi tidak valid.");
       }
     } catch (err: any) {
-      setError('Username atau password salah.');
+      console.error("Login Error:", err);
+      setRawError(err);
+      
+      const msg = err.message?.toLowerCase() || '';
+      const code = err.code || '';
+      
+      if (msg.includes("email not confirmed")) {
+         setErrorState({
+           message: "Email belum dikonfirmasi.",
+           isConfirmationError: true
+         });
+      } else if (msg.includes("invalid login credentials") || code === "invalid_credentials") {
+         setErrorState({
+           message: "Username/Email atau Password salah.",
+           isConfirmationError: false
+         });
+      } else {
+         setErrorState({
+           message: err.message || "Terjadi kesalahan koneksi.",
+           isConfirmationError: false
+         });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -70,11 +104,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             <div className="relative">
               <UserIcon size={18} className="absolute left-3 top-11 text-mutedForeground" />
               <Input 
-                label="Username" 
-                placeholder="Masukkan username Anda" 
+                label="Username atau Email" 
+                placeholder="Masukkan username..." 
                 className="pl-10"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={identifier}
+                onChange={(e) => { setIdentifier(e.target.value); setErrorState(null); }}
                 required
                 autoCapitalize="none"
               />
@@ -84,30 +118,73 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               <Lock size={18} className="absolute left-3 top-11 text-mutedForeground" />
               <Input 
                 label="Password" 
-                type="password" 
+                type={showPassword ? "text" : "password"} 
                 placeholder="••••••••" 
-                className="pl-10"
+                className="pl-10 pr-10"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); setErrorState(null); }}
                 required
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-11 text-slate-400 hover:text-slate-600 transition-colors"
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
 
-            {error && (
-              <div className="flex items-start gap-2 p-3 bg-secondary/10 border-2 border-secondary rounded-xl text-secondary text-xs font-bold leading-relaxed">
-                <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                <span>{error}</span>
+            {errorState && (
+              <div className={`p-4 rounded-xl border-2 text-xs font-bold leading-relaxed animate-in slide-in-from-top-2 ${errorState.isConfirmationError ? 'bg-tertiary/10 border-tertiary text-slate-800' : 'bg-secondary/10 border-secondary text-secondary'}`}>
+                <div className="flex items-start gap-2">
+                   <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                   <div className="flex-1">
+                     <p className="text-sm font-black mb-1">Akses Ditolak</p>
+                     <p>{errorState.message}</p>
+                     
+                     {errorState.isConfirmationError && (
+                       <div className="mt-3 p-3 bg-white rounded-lg border-2 border-slate-200">
+                         <p className="mb-2 text-[10px] uppercase text-slate-400 font-black tracking-widest">Solusi untuk Developer:</p>
+                         <ol className="list-decimal pl-4 space-y-1 text-slate-600 font-medium">
+                           <li>Buka Dashboard Supabase.</li>
+                           <li>Ke menu <strong>Authentication &gt; Providers &gt; Email</strong>.</li>
+                           <li>Matikan <strong>Confirm Email</strong>.</li>
+                         </ol>
+                       </div>
+                     )}
+                   </div>
+                </div>
               </div>
             )}
 
-            <Button variant="primary" className="w-full text-lg py-4" type="submit" disabled={isLoading}>
+            <Button variant="primary" className="w-full text-lg py-4 shadow-pop" type="submit" disabled={isLoading}>
               {isLoading ? <Loader2 className="animate-spin" /> : "Masuk"}
             </Button>
           </form>
 
-          <div className="mt-8 pt-6 border-t-2 border-slate-100 text-center">
+          {/* Technical Details Toggler */}
+          {rawError && (
+             <div className="mt-6 border-t-2 border-slate-100 pt-4 text-center">
+                <button 
+                  type="button"
+                  onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
+                  className="text-[10px] font-bold text-slate-400 hover:text-accent flex items-center justify-center gap-1 mx-auto"
+                >
+                  <HelpCircle size={10} /> {showTechnicalDetails ? 'Sembunyikan' : 'Lihat'} Detail Error
+                </button>
+                
+                {showTechnicalDetails && (
+                  <div className="mt-2 p-2 bg-slate-900 text-slate-200 text-[10px] font-mono rounded-lg text-left overflow-x-auto max-h-32">
+                    <pre>{JSON.stringify(rawError, null, 2)}</pre>
+                  </div>
+                )}
+             </div>
+          )}
+
+          <div className="mt-6 text-center">
              <p className="text-[10px] text-mutedForeground font-medium leading-relaxed">
-              Hubungi Admin Workspace untuk mendapatkan Username & Password.
+              Jika lupa password, hubungi Admin Workspace untuk reset akun.
             </p>
           </div>
         </div>
