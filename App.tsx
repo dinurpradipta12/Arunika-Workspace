@@ -30,6 +30,7 @@ import { ProfileView } from './components/ProfileView';
 import { TeamSpace } from './components/TeamSpace';
 import { TaskItem } from './components/TaskItem';
 import { TaskInspectModal } from './components/TaskInspectModal';
+import { TaskDetailModal } from './components/TaskDetailModal'; // Import Modal Detail Besar
 import { RescheduleModal } from './components/RescheduleModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CalendarView } from './components/CalendarView';
@@ -94,8 +95,11 @@ const App: React.FC = () => {
   const [isNewWorkspaceModalOpen, setIsNewWorkspaceModalOpen] = useState(false);
   const [isJoinWorkspaceModalOpen, setIsJoinWorkspaceModalOpen] = useState(false); 
 
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [inspectedTask, setInspectedTask] = useState<Task | null>(null);
+  // --- STATE MODALS & VIEWS ---
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null); // Untuk tampilan Inline di tab 'tasks'
+  const [detailTask, setDetailTask] = useState<Task | null>(null); // Untuk Modal Besar (Main Task)
+  const [inspectedTask, setInspectedTask] = useState<Task | null>(null); // Untuk Modal Simple (Subtask)
+  
   const [reschedulingTask, setReschedulingTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | 'all'>('all');
@@ -145,9 +149,28 @@ const App: React.FC = () => {
     return { color: 'text-secondary', label: 'Menyambungkan', icon: <WifiOff size={16} /> };
   };
 
+  // --- GLOBAL TASK CLICK HANDLER ---
+  const handleGlobalTaskClick = (task: Task) => {
+    // 1. Cek apakah ini Subtask (punya parent_id)
+    if (task.parent_id) {
+        // Jika Subtask -> Buka Simple Modal (Inspect Modal)
+        setInspectedTask(task);
+        setDetailTask(null);
+    } else {
+        // Jika Main Task
+        if (activeTab === 'tasks') {
+            // Jika sedang di tab Board, buka detail inline view
+            setSelectedTaskId(task.id);
+        } else {
+            // Jika di tab lain (Dashboard, Workspace, Calendar), buka Modal Besar
+            setDetailTask(task);
+            setInspectedTask(null);
+        }
+    }
+  };
+
   // --- BRANDING EFFECT ---
   useEffect(() => {
-    // Gunakan Global Branding jika ada, jika tidak fallback ke default
     const appName = globalBranding?.app_name || 'TaskPlay';
     const appFavicon = globalBranding?.app_favicon;
 
@@ -258,7 +281,7 @@ const App: React.FC = () => {
           name: sessionUser.user_metadata?.name || generatedUsername,
           avatar_url: sessionUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${sessionUser.id}`,
           status: isLegacyAdmin ? 'Admin' : 'Member',
-          app_settings: { }, // Empty for new users, they use global config
+          app_settings: { }, 
           is_active: true
         };
         const { data: createdData } = await supabase.from('users').upsert(newUser).select().single();
@@ -336,19 +359,16 @@ const App: React.FC = () => {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, () => fetchData())
         .subscribe();
 
-      // --- CONFIG REALTIME ---
       if (configChannelRef.current) supabase.removeChannel(configChannelRef.current);
       configChannelRef.current = supabase
         .channel('app-config-live')
         .on('postgres_changes', { 
             event: '*', schema: 'public', table: 'app_config', filter: 'id=eq.1'
         }, (payload) => {
-            console.log("Global config updated:", payload.new);
             setGlobalBranding(payload.new as AppConfig);
         })
         .subscribe();
 
-      // --- NOTIFICATION REALTIME ---
       if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
       notificationChannelRef.current = supabase
         .channel(`notifications:${currentUser.id}`)
@@ -358,14 +378,9 @@ const App: React.FC = () => {
             table: 'notifications',
             filter: `user_id=eq.${currentUser.id}`
         }, (payload) => {
-           console.log("Realtime Notification:", payload.new);
            const newNotif = payload.new as Notification;
-           setNotifications(prev => [newNotif, ...prev]); // Add to list
-           setCurrentNotification(newNotif); // Show Toast
-           
-           // Play sound if possible (optional)
-           
-           // 5 Seconds auto-dismiss for toast
+           setNotifications(prev => [newNotif, ...prev]); 
+           setCurrentNotification(newNotif); 
            setTimeout(() => setCurrentNotification(null), 5000);
         })
         .subscribe();
@@ -493,7 +508,6 @@ const App: React.FC = () => {
   const handleUpdateProfile = async (profileData: Partial<User>, newRole: string, settingsUpdate: any) => {
     if (!currentUser) return;
     try {
-        // 1. Update Personal Profile & Settings
         const personalSettings = {
            notificationsEnabled: settingsUpdate.notificationsEnabled,
            googleConnected: settingsUpdate.googleConnected,
@@ -511,12 +525,11 @@ const App: React.FC = () => {
         const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
         if (error) throw error;
 
-        // 2. Update Global Branding (Only if Admin/Owner)
         const isAdmin = newRole.toLowerCase() === 'admin' || newRole.toLowerCase() === 'owner' || accountRole === 'Owner';
         
         if (isAdmin) {
            const { error: configError } = await supabase.from('app_config').upsert({
-              id: 1, // Always row 1
+              id: 1, 
               app_name: settingsUpdate.appName,
               app_logo: settingsUpdate.appLogo,
               app_favicon: settingsUpdate.appFavicon,
@@ -569,7 +582,12 @@ const App: React.FC = () => {
   };
 
   const getDragOverStyle = (status: TaskStatus) => {
-    return "bg-slate-100 border-slate-400 border-dashed opacity-80";
+    switch (status) {
+      case TaskStatus.TODO: return 'bg-slate-100 border-slate-400 border-dashed scale-[1.01]';
+      case TaskStatus.IN_PROGRESS: return 'bg-yellow-50 border-yellow-400 border-dashed scale-[1.01]';
+      case TaskStatus.DONE: return 'bg-emerald-50 border-emerald-400 border-dashed scale-[1.01]';
+      default: return 'border-transparent';
+    }
   };
 
   const handleLogout = async () => {
@@ -578,7 +596,7 @@ const App: React.FC = () => {
     setCurrentUser(null);
     setIsAccountLocked(false);
     setLoginMessage(null);
-    localStorage.removeItem('taskplay_activeTab'); // Optional: Clear on logout
+    localStorage.removeItem('taskplay_activeTab');
     localStorage.removeItem('taskplay_activeWorkspaceId');
   };
 
@@ -629,33 +647,28 @@ const App: React.FC = () => {
   };
 
   const handleNotificationClick = async (notif: Notification) => {
-     // Mark as read locally
      if (!notif.is_read) {
         setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
         await supabase.from('notifications').update({ is_read: true }).eq('id', notif.id);
      }
      setIsNotifDropdownOpen(false);
-     setCurrentNotification(null); // Close toast if open
+     setCurrentNotification(null); 
 
-     // LOGIC NAVIGASI BERDASARKAN METADATA
      const metadata = notif.metadata || {};
 
      if (metadata.task_id) {
-        // Find task locally first to avoid fetch if possible
         const targetTask = tasks.find(t => t.id === metadata.task_id);
         if (targetTask) {
-           setInspectedTask(targetTask);
+           handleGlobalTaskClick(targetTask); // Use Global Handler
         } else {
-           // Fetch single task if not in list
            const { data } = await supabase.from('tasks').select('*').eq('id', metadata.task_id).single();
-           if (data) setInspectedTask(data as Task);
+           if (data) handleGlobalTaskClick(data as Task);
            else alert("Task tidak ditemukan atau sudah dihapus.");
         }
      } else if (metadata.workspace_id) {
         setActiveWorkspaceId(metadata.workspace_id);
         setActiveTab('workspace_view');
      } else if (notif.type === 'join_workspace') {
-        // Default behavior for join
         setActiveTab('team');
      }
   };
@@ -781,7 +794,7 @@ const App: React.FC = () => {
           topLevelTasks={parentTasks} 
           tasks={tasks} 
           workspaces={workspaces} 
-          handleTaskClick={(t) => { setSelectedTaskId(t.id); setActiveTab('tasks'); }} 
+          handleTaskClick={(t) => handleGlobalTaskClick(t)} 
           onLogout={handleLogout} 
           currentUser={currentUser} 
           role={accountRole}
@@ -792,7 +805,7 @@ const App: React.FC = () => {
           onJoinWorkspace={() => setIsJoinWorkspaceModalOpen(true)}
         />
 
-        {/* REPLACED WITH SIMPLE MODAL */}
+        {/* TASK INSPECT MODAL (SIMPLE) - For Subtasks */}
         <TaskInspectModal 
           task={inspectedTask} 
           isOpen={!!inspectedTask} 
@@ -802,6 +815,24 @@ const App: React.FC = () => {
           onReschedule={(t) => setReschedulingTask(t)} 
           onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }} 
           onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }} 
+        />
+
+        {/* TASK DETAIL MODAL (LARGE) - For Main Tasks */}
+        <TaskDetailModal 
+          isOpen={!!detailTask}
+          parentTask={detailTask}
+          subTasks={tasks.filter(t => t.parent_id === detailTask?.id && !t.is_archived)}
+          onClose={() => setDetailTask(null)}
+          onStatusChange={handleStatusChange}
+          onAddTask={() => {
+             setEditingTask({ parent_id: detailTask?.id, workspace_id: detailTask?.workspace_id } as Task);
+             setIsNewTaskModalOpen(true);
+          }}
+          onEditTask={openEditModal}
+          onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); setDetailTask(null); }} 
+          onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); setDetailTask(null); }} 
+          onInspectTask={(t) => { setInspectedTask(t); setDetailTask(null); }}
+          onRescheduleTask={(t) => setReschedulingTask(t)}
         />
 
         <RescheduleModal 
@@ -824,7 +855,7 @@ const App: React.FC = () => {
         />
         
         <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0">
-          {/* Header Removed to reduce xml size, assuming structure is same */}
+          {/* Header */}
           <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
             <button className="p-2 border-2 border-slate-800 rounded-xl shadow-pop-active bg-white transition-all hover:-translate-y-0.5" onClick={() => setSidebarOpen(!isSidebarOpen)}>
               {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
@@ -926,7 +957,7 @@ const App: React.FC = () => {
             {activeTab === 'workspace_view' && activeWorkspace && (
               <WorkspaceView 
                 workspace={activeWorkspace}
-                tasks={currentWorkspaceTasks}
+                tasks={currentWorkspaceTasks} // This prop is auto-updated by App's state
                 onAddTask={(initialData) => {
                   setEditingTask({ workspace_id: activeWorkspaceId, ...initialData } as Task);
                   setIsNewTaskModalOpen(true);
@@ -934,6 +965,7 @@ const App: React.FC = () => {
                 onStatusChange={handleStatusChange}
                 onEditTask={openEditModal}
                 onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+                onTaskClick={handleGlobalTaskClick} // Pass the global handler
               />
             )}
 
@@ -941,7 +973,7 @@ const App: React.FC = () => {
               <CalendarView 
                 tasks={tasks} 
                 workspaces={workspaces} 
-                onTaskClick={setInspectedTask} 
+                onTaskClick={handleGlobalTaskClick} // Use global handler here too
                 userEmail={currentUser.email} 
                 googleAccessToken={googleAccessToken} 
                 onDayClick={(date) => {
@@ -982,7 +1014,8 @@ const App: React.FC = () => {
                   onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }} 
                   onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }} 
                   priorityFilter={priorityFilter} onPriorityFilterChange={setPriorityFilter}
-                  onInspectTask={setInspectedTask} onRescheduleTask={setReschedulingTask}
+                  onInspectTask={(t) => setInspectedTask(t)} // Subtasks in Inline View use Simple Modal
+                  onRescheduleTask={setReschedulingTask}
                 />
               ) : (
                 <div className="space-y-8 pb-20">
@@ -1016,7 +1049,7 @@ const App: React.FC = () => {
                               key={task.id} 
                               task={task} 
                               onStatusChange={handleStatusChange} 
-                              onClick={setInspectedTask}
+                              onClick={handleGlobalTaskClick} // Use Global Handler
                               onEdit={openEditModal}
                               onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
                               onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }}
@@ -1048,7 +1081,7 @@ const App: React.FC = () => {
                           <TaskItem 
                             task={task} 
                             onStatusChange={() => {}} // Disabled for archived
-                            onClick={setInspectedTask}
+                            onClick={handleGlobalTaskClick}
                             onEdit={openEditModal}
                             onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
                             onRestore={async (id) => { await supabase.from('tasks').update({ is_archived: false }).eq('id', id); fetchData(); }}

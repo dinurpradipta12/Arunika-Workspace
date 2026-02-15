@@ -28,7 +28,6 @@ import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 import { TaskItem } from './TaskItem';
-import { TaskInspectModal } from './TaskInspectModal'; // Changed from TaskDetailModal
 import { RescheduleModal } from './RescheduleModal';
 import { supabase } from '../lib/supabase';
 
@@ -40,6 +39,7 @@ interface WorkspaceViewProps {
   onEditTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
   onArchiveTask?: (id: string) => void;
+  onTaskClick?: (task: Task) => void; // New Prop for Global Handler
 }
 
 type ModalType = 'members' | 'all_tasks' | 'subtasks' | 'completed' | 'overdue' | null;
@@ -51,7 +51,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   onStatusChange,
   onEditTask,
   onDeleteTask,
-  onArchiveTask
+  onArchiveTask,
+  onTaskClick
 }) => {
   // State
   const [activeModal, setActiveModal] = useState<ModalType>(null);
@@ -59,10 +60,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [memberCount, setMemberCount] = useState(1);
   
-  // Interaction State for Tasks
-  const [inspectedTask, setInspectedTask] = useState<Task | null>(null);
-  const [reschedulingTask, setReschedulingTask] = useState<Task | null>(null);
-
   // Local State for Inputs
   const [notepadContent, setNotepadContent] = useState(workspace.notepad || '');
   const [assets, setAssets] = useState<WorkspaceAsset[]>(workspace.assets || [
@@ -280,10 +277,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     }
   };
 
-  // --- DATA FILTERING FOR MODALS & LISTS ---
-  const totalTasks = tasks.length;
+  // --- DATA FILTERING FOR STATS ---
+  // Count Total Tasks (Only Main Tasks)
+  const totalTasks = tasks.filter(t => !t.parent_id && !t.is_archived).length;
+  // Count Subtasks (Only tasks with parent_id)
+  const subTasksCount = tasks.filter(t => t.parent_id && !t.is_archived).length;
+  
   const allSubtasks = tasks.filter(t => t.parent_id);
-  const subTasksCount = allSubtasks.length;
   const completedTasksList = tasks.filter(t => t.status === TaskStatus.DONE);
   const completedTasks = completedTasksList.length;
   const overdueTasksList = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE);
@@ -382,7 +382,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                       key={task.id} 
                       task={task} 
                       onStatusChange={onStatusChange}
-                      onClick={() => { setInspectedTask(task); setActiveModal(null); }}
+                      onClick={() => { onTaskClick?.(task); setActiveModal(null); }}
                       onEdit={() => { onEditTask(task); setActiveModal(null); }}
                       onDelete={(id) => { onDeleteTask(id); setActiveModal(null); }}
                       assigneeName={members.find(m => m.user_id === task.assigned_to)?.users?.name}
@@ -408,7 +408,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                           {groupedSubtasks[parentId].map(st => (
                              <div 
                                key={st.id} 
-                               onClick={() => { setInspectedTask(st); setActiveModal(null); }}
+                               onClick={() => { onTaskClick?.(st); setActiveModal(null); }}
                                className="cursor-pointer"
                              >
                                 <TaskItem 
@@ -484,28 +484,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       {/* MODAL RENDER */}
       {renderModalContent()}
 
-      {/* USING SIMPLE MODAL FOR INSPECTION INSTEAD OF COMPLEX DETAIL MODAL */}
-      <TaskInspectModal 
-        task={inspectedTask} 
-        isOpen={!!inspectedTask} 
-        onClose={() => setInspectedTask(null)} 
-        onStatusChange={onStatusChange} 
-        onEdit={(t) => { setInspectedTask(null); onEditTask(t); }} 
-        onReschedule={(t) => setReschedulingTask(t)} 
-        onDelete={(id) => { setInspectedTask(null); onDeleteTask(id); }} 
-        onArchive={(id) => { setInspectedTask(null); onArchiveTask ? onArchiveTask(id) : onDeleteTask(id); }} 
-      />
-
-      <RescheduleModal 
-        task={reschedulingTask} 
-        isOpen={!!reschedulingTask} 
-        onClose={() => setReschedulingTask(null)} 
-        onSave={async (id, date) => { 
-           await supabase.from('tasks').update({ due_date: new Date(date).toISOString() }).eq('id', id); 
-           // Force refresh happens via Realtime in App.tsx
-        }} 
-      />
-
       {/* --- HEADER --- */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b-2 border-slate-100 pb-6">
         <div>
@@ -529,7 +507,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
       {/* --- ROW 1: STATS GRID --- */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-        {/* Total Task */}
+        {/* Total Task (Only Main Tasks) */}
         <div 
           onClick={() => setActiveModal('all_tasks')}
           className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none"
@@ -544,7 +522,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           <p className="text-4xl font-heading text-slate-900">{totalTasks}</p>
         </div>
 
-        {/* Total Sub Task */}
+        {/* Total Sub Task (Only Children) */}
         <div 
           onClick={() => setActiveModal('subtasks')}
           className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none"
@@ -649,11 +627,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   key={task.id} 
                   task={task} 
                   onStatusChange={onStatusChange}
-                  onClick={() => setInspectedTask(task)} // Open simple modal on click
+                  onClick={() => onTaskClick?.(task)} // Use Global Handler from Props
                   onEdit={onEditTask}
                   onDelete={onDeleteTask}
                   onArchive={(id) => onArchiveTask ? onArchiveTask(id) : onDeleteTask(id)}
-                  parentTitle={task.parent_id ? getParentTitle(task.parent_id) : undefined} // Pass parent title
+                  parentTitle={task.parent_id ? getParentTitle(task.parent_id) : undefined} 
                   assigneeName={members.find(m => m.user_id === task.assigned_to)?.users?.name}
                 />
               ))
