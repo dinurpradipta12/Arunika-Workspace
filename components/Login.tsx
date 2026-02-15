@@ -26,13 +26,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
     try {
       let loginEmail = identifier.trim();
-      
-      // LOGIKA CERDAS: Cek apakah input adalah Email atau Username
       const isEmail = identifier.includes('@');
 
       if (!isEmail) {
-        // Jika input adalah USERNAME, kita harus mencari emailnya dulu di database
-        // karena Supabase Auth hanya menerima login via Email secara default
+        // LOGIKA HYBRID:
+        // 1. Coba cari di tabel public.users (untuk user baru yang daftar pakai email asli)
         const cleanUsername = identifier.trim().toLowerCase();
         
         const { data: userData, error: fetchError } = await supabase
@@ -41,16 +39,23 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           .eq('username', cleanUsername)
           .single();
 
-        if (fetchError || !userData) {
-          throw new Error("Username tidak ditemukan.");
+        if (userData && userData.email) {
+           // User ditemukan di database modern
+           loginEmail = userData.email;
+        } else {
+           // 2. FALLBACK LEGACY (PENTING UNTUK ADMIN LAMA)
+           // Jika username tidak ada di public.users, asumsikan ini akun lama (arunika)
+           // yang menggunakan format dummy @taskplay.com
+           console.warn("Username tidak ditemukan di public DB, mencoba format legacy...");
+           loginEmail = `${cleanUsername}@taskplay.com`;
         }
-
-        loginEmail = userData.email;
       } else {
         loginEmail = identifier.trim().toLowerCase();
       }
       
-      // Login menggunakan Email (entah itu input langsung atau hasil lookup username)
+      console.log("Attempting login with:", loginEmail);
+
+      // Login ke Supabase Auth
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: password,
@@ -61,7 +66,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       if (data.session) {
         onLoginSuccess();
       } else {
-        throw new Error("Login berhasil tetapi sesi tidak valid.");
+        throw new Error("Sesi tidak valid.");
       }
     } catch (err: any) {
       console.error("Login Error:", err);
@@ -71,17 +76,12 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       
       if (msg.includes("email not confirmed")) {
          setErrorState({
-           message: "Email belum dikonfirmasi. Cek inbox email Anda.",
+           message: "Akun ini terkunci karena Email belum diverifikasi.",
            isConfirmationError: true
          });
       } else if (msg.includes("invalid login credentials")) {
          setErrorState({
-           message: "Password salah atau akun tidak ditemukan.",
-           isConfirmationError: false
-         });
-      } else if (msg.includes("username tidak ditemukan")) {
-         setErrorState({
-           message: "Username tidak terdaftar.",
+           message: "Username atau Password salah.",
            isConfirmationError: false
          });
       } else {
@@ -121,7 +121,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               <UserIcon size={18} className="absolute left-3 top-11 text-mutedForeground" />
               <Input 
                 label="Username atau Email" 
-                placeholder="Masukan username / email..." 
+                placeholder="Masukan username..." 
                 className="pl-10"
                 value={identifier}
                 onChange={(e) => { setIdentifier(e.target.value); setErrorState(null); }}
@@ -158,6 +158,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                    <div className="flex-1">
                      <p className="text-sm font-black mb-1">Gagal Masuk</p>
                      <p>{errorState.message}</p>
+                     {errorState.isConfirmationError && (
+                       <p className="mt-2 text-[10px] text-slate-500">
+                         <strong>Tips Admin:</strong> Jalankan script SQL <code>UPDATE auth.users SET email_confirmed_at = NOW()...</code> di Dashboard untuk akun lama.
+                       </p>
+                     )}
                    </div>
                 </div>
               </div>
