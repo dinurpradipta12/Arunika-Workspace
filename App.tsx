@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
@@ -99,6 +100,30 @@ const App: React.FC = () => {
     }
     return { color: 'text-secondary', label: 'Menyambungkan', icon: <WifiOff size={16} /> };
   };
+
+  // --- BRANDING SYNC EFFECT ---
+  // Secara otomatis menerapkan Nama App & Favicon ke browser saat data user berubah
+  useEffect(() => {
+    if (currentUser?.app_settings) {
+      const { appName, appFavicon } = currentUser.app_settings;
+      
+      // Update Title
+      if (appName && document.title !== appName) {
+        document.title = appName;
+      }
+      
+      // Update Favicon
+      if (appFavicon) {
+        let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+        if (!link) {
+          link = document.createElement('link');
+          link.rel = 'icon';
+          document.head.appendChild(link);
+        }
+        link.href = appFavicon;
+      }
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     if (tasks.length > 0) {
@@ -337,13 +362,25 @@ const App: React.FC = () => {
   const handleUpdateProfile = async (profileData: Partial<User>, newRole: string, settingsUpdate: any) => {
     if (!currentUser) return;
     try {
-        const updates = { ...profileData, status: newRole, app_settings: settingsUpdate };
+        const updates = { 
+          ...profileData, 
+          status: newRole, 
+          app_settings: {
+             ...currentUser.app_settings,
+             ...settingsUpdate
+          } 
+        };
+        
+        // Simpan ke Database
         const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
         if (error) throw error;
-        setCurrentUser(prev => prev ? { ...prev, ...profileData, status: newRole, app_settings: settingsUpdate } : null);
+        
+        // Update Local State langsung agar UI responsif
+        setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
+        
         const calculatedRole = (newRole?.toLowerCase() === 'admin' || newRole?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(calculatedRole);
-        alert("Data profil berhasil disimpan!");
+        alert("Data profil berhasil disimpan & disinkronkan!");
     } catch (err: any) {
         alert("Gagal menyimpan perubahan: " + err.message);
     }

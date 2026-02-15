@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Calendar, Clock, Globe, Layout, AlignLeft, Info, ChevronDown, List, Tag, Plus, Check } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
-import { TaskPriority, Task, TaskStatus, Workspace } from '../types';
+import { TaskPriority, Task, TaskStatus, Workspace, WorkspaceType } from '../types';
 import { GoogleCalendar } from '../services/googleCalendarService';
 
 interface NewTaskModalProps {
@@ -47,6 +47,10 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
 
+  // Filter workspaces based on type
+  const personalWorkspaces = workspaces.filter(ws => ws.type === WorkspaceType.PERSONAL);
+  const teamWorkspaces = workspaces.filter(ws => ws.type !== WorkspaceType.PERSONAL);
+
   useEffect(() => {
     if (initialData) {
       setTitle(initialData.title || '');
@@ -74,7 +78,11 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
       setEndTime('10:00');
       setIsAllDay(true);
       setPriority(TaskPriority.MEDIUM);
-      if (workspaces.length > 0) setTargetId(workspaces[0].id);
+      
+      // Default ke Personal Workspace jika ada, jika tidak ambil yang pertama
+      const defaultWs = workspaces.find(w => w.type === WorkspaceType.PERSONAL) || workspaces[0];
+      if (defaultWs) setTargetId(defaultWs.id);
+      
       setSelectedParentId('');
       setCategory('General');
     }
@@ -221,7 +229,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
             <div className="grid grid-cols-2 gap-4">
                {/* Workspace Selector */}
                <div className="space-y-2">
-                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Workspace</label>
+                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Lokasi Task</label>
                 <div className="relative">
                   <Globe size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <select 
@@ -230,13 +238,27 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
                     disabled={!!selectedParentId} // Disable jika sudah pilih parent task
                     className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl font-bold text-xs outline-none focus:border-accent appearance-none disabled:bg-slate-100 disabled:text-slate-400"
                   >
-                    <optgroup label="Local">
-                      {workspaces.map(ws => (
-                        <option key={ws.id} value={ws.id}>{ws.name}</option>
-                      ))}
-                    </optgroup>
+                    {/* Personal / Private */}
+                    {personalWorkspaces.length > 0 && (
+                      <optgroup label="🔒 Personal (Hanya Saya)">
+                        {personalWorkspaces.map(ws => (
+                          <option key={ws.id} value={ws.id}>{ws.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
+
+                    {/* Shared / Team */}
+                    {teamWorkspaces.length > 0 && (
+                      <optgroup label="👥 Team (Dilihat Anggota)">
+                        {teamWorkspaces.map(ws => (
+                          <option key={ws.id} value={ws.id}>{ws.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
+
+                    {/* Google Calendars */}
                     {googleCalendars.length > 0 && (
-                      <optgroup label="Google Calendars">
+                      <optgroup label="☁️ Google Calendars">
                         {googleCalendars.map(gc => (
                           <option key={gc.id} value={gc.id}>{gc.summary}</option>
                         ))}

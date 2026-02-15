@@ -41,6 +41,7 @@ export interface User {
     sourceColors?: Record<string, string>;
     visibleSources?: string[];
     googleAccessToken?: string; 
+    googleConnected?: boolean; // New field to persist connection status
   };
 }
 
@@ -52,7 +53,7 @@ export interface Workspace {
   created_at: string;
   description?: string;
   category?: string;
-  join_code?: string; // New field
+  join_code?: string;
 }
 
 export interface Task {

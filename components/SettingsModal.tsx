@@ -100,7 +100,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       appLogo: tempAppLogo,
       appFavicon: tempFavicon,
       notificationsEnabled: tempNotifications,
-      googleAccessToken: googleAccessToken // Simpan token juga jika ada
+      // Persist connection status (boolean) so UI remembers it
+      googleConnected: !!googleAccessToken || user.app_settings?.googleConnected
     };
 
     const finalProfile = {
@@ -260,11 +261,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <Chrome size={20} className="text-accent" />
                     <div>
                        <p className="text-xs font-black uppercase text-slate-800">Google Calendar</p>
-                       <p className="text-[9px] font-bold text-slate-400">{googleAccessToken ? 'Koneksi Berhasil' : 'Belum Terhubung'}</p>
+                       <p className="text-[9px] font-bold text-slate-400">{(googleAccessToken || user.app_settings?.googleConnected) ? 'Koneksi Berhasil' : 'Belum Terhubung'}</p>
                     </div>
                   </div>
                   <Button variant="primary" className="text-[9px] py-1 px-4" onClick={() => calendarService.current?.requestAccessToken()}>
-                    {googleAccessToken ? 'Hubungkan Kembali' : 'Hubungkan'}
+                    {(googleAccessToken || user.app_settings?.googleConnected) ? 'Hubungkan Kembali' : 'Hubungkan'}
                   </Button>
                 </div>
                 
