@@ -471,6 +471,17 @@ const App: React.FC = () => {
       if (editingTask && editingTask.id) {
         const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
         if (error) throw error;
+        
+        // --- REALTIME UPDATE FIX FOR TASK DETAIL MODAL ---
+        // If the task being edited is the same as the one currently open in the detail modal, update it.
+        if (detailTask && detailTask.id === editingTask.id) {
+            setDetailTask(prev => prev ? ({ ...prev, ...payload }) : null);
+        }
+        // Also update inspected task if open
+        if (inspectedTask && inspectedTask.id === editingTask.id) {
+            setInspectedTask(prev => prev ? ({ ...prev, ...payload }) : null);
+        }
+
       } else {
         payload.created_at = new Date().toISOString();
         const { error } = await supabase.from('tasks').insert(payload);
@@ -512,6 +523,10 @@ const App: React.FC = () => {
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+    // If detail modal is open, update its status too
+    if (detailTask && detailTask.id === id) {
+        setDetailTask(prev => prev ? ({ ...prev, status }) : null);
+    }
     try { await supabase.from('tasks').update({ status }).eq('id', id); } catch (err) { fetchData(); }
   };
 

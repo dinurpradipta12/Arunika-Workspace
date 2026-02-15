@@ -13,9 +13,10 @@ import {
   FolderCheck,
   Clock,
   Circle,
-  AlertCircle,
   RefreshCw,
-  Target
+  Target,
+  Calendar,
+  Tag
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
@@ -45,7 +46,8 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
   onEditTask,
   onArchiveTask,
   onDeleteTask,
-  onInspectTask
+  onInspectTask,
+  onRescheduleTask
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
@@ -89,19 +91,17 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
 
   const getStatusConfig = (status: TaskStatus) => {
     switch(status) {
-        case TaskStatus.TODO: return { color: 'bg-slate-100 text-slate-600', icon: Circle, label: 'Todo' };
-        case TaskStatus.IN_PROGRESS: return { color: 'bg-blue-100 text-blue-600', icon: RefreshCw, label: 'In Progress' };
-        case TaskStatus.IN_REVIEW: return { color: 'bg-pink-100 text-secondary', icon: Target, label: 'In Review' };
-        case TaskStatus.DONE: return { color: 'bg-green-100 text-quaternary', icon: CheckCircle2, label: 'Done' };
+        case TaskStatus.TODO: return { color: 'bg-slate-800 text-white', icon: Circle, label: 'Todo' };
+        case TaskStatus.IN_PROGRESS: return { color: 'bg-blue-500 text-white', icon: RefreshCw, label: 'In Progress' };
+        case TaskStatus.IN_REVIEW: return { color: 'bg-secondary text-white', icon: Target, label: 'In Review' };
+        case TaskStatus.DONE: return { color: 'bg-quaternary text-slate-900', icon: CheckCircle2, label: 'Done' };
         default: return { color: 'bg-slate-100 text-slate-600', icon: Circle, label: 'Todo' };
     }
   }
 
-  const currentStatusConfig = getStatusConfig(parentTask.status);
-
   return (
     <div className="space-y-8 animate-in slide-in-from-right-4 duration-500 pb-20">
-      {/* Header Utama - Reorganized: Buttons Top, Title Bottom */}
+      {/* Header Utama */}
       <div className="flex flex-col gap-6">
         {/* ROW 1: Action Buttons (Top) */}
         <div className="flex items-center justify-between">
@@ -162,6 +162,7 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
 
       {/* DASHBOARD GRID: Progress & Info */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        
         {/* COL 1: Progress Card (2 spans) */}
         <Card className="md:col-span-2" variant="white">
           <div className="flex items-center justify-between mb-6">
@@ -181,44 +182,56 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
           </p>
         </Card>
 
-        {/* COL 2: Status Switcher (1 span) - NEW */}
-        <Card variant="white" className="flex flex-col justify-center gap-2 md:col-span-1">
-            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Status Pengerjaan</h4>
-            <div className="relative group">
-                <button className={`w-full flex items-center justify-between p-3 rounded-xl border-2 border-slate-200 hover:border-slate-800 transition-all ${currentStatusConfig.color}`}>
-                    <div className="flex items-center gap-2">
-                        <currentStatusConfig.icon size={18} strokeWidth={3} />
-                        <span className="text-xs font-black uppercase">{currentStatusConfig.label}</span>
-                    </div>
-                    <ChevronDown size={16} />
-                </button>
-                
-                {/* Status Dropdown */}
-                <div className="absolute top-full left-0 right-0 mt-2 bg-white border-2 border-slate-800 rounded-xl shadow-pop z-20 hidden group-hover:block animate-in fade-in zoom-in-95">
+        {/* COL 2 & 3 Combined: Status & Deadline with Padding */}
+        <div className="md:col-span-2 flex flex-col gap-4 px-0 md:px-12">
+            
+            {/* FIXED STATUS CARD - 1 Row, Non-clickable */}
+            <Card variant="white" className="p-4" isHoverable={false}>
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2">
+                    <Target size={14} /> Status Pengerjaan (Read-Only)
+                </h4>
+                <div className="flex flex-row gap-2 overflow-x-auto pb-1 scrollbar-hide">
                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DONE].map(status => {
                         const cfg = getStatusConfig(status);
+                        const isActive = parentTask.status === status;
                         return (
-                            <button 
+                            <div 
                                 key={status}
-                                onClick={() => onStatusChange(parentTask.id, status)}
-                                className="w-full text-left p-2 flex items-center gap-2 hover:bg-slate-50 first:rounded-t-xl last:rounded-b-xl"
+                                className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-1.5 p-2 rounded-xl border-2 transition-all cursor-default ${isActive ? `${cfg.color} border-slate-800 shadow-sm opacity-100` : 'bg-slate-50 border-slate-100 text-slate-400 opacity-50 grayscale'}`}
                             >
-                                <div className={`w-2 h-2 rounded-full ${cfg.color.split(' ')[0].replace('bg-', 'bg-')}`} />
-                                <span className="text-[10px] font-bold uppercase text-slate-600">{cfg.label}</span>
-                            </button>
+                                <cfg.icon size={16} strokeWidth={3} />
+                                <span className="text-[9px] font-black uppercase text-center leading-none">{cfg.label}</span>
+                            </div>
                         )
                     })}
                 </div>
-            </div>
-        </Card>
+            </Card>
 
-        {/* COL 3: Info Compact (1 span) - Resized */}
-        <div className="bg-slate-100 border-2 border-slate-200 rounded-xl p-4 flex flex-col justify-center items-center text-center md:col-span-1">
-            <div className="w-10 h-10 bg-white border-2 border-slate-200 rounded-full flex items-center justify-center mb-2">
-                <CheckCircle2 size={20} className="text-slate-400" />
+            {/* DEADLINE CARD (Below Status) */}
+            <button 
+                onClick={() => onRescheduleTask(parentTask)}
+                className="bg-white border-2 border-slate-800 rounded-xl p-4 flex items-center gap-4 hover:shadow-pop transition-all group text-left"
+            >
+                <div className="w-10 h-10 bg-slate-100 rounded-full border-2 border-slate-200 flex items-center justify-center group-hover:bg-accent group-hover:text-white group-hover:border-slate-800 transition-colors">
+                    <Calendar size={20} />
+                </div>
+                <div>
+                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest group-hover:text-accent transition-colors">Tenggat Waktu</p>
+                    <p className="text-sm font-bold text-slate-800 mt-0.5">{formatDateTime(parentTask.due_date).split(',')[0]}</p>
+                </div>
+            </button>
+
+            {/* CATEGORY CARD (Below Deadline) - NEW */}
+            <div className="bg-white border-2 border-slate-800 rounded-xl p-4 flex items-center gap-4">
+                <div className="w-10 h-10 bg-slate-100 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-400">
+                    <Tag size={20} />
+                </div>
+                <div>
+                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Kategori Task</p>
+                    <p className="text-sm font-bold text-slate-800 mt-0.5">{parentTask.category || 'General'}</p>
+                </div>
             </div>
-            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Tenggat Waktu</p>
-            <p className="text-xs font-bold text-slate-800 mt-1">{formatDateTime(parentTask.due_date).split(',')[0]}</p>
+
         </div>
       </div>
 

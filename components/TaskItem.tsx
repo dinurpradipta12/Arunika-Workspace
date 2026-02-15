@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { CheckCircle2, Clock, Circle, MoreHorizontal, Edit2, Trash2, Archive, RotateCcw, ArrowRight, Briefcase, Tag, Flag, User } from 'lucide-react';
 import { Task, TaskPriority, TaskStatus } from '../types';
 
@@ -17,14 +17,6 @@ interface TaskItemProps {
   assigneeUser?: { name: string; avatar_url: string }; 
 }
 
-const UI_PALETTE = [
-  { border: 'border-accent', shadow: 'shadow-[4px_4px_0px_0px_#8B5CF6]', bg: 'hover:bg-violet-50' }, // Purple
-  { border: 'border-secondary', shadow: 'shadow-[4px_4px_0px_0px_#F472B6]', bg: 'hover:bg-pink-50' }, // Pink
-  { border: 'border-tertiary', shadow: 'shadow-[4px_4px_0px_0px_#FBBF24]', bg: 'hover:bg-amber-50' }, // Yellow
-  { border: 'border-quaternary', shadow: 'shadow-[4px_4px_0px_0px_#34D399]', bg: 'hover:bg-emerald-50' }, // Green
-  { border: 'border-sky-400', shadow: 'shadow-[4px_4px_0px_0px_#38BDF8]', bg: 'hover:bg-sky-50' }, // Sky
-];
-
 export const TaskItem: React.FC<TaskItemProps> = ({ 
   task, 
   onStatusChange, 
@@ -40,17 +32,6 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  // Generate consistent random-like color based on task ID or Category
-  const theme = useMemo(() => {
-    const key = task.category || task.id;
-    let hash = 0;
-    for (let i = 0; i < key.length; i++) {
-      hash = key.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const index = Math.abs(hash) % UI_PALETTE.length;
-    return UI_PALETTE[index];
-  }, [task.id, task.category]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -79,6 +60,22 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     }
   };
 
+  // Logic Warna Border & Shadow berdasarkan Status
+  const getStatusStyle = (status: TaskStatus) => {
+    if (task.is_archived) return 'border-slate-200 shadow-none grayscale opacity-75';
+
+    switch (status) {
+      case TaskStatus.IN_PROGRESS: 
+        return 'border-blue-500 shadow-[4px_4px_0px_0px_#3B82F6]'; // Biru
+      case TaskStatus.IN_REVIEW: 
+        return 'border-secondary shadow-[4px_4px_0px_0px_#F472B6]'; // Pink
+      case TaskStatus.DONE: 
+        return 'border-quaternary shadow-[4px_4px_0px_0px_#34D399]'; // Hijau
+      default: 
+        return 'border-slate-800 shadow-[4px_4px_0px_0px_#1E293B]'; // Todo (Hitam)
+    }
+  };
+
   const formatDateWithTime = (dateStr?: string) => {
     if (!dateStr) return null;
     const date = new Date(dateStr);
@@ -92,10 +89,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       onClick={() => onClick?.(task)}
       className={`
         group relative bg-white border-2 rounded-2xl p-4 transition-all duration-300 cursor-pointer
-        ${task.is_archived 
-          ? 'grayscale opacity-75 border-slate-200 shadow-none' 
-          : `${theme.border} ${theme.shadow} hover:-translate-y-1 hover:shadow-pop-hover ${theme.bg}`
-        }
+        hover:bg-white hover:-translate-y-1 hover:shadow-pop-hover
+        ${getStatusStyle(task.status)}
       `}
     >
       {/* ROW 1: Icon, Title, Date/Time */}
@@ -128,7 +123,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         <div className="relative" ref={menuRef}>
           <button 
             onClick={(e) => { e.stopPropagation(); setIsMenuOpen(!isMenuOpen); }}
-            className={`p-1 rounded-lg hover:bg-white/50 text-slate-300 hover:text-slate-600 transition-colors ${isMenuOpen ? 'bg-slate-100 text-slate-600' : ''}`}
+            className={`p-1 rounded-lg hover:bg-slate-100 text-slate-300 hover:text-slate-600 transition-colors ${isMenuOpen ? 'bg-slate-100 text-slate-600' : ''}`}
           >
             <MoreHorizontal size={20} />
           </button>
@@ -178,7 +173,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
       {/* ROW 3: Bottom (Avatar & Arrow) */}
       <div className="mt-4 pt-3 border-t-2 border-slate-100/50 flex items-center justify-between">
-        {/* Assignee Avatar (Increased Size) */}
+        {/* Assignee Avatar */}
         <div className="flex items-center gap-2">
           {assigneeUser ? (
             <img src={assigneeUser.avatar_url} alt={assigneeUser.name} className="w-8 h-8 rounded-full border-2 border-white shadow-sm object-cover" title={`Assigned to: ${assigneeUser.name}`} />

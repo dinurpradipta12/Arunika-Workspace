@@ -75,16 +75,20 @@
         transform: translateY(-2px);
         transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
       }
-      /* Scrollbar styling */
+      /* Scrollbar styling - Transparan Putih / Subtle */
       ::-webkit-scrollbar {
-        width: 8px;
+        width: 6px;
+        height: 6px;
       }
       ::-webkit-scrollbar-track {
         background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: #1E293B;
+        background: rgba(0, 0, 0, 0.1); /* Very subtle transparent grey/white look */
         border-radius: 10px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(0, 0, 0, 0.2);
       }
     </style>
     <script type="importmap">

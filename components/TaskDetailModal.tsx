@@ -122,9 +122,9 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-500 ease-out"
         onClick={onClose}
     >
-      {/* Outer Flex Container: Added Padding here (px-4 md:px-8) */}
+      {/* Outer Flex Container: Increased Padding to px-16 */}
       <div 
-        className="flex h-[85vh] w-full max-w-[98vw] items-center justify-center relative transition-all duration-500 px-4 md:px-8"
+        className="flex h-[85vh] w-full max-w-[98vw] items-center justify-center relative transition-all duration-500 px-4 md:px-16"
         onClick={(e) => e.stopPropagation()} 
       >
         
@@ -140,7 +140,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         </button>
 
         {/* 2. Priority Label (Top Left Outside) */}
-        <div className={`absolute -top-10 left-8 z-[60] px-5 py-2 rounded-t-2xl border-x-2 border-t-2 border-slate-800 ${parentPriorityConfig.bg} text-white shadow-sm flex items-center gap-2`}>
+        <div className={`absolute -top-10 left-16 z-[60] px-5 py-2 rounded-t-2xl border-x-2 border-t-2 border-slate-800 ${parentPriorityConfig.bg} text-white shadow-sm flex items-center gap-2`}>
             <Flag size={14} strokeWidth={3} />
             <span className="text-xs font-black uppercase tracking-widest">{parentPriorityConfig.text}</span>
         </div>
@@ -167,8 +167,9 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         </div>
 
         {/* SUBTASK POPUP (DETACHED SIDE PANEL) - Colorful Design */}
+        {/* Increased Margin Left to ml-12 for larger gap */}
         {internalActiveSubtask && (
-            <div className="w-[400px] shrink-0 ml-6 h-full bg-slate-50 border-4 border-slate-800 rounded-3xl shadow-[-8px_8px_0px_0px_#1E293B] flex flex-col animate-in slide-in-from-bottom-10 duration-500 ease-out z-20 relative overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="w-[400px] shrink-0 ml-12 h-full bg-slate-50 border-4 border-slate-800 rounded-3xl shadow-[-8px_8px_0px_0px_#1E293B] flex flex-col animate-in slide-in-from-bottom-10 duration-500 ease-out z-20 relative overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 {/* Header Subtask - Colorful */}
                 <div className={`p-6 border-b-4 border-slate-800 flex justify-between items-start text-white ${subtaskPriorityConfig.bg === 'bg-slate-400' ? 'bg-slate-800' : subtaskPriorityConfig.bg}`}>
                     <div className="flex-1 pr-2">
