@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { CheckCircle2, Clock, Circle, AlertCircle, ChevronRight, MoreHorizontal, Edit2, Trash2, Calendar, Archive, GripVertical, RotateCcw } from 'lucide-react';
+import { CheckCircle2, Clock, Circle, AlertCircle, ChevronRight, MoreHorizontal, Edit2, Trash2, Calendar, Archive, GripVertical, RotateCcw, CornerDownRight } from 'lucide-react';
 import { Task, TaskPriority, TaskStatus } from '../types';
 
 interface TaskItemProps {
@@ -12,9 +12,10 @@ interface TaskItemProps {
   onArchive?: (id: string) => void;
   onReschedule?: (task: Task) => void;
   onRestore?: (id: string) => void;
+  parentTitle?: string; // New Prop for Subtask Indication
 }
 
-export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClick, onEdit, onDelete, onArchive, onReschedule, onRestore }) => {
+export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClick, onEdit, onDelete, onArchive, onReschedule, onRestore, parentTitle }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -40,6 +41,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClic
   }, [isMenuOpen]);
 
   const handleContainerClick = (e: React.MouseEvent) => {
+    // Prevent firing if clicking menu or checkbox
+    if ((e.target as HTMLElement).closest('button')) return;
+    
     if (onClick) {
       onClick(task);
     }
@@ -78,7 +82,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClic
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onClick={handleContainerClick}
-      className={`group relative flex items-start justify-between p-4 border-2 border-slate-800 rounded-xl transition-all mb-3 cursor-grab active:cursor-grabbing ${onClick ? 'hover:-translate-y-1' : ''} ${task.is_archived ? 'bg-slate-50 border-slate-400 grayscale opacity-75 shadow-none' : 'bg-white shadow-sm hover:shadow-pop'}`}
+      className={`group relative flex items-start justify-between p-4 border-2 border-slate-800 rounded-xl transition-all mb-3 cursor-grab active:cursor-grabbing ${onClick ? 'cursor-pointer hover:-translate-y-1' : ''} ${task.is_archived ? 'bg-slate-50 border-slate-400 grayscale opacity-75 shadow-none' : 'bg-white shadow-sm hover:shadow-pop'}`}
     >
       <div className="flex items-start gap-3 flex-1 min-w-0">
         {!task.is_archived && (
@@ -105,6 +109,15 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClic
             <div className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-black text-white ${getPriorityColor(task.priority)} shadow-[1px_1px_0px_#1E293B]`}>
               {task.priority}
             </div>
+            
+            {/* Parent Task Indicator */}
+            {parentTitle && (
+              <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[9px] font-black uppercase tracking-widest border border-slate-200">
+                <CornerDownRight size={10} strokeWidth={3} />
+                <span className="truncate max-w-[100px]">{parentTitle}</span>
+              </div>
+            )}
+
             {task.due_date && (
               <div className="flex items-center gap-1 text-[11px] text-mutedForeground font-bold uppercase tracking-tighter">
                 <Clock size={12} strokeWidth={3} />

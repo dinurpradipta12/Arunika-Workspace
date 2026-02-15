@@ -28,6 +28,8 @@ import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 import { TaskItem } from './TaskItem';
+import { TaskInspectModal } from './TaskInspectModal';
+import { RescheduleModal } from './RescheduleModal';
 import { supabase } from '../lib/supabase';
 
 interface WorkspaceViewProps {
@@ -57,6 +59,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [memberCount, setMemberCount] = useState(1);
   
+  // Interaction State for Tasks
+  const [inspectedTask, setInspectedTask] = useState<Task | null>(null);
+  const [reschedulingTask, setReschedulingTask] = useState<Task | null>(null);
+
   // Local State for Inputs
   const [notepadContent, setNotepadContent] = useState(workspace.notepad || '');
   const [assets, setAssets] = useState<WorkspaceAsset[]>(workspace.assets || [
@@ -274,7 +280,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     }
   };
 
-  // --- DATA FILTERING FOR MODALS ---
+  // --- DATA FILTERING FOR MODALS & LISTS ---
   const totalTasks = tasks.length;
   const allSubtasks = tasks.filter(t => t.parent_id);
   const subTasksCount = allSubtasks.length;
@@ -374,6 +380,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                       key={task.id} 
                       task={task} 
                       onStatusChange={onStatusChange}
+                      onClick={() => { setInspectedTask(task); setActiveModal(null); }}
                       onEdit={() => { onEditTask(task); setActiveModal(null); }}
                       onDelete={(id) => { onDeleteTask(id); setActiveModal(null); }}
                    />
@@ -396,7 +403,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                        </div>
                        <div className="p-3 space-y-2 bg-white">
                           {groupedSubtasks[parentId].map(st => (
-                             <div key={st.id} className="flex items-center justify-between p-2 border border-slate-100 rounded-xl hover:bg-slate-50">
+                             <div 
+                               key={st.id} 
+                               onClick={() => { setInspectedTask(st); setActiveModal(null); }}
+                               className="flex items-center justify-between p-2 border border-slate-100 rounded-xl hover:bg-slate-50 cursor-pointer"
+                             >
                                 <span className={`text-sm font-bold ${st.status === TaskStatus.DONE ? 'line-through text-slate-400' : 'text-slate-700'}`}>{st.title}</span>
                                 <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${st.status === TaskStatus.DONE ? 'bg-quaternary text-white' : 'bg-slate-200 text-slate-500'}`}>{st.status.replace('_', ' ')}</span>
                              </div>
@@ -465,6 +476,27 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       
       {/* MODAL RENDER */}
       {renderModalContent()}
+
+      <TaskInspectModal 
+        task={inspectedTask} 
+        isOpen={!!inspectedTask} 
+        onClose={() => setInspectedTask(null)} 
+        onStatusChange={onStatusChange} 
+        onEdit={(t) => { setInspectedTask(null); onEditTask(t); }} 
+        onReschedule={(t) => setReschedulingTask(t)} 
+        onDelete={(id) => { setInspectedTask(null); onDeleteTask(id); }} 
+        onArchive={(id) => { setInspectedTask(null); onArchiveTask ? onArchiveTask(id) : onDeleteTask(id); }} 
+      />
+
+      <RescheduleModal 
+        task={reschedulingTask} 
+        isOpen={!!reschedulingTask} 
+        onClose={() => setReschedulingTask(null)} 
+        onSave={async (id, date) => { 
+           await supabase.from('tasks').update({ due_date: new Date(date).toISOString() }).eq('id', id); 
+           // Force refresh happens via Realtime in App.tsx
+        }} 
+      />
 
       {/* --- HEADER --- */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b-2 border-slate-100 pb-6">
@@ -609,9 +641,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   key={task.id} 
                   task={task} 
                   onStatusChange={onStatusChange}
+                  onClick={() => setInspectedTask(task)} // Open modal on click
                   onEdit={onEditTask}
                   onDelete={onDeleteTask}
-                  onArchive={(id) => onArchiveTask ? onArchiveTask(id) : onDeleteTask(id)} 
+                  onArchive={(id) => onArchiveTask ? onArchiveTask(id) : onDeleteTask(id)}
+                  parentTitle={task.parent_id ? getParentTitle(task.parent_id) : undefined} // Pass parent title
                 />
               ))
             )}
