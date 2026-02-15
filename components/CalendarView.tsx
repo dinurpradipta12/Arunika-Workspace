@@ -289,7 +289,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 const startT = getTimeString(task.start_date);
                 const endT = getTimeString(task.due_date);
                 const timeDisplay = task.is_all_day ? 'All Day' : `${startT} - ${endT}`;
-                const catColor = categoryColors[task.category || 'General'] || '#8B5CF6';
+                
+                // Color logic for sidebar item
+                let catColor = UI_PALETTE[0];
+                if (task.parent_id) {
+                   catColor = sourceColors['personal-subtasks'] || UI_PALETTE[0];
+                } else {
+                   catColor = categoryColors[task.category || 'General'] || '#8B5CF6';
+                }
 
                 return (
                   <button 
@@ -551,9 +558,23 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         ${!isTaskEnd && isSaturday ? 'rounded-r-md mr-0.5' : ''}
                       `;
                       
-                      const catColor = categoryColors[task.category || 'General'];
-                      const wsColor = sourceColors[task.workspace_id];
-                      const taskColor = catColor || (task.parent_id ? (sourceColors['personal-subtasks'] || UI_PALETTE[0]) : (wsColor || UI_PALETTE[0]));
+                      // LOGIKA WARNA DIPERBAIKI: Prioritaskan Sub-task color jika itu adalah subtask
+                      let taskColor = UI_PALETTE[0];
+
+                      if (task.parent_id) {
+                        // Prioritas 1: Jika Sub-task, gunakan warna khusus sub-task
+                        taskColor = sourceColors['personal-subtasks'] || UI_PALETTE[0];
+                      } else if (task.id.startsWith('google-')) {
+                        // Prioritas 2: Google Events
+                        taskColor = sourceColors[task.workspace_id] || UI_PALETTE[0];
+                      } else {
+                        // Prioritas 3: Task Biasa (Kategori > Workspace > Default)
+                        taskColor = categoryColors[task.category || 'General'] || sourceColors[task.workspace_id] || UI_PALETTE[0];
+                      }
+
+                      // LOGIKA TAMPILAN LABEL EVENT: (Jam Mulai) - (Judul)
+                      const startTimeDisplay = (!task.is_all_day && task.start_date) ? getTimeString(task.start_date) : '';
+                      const eventLabel = startTimeDisplay ? `${startTimeDisplay} - ${task.title}` : task.title;
 
                       return (
                         <button
@@ -580,8 +601,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             zIndex: 50
                           }}
                         >
-                          <span className="truncate w-full text-center px-1">
-                            {isMiddle ? task.title : '\u00A0'}
+                          <span className="truncate w-full text-left px-1">
+                            {isMiddle ? eventLabel : '\u00A0'}
                           </span>
                         </button>
                       );
