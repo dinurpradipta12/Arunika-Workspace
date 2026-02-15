@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Plus, 
   Layout, 
@@ -14,7 +14,14 @@ import {
   Trash2,
   Save,
   Loader2,
-  Cloud
+  Cloud,
+  X,
+  Crown,
+  Shield,
+  User,
+  ArrowRight,
+  Clock,
+  Calendar
 } from 'lucide-react';
 import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
@@ -32,6 +39,8 @@ interface WorkspaceViewProps {
   onArchiveTask?: (id: string) => void;
 }
 
+type ModalType = 'members' | 'all_tasks' | 'subtasks' | 'completed' | 'overdue' | null;
+
 export const WorkspaceView: React.FC<WorkspaceViewProps> = ({ 
   workspace, 
   tasks, 
@@ -41,6 +50,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   onDeleteTask,
   onArchiveTask
 }) => {
+  // State
+  const [activeModal, setActiveModal] = useState<ModalType>(null);
+  const [members, setMembers] = useState<any[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [memberCount, setMemberCount] = useState(1);
   
   // Local State for Inputs
@@ -62,10 +75,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const notepadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const notepadRef = useRef<HTMLTextAreaElement>(null);
 
+  // --- 0. CHECK CURRENT USER ---
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setCurrentUserId(data.user.id);
+    });
+  }, []);
+
   // --- 1. SYNC FROM PROP (Initial Load / Workspace Switch) ---
   useEffect(() => {
-    // Update local state when workspace prop changes (e.g. switching workspaces)
-    // Only update notepad if NOT focused to prevent overwriting user input while typing
     if (document.activeElement !== notepadRef.current && workspace.notepad !== undefined) {
        setNotepadContent(workspace.notepad);
     }
@@ -75,7 +93,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   }, [workspace.id, workspace.notepad, workspace.assets]);
 
   // --- 2. DEDICATED REALTIME SUBSCRIPTION (Notepad & Assets) ---
-  // This ensures updates appear instantly for other users without full app refresh
   useEffect(() => {
     const channel = supabase.channel(`workspace-updates-${workspace.id}`)
       .on(
@@ -89,12 +106,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         (payload) => {
           const newData = payload.new as Workspace;
           
-          // Sync Notepad: Only update if user is NOT currently typing in it
+          // Fix Realtime Notepad: Update if user is NOT focusing the textarea
           if (document.activeElement !== notepadRef.current && newData.notepad !== undefined) {
              setNotepadContent(newData.notepad);
           }
 
-          // Sync Assets: Update if different
+          // Sync Assets
           if (newData.assets && JSON.stringify(newData.assets) !== JSON.stringify(assets)) {
              setAssets(newData.assets);
           }
@@ -103,27 +120,31 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [workspace.id, assets]); // Depend on workspace.id to reset on switch
+  }, [workspace.id, assets]);
 
-  // --- 3. REALTIME MEMBER COUNT SUBSCRIPTION ---
+  // --- 3. MEMBERS DATA & REALTIME ---
+  const fetchMembers = async () => {
+    const { data, count } = await supabase
+      .from('workspace_members')
+      .select(`
+        id, role, user_id,
+        users:user_id (id, name, email, avatar_url)
+      `, { count: 'exact' })
+      .eq('workspace_id', workspace.id);
+    
+    if (data) setMembers(data);
+    if (count !== null) setMemberCount(count);
+  };
+
   useEffect(() => {
-    const fetchCount = async () => {
-      const { count } = await supabase
-        .from('workspace_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('workspace_id', workspace.id);
-      if (count !== null) setMemberCount(count);
-    };
-
-    fetchCount();
-
-    const channel = supabase.channel(`members-count-${workspace.id}`)
+    fetchMembers();
+    const channel = supabase.channel(`members-sync-${workspace.id}`)
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
         table: 'workspace_members', 
         filter: `workspace_id=eq.${workspace.id}` 
-      }, () => fetchCount())
+      }, () => fetchMembers())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -148,22 +169,16 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       } finally {
         setIsSavingNotepad(false);
       }
-    }, 1500); // Auto-save after 1.5s
+    }, 1000); // Faster save (1s)
   };
 
-  // --- 5. ASSET HANDLERS (Direct Save) ---
+  // --- 5. ASSET HANDLERS ---
   const saveAssetsToDB = async (newAssets: WorkspaceAsset[]) => {
     setIsSavingAssets(true);
     try {
-      await supabase
-        .from('workspaces')
-        .update({ assets: newAssets })
-        .eq('id', workspace.id);
-    } catch (err) {
-      console.error("Failed to save assets", err);
-    } finally {
-      setIsSavingAssets(false);
-    }
+      await supabase.from('workspaces').update({ assets: newAssets }).eq('id', workspace.id);
+    } catch (err) { console.error(err); } 
+    finally { setIsSavingAssets(false); }
   };
 
   const handleAddAsset = async (e: React.FormEvent) => {
@@ -171,32 +186,219 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     if (newAssetName && newAssetUrl) {
       const newAssetItem = { id: Date.now(), name: newAssetName, url: newAssetUrl };
       const updatedAssets = [...assets, newAssetItem];
-      
-      setAssets(updatedAssets); // Optimistic update
-      setNewAssetName('');
-      setNewAssetUrl('');
-      setIsAddingAsset(false);
-      
+      setAssets(updatedAssets);
+      setNewAssetName(''); setNewAssetUrl(''); setIsAddingAsset(false);
       await saveAssetsToDB(updatedAssets);
     }
   };
 
   const handleDeleteAsset = async (id: number) => {
     const updatedAssets = assets.filter(a => a.id !== id);
-    setAssets(updatedAssets); // Optimistic update
+    setAssets(updatedAssets);
     await saveAssetsToDB(updatedAssets);
   };
 
-  // Derived Stats
+  // --- 6. MEMBER MANAGEMENT ---
+  const handleRemoveMember = async (memberId: string) => {
+    if(confirm("Apakah Anda yakin ingin menghapus anggota ini dari workspace?")) {
+      await supabase.from('workspace_members').delete().eq('id', memberId);
+      fetchMembers();
+    }
+  };
+
+  // --- DATA FILTERING FOR MODALS ---
   const totalTasks = tasks.length;
-  const subTasksCount = tasks.filter(t => t.parent_id).length;
-  const completedTasks = tasks.filter(t => t.status === TaskStatus.DONE).length;
-  const overdueTasks = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE).length;
+  const allSubtasks = tasks.filter(t => t.parent_id);
+  const subTasksCount = allSubtasks.length;
+  const completedTasksList = tasks.filter(t => t.status === TaskStatus.DONE);
+  const completedTasks = completedTasksList.length;
+  const overdueTasksList = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE);
+  const overdueTasks = overdueTasksList.length;
   const activeTasks = tasks.filter(t => !t.is_archived);
 
+  // Group Subtasks by Parent
+  const groupedSubtasks = useMemo(() => {
+    const groups: Record<string, Task[]> = {};
+    allSubtasks.forEach(st => {
+      const pid = st.parent_id || 'unknown';
+      if (!groups[pid]) groups[pid] = [];
+      groups[pid].push(st);
+    });
+    return groups;
+  }, [allSubtasks]);
+
+  const getParentTitle = (parentId: string) => {
+    const parent = tasks.find(t => t.id === parentId);
+    return parent ? parent.title : 'Unknown Parent Task';
+  };
+
+  // --- RENDER MODAL CONTENT ---
+  const renderModalContent = () => {
+    if (!activeModal) return null;
+
+    const ModalWrapper = ({ title, children, icon }: any) => (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+        <div className="bg-white border-4 border-slate-800 rounded-3xl shadow-[12px_12px_0px_0px_#1E293B] w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-300">
+          <div className="p-6 bg-slate-800 flex items-center justify-between text-white shrink-0">
+            <div className="flex items-center gap-3">
+              {icon}
+              <h2 className="text-2xl font-heading">{title}</h2>
+            </div>
+            <button onClick={() => setActiveModal(null)} className="p-2 hover:bg-white/20 rounded-xl transition-colors">
+              <X size={24} strokeWidth={3} />
+            </button>
+          </div>
+          <div className="p-6 overflow-y-auto flex-1">
+            {children}
+          </div>
+          <div className="p-4 bg-slate-50 border-t-2 border-slate-100 shrink-0 text-right">
+             <Button variant="secondary" onClick={() => setActiveModal(null)}>Tutup</Button>
+          </div>
+        </div>
+      </div>
+    );
+
+    switch (activeModal) {
+      case 'members':
+        const isOwner = workspace.owner_id === currentUserId;
+        return (
+          <ModalWrapper title="Anggota Workspace" icon={<Users size={24} strokeWidth={3} />}>
+            <div className="space-y-3">
+              {members.map(m => (
+                <div key={m.id} className="flex items-center justify-between p-4 bg-white border-2 border-slate-100 rounded-2xl shadow-sm hover:border-slate-800 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <img src={m.users?.avatar_url} className="w-12 h-12 rounded-full border-2 border-slate-800 bg-slate-100" alt="Avatar" />
+                    <div>
+                      <h4 className="font-bold text-slate-900 flex items-center gap-2">
+                        {m.users?.name}
+                        {m.role === 'owner' && <Crown size={14} className="text-tertiary fill-tertiary" />}
+                        {m.role === 'admin' && <Shield size={14} className="text-accent" />}
+                      </h4>
+                      <p className="text-xs font-bold text-slate-400">{m.users?.email}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="px-3 py-1 bg-slate-100 text-slate-500 rounded-lg text-[10px] font-black uppercase tracking-widest">{m.role}</span>
+                    {isOwner && m.user_id !== currentUserId && (
+                      <button 
+                        onClick={() => handleRemoveMember(m.id)}
+                        className="p-2 text-slate-300 hover:text-secondary hover:bg-secondary/10 rounded-lg transition-colors"
+                        title="Hapus Anggota"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ModalWrapper>
+        );
+
+      case 'all_tasks':
+        // Show only Top Level Tasks (No Subtasks)
+        const rootTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
+        return (
+          <ModalWrapper title="Daftar Semua Task" icon={<Layout size={24} strokeWidth={3} />}>
+            <div className="space-y-3">
+               {rootTasks.length === 0 ? <p className="text-center text-slate-400 italic">Tidak ada task utama.</p> : 
+                 rootTasks.map(task => (
+                   <TaskItem 
+                      key={task.id} 
+                      task={task} 
+                      onStatusChange={onStatusChange}
+                      onEdit={() => { onEditTask(task); setActiveModal(null); }}
+                      onDelete={(id) => { onDeleteTask(id); setActiveModal(null); }}
+                   />
+                 ))
+               }
+            </div>
+          </ModalWrapper>
+        );
+
+      case 'subtasks':
+        return (
+          <ModalWrapper title="Daftar Sub-Tasks" icon={<Layers size={24} strokeWidth={3} />}>
+             <div className="space-y-6">
+                {Object.keys(groupedSubtasks).length === 0 ? <p className="text-center text-slate-400 italic">Tidak ada sub-task.</p> :
+                  Object.keys(groupedSubtasks).map(parentId => (
+                    <div key={parentId} className="border-2 border-slate-200 rounded-2xl overflow-hidden">
+                       <div className="bg-slate-100 p-3 border-b-2 border-slate-200 flex items-center gap-2">
+                          <CheckCircle2 size={16} className="text-slate-400" />
+                          <h4 className="font-bold text-slate-700 text-sm">Parent: {getParentTitle(parentId)}</h4>
+                       </div>
+                       <div className="p-3 space-y-2 bg-white">
+                          {groupedSubtasks[parentId].map(st => (
+                             <div key={st.id} className="flex items-center justify-between p-2 border border-slate-100 rounded-xl hover:bg-slate-50">
+                                <span className={`text-sm font-bold ${st.status === TaskStatus.DONE ? 'line-through text-slate-400' : 'text-slate-700'}`}>{st.title}</span>
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${st.status === TaskStatus.DONE ? 'bg-quaternary text-white' : 'bg-slate-200 text-slate-500'}`}>{st.status.replace('_', ' ')}</span>
+                             </div>
+                          ))}
+                       </div>
+                    </div>
+                  ))
+                }
+             </div>
+          </ModalWrapper>
+        );
+
+      case 'completed':
+        return (
+          <ModalWrapper title="Task Selesai" icon={<CheckCircle2 size={24} strokeWidth={3} />}>
+             <div className="space-y-3">
+               {completedTasksList.length === 0 ? <p className="text-center text-slate-400 italic">Belum ada task selesai.</p> : 
+                 completedTasksList.map(task => (
+                   <div key={task.id} className="flex items-center justify-between p-4 bg-quaternary/5 border-2 border-quaternary/20 rounded-2xl opacity-75 hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-3">
+                         <div className="w-8 h-8 rounded-full bg-quaternary flex items-center justify-center text-white"><CheckCircle2 size={16} /></div>
+                         <div>
+                            <p className="font-bold text-slate-800 line-through">{task.title}</p>
+                            <p className="text-[10px] font-bold text-slate-500">Selesai pada {task.completed_at ? new Date(task.completed_at).toLocaleDateString() : '-'}</p>
+                         </div>
+                      </div>
+                      <Button variant="ghost" onClick={() => onStatusChange(task.id, TaskStatus.TODO)} className="text-[10px]">Buka Kembali</Button>
+                   </div>
+                 ))
+               }
+            </div>
+          </ModalWrapper>
+        );
+
+      case 'overdue':
+        return (
+           <ModalWrapper title="Task Terlambat" icon={<AlertTriangle size={24} strokeWidth={3} />}>
+             <div className="space-y-3">
+               {overdueTasksList.length === 0 ? <div className="text-center py-10"><p className="font-heading text-xl text-quaternary">Great Job!</p><p className="text-slate-400 text-sm">Tidak ada task terlambat.</p></div> : 
+                 overdueTasksList.map(task => (
+                   <div key={task.id} className="flex items-center justify-between p-4 bg-secondary/5 border-2 border-secondary/20 rounded-2xl">
+                      <div className="flex items-center gap-3">
+                         <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-white"><AlertTriangle size={16} /></div>
+                         <div>
+                            <p className="font-bold text-slate-800">{task.title}</p>
+                            <p className="text-[10px] font-bold text-secondary flex items-center gap-1">
+                               <Clock size={10} /> Deadline: {task.due_date ? new Date(task.due_date).toLocaleDateString() : '-'}
+                            </p>
+                         </div>
+                      </div>
+                      <Button variant="ghost" onClick={() => { onEditTask(task); setActiveModal(null); }} className="text-[10px] text-slate-500">Reschedule</Button>
+                   </div>
+                 ))
+               }
+            </div>
+          </ModalWrapper>
+        );
+
+      default:
+        return null;
+    }
+  };
+
   return (
-    <div className="space-y-8 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-8 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
       
+      {/* MODAL RENDER */}
+      {renderModalContent()}
+
       {/* --- HEADER --- */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b-2 border-slate-100 pb-6">
         <div>
@@ -221,46 +423,76 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       {/* --- ROW 1: STATS GRID --- */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
         {/* Total Task */}
-        <div className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-transform">
-          <div className="flex items-center gap-2 mb-2 text-slate-400">
-            <Layout size={18} />
-            <span className="text-[10px] font-black uppercase tracking-widest">Total Task</span>
+        <div 
+          onClick={() => setActiveModal('all_tasks')}
+          className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none"
+        >
+          <div className="flex items-center justify-between mb-2 text-slate-400">
+            <div className="flex items-center gap-2">
+              <Layout size={18} />
+              <span className="text-[10px] font-black uppercase tracking-widest">Total Task</span>
+            </div>
+            <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />
           </div>
           <p className="text-4xl font-heading text-slate-900">{totalTasks}</p>
         </div>
 
         {/* Total Sub Task */}
-        <div className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-transform">
-          <div className="flex items-center gap-2 mb-2 text-accent">
-            <Layers size={18} />
-            <span className="text-[10px] font-black uppercase tracking-widest">Sub-Tasks</span>
+        <div 
+          onClick={() => setActiveModal('subtasks')}
+          className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none"
+        >
+          <div className="flex items-center justify-between mb-2 text-accent">
+            <div className="flex items-center gap-2">
+              <Layers size={18} />
+              <span className="text-[10px] font-black uppercase tracking-widest">Sub-Tasks</span>
+            </div>
+            <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />
           </div>
           <p className="text-4xl font-heading text-accent">{subTasksCount}</p>
         </div>
 
         {/* Completed */}
-        <div className="bg-quaternary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-transform text-slate-900">
-          <div className="flex items-center gap-2 mb-2 opacity-70">
-            <CheckCircle2 size={18} />
-            <span className="text-[10px] font-black uppercase tracking-widest">Selesai</span>
+        <div 
+          onClick={() => setActiveModal('completed')}
+          className="bg-quaternary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none text-slate-900"
+        >
+          <div className="flex items-center justify-between mb-2 opacity-70">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={18} />
+              <span className="text-[10px] font-black uppercase tracking-widest">Selesai</span>
+            </div>
+            <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />
           </div>
           <p className="text-4xl font-heading">{completedTasks}</p>
         </div>
 
         {/* Overdue */}
-        <div className="bg-secondary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-transform text-white">
-          <div className="flex items-center gap-2 mb-2 opacity-80">
-            <AlertTriangle size={18} />
-            <span className="text-[10px] font-black uppercase tracking-widest">Terlambat</span>
+        <div 
+          onClick={() => setActiveModal('overdue')}
+          className="bg-secondary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none text-white"
+        >
+          <div className="flex items-center justify-between mb-2 opacity-80">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={18} />
+              <span className="text-[10px] font-black uppercase tracking-widest">Terlambat</span>
+            </div>
+             <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />
           </div>
           <p className="text-4xl font-heading">{overdueTasks}</p>
         </div>
 
         {/* Members (Realtime) */}
-        <div className="bg-slate-800 p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-transform text-white group">
-          <div className="flex items-center gap-2 mb-2 text-tertiary group-hover:text-white transition-colors">
-            <Users size={18} />
-            <span className="text-[10px] font-black uppercase tracking-widest">Anggota</span>
+        <div 
+          onClick={() => setActiveModal('members')}
+          className="bg-slate-800 p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer active:translate-y-0 active:shadow-none text-white group"
+        >
+          <div className="flex items-center justify-between mb-2 text-tertiary group-hover:text-white transition-colors">
+            <div className="flex items-center gap-2">
+              <Users size={18} />
+              <span className="text-[10px] font-black uppercase tracking-widest">Anggota</span>
+            </div>
+            <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />
           </div>
           <div className="flex items-end justify-between">
              <p className="text-4xl font-heading">{memberCount}</p>
@@ -287,7 +519,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             
             <div className="flex gap-2">
                <span className="px-3 py-1 bg-slate-100 rounded-lg text-xs font-bold text-slate-500 border border-slate-200">
-                 All Tasks ({activeTasks.length})
+                 Active Tasks ({activeTasks.length})
                </span>
             </div>
           </div>
