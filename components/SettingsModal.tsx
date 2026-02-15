@@ -70,7 +70,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       
       setTempNotifications(user.app_settings?.notificationsEnabled ?? true);
     }
-  }, [isOpen, user, role, currentBranding]);
+    // Dependency array dikurangi menjadi [isOpen] saja untuk mencegah reset form saat user mengetik jika parent re-render
+  }, [isOpen]);
 
   const validateAndReadImage = (file: File, callback: (base64: string) => void) => {
     if (file.size > 800 * 1024) { // Limit 800KB
