@@ -46,7 +46,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   // Local State for Inputs
   const [notepadContent, setNotepadContent] = useState(workspace.notepad || '');
   const [assets, setAssets] = useState<WorkspaceAsset[]>(workspace.assets || [
-    { id: 1, name: 'Project Drive', url: '#' }, // Default mock data if empty
+    { id: 1, name: 'Project Drive', url: '#' }, 
   ]);
   
   // Asset Form State
@@ -58,27 +58,54 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [isSavingNotepad, setIsSavingNotepad] = useState(false);
   const [isSavingAssets, setIsSavingAssets] = useState(false);
 
-  // Refs for Debounce
+  // Refs for Debounce & Focus check
   const notepadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const notepadRef = useRef<HTMLTextAreaElement>(null);
 
-  // --- 1. SYNC FROM PROP (Incoming Realtime Updates) ---
+  // --- 1. SYNC FROM PROP (Initial Load / Workspace Switch) ---
   useEffect(() => {
-    // Hanya update notepad dari prop jika user TIDAK sedang mengetik (fokus di textarea)
-    // Ini mencegah kursor lompat saat ada update dari user lain atau refresh
+    // Update local state when workspace prop changes (e.g. switching workspaces)
+    // Only update notepad if NOT focused to prevent overwriting user input while typing
     if (document.activeElement !== notepadRef.current && workspace.notepad !== undefined) {
        setNotepadContent(workspace.notepad);
     }
-  }, [workspace.notepad]);
-
-  useEffect(() => {
-    // Update assets dari prop jika berubah
     if (workspace.assets) {
       setAssets(workspace.assets);
     }
-  }, [workspace.assets]);
+  }, [workspace.id, workspace.notepad, workspace.assets]);
 
-  // --- 2. REALTIME MEMBER COUNT SUBSCRIPTION ---
+  // --- 2. DEDICATED REALTIME SUBSCRIPTION (Notepad & Assets) ---
+  // This ensures updates appear instantly for other users without full app refresh
+  useEffect(() => {
+    const channel = supabase.channel(`workspace-updates-${workspace.id}`)
+      .on(
+        'postgres_changes', 
+        { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'workspaces', 
+          filter: `id=eq.${workspace.id}` 
+        }, 
+        (payload) => {
+          const newData = payload.new as Workspace;
+          
+          // Sync Notepad: Only update if user is NOT currently typing in it
+          if (document.activeElement !== notepadRef.current && newData.notepad !== undefined) {
+             setNotepadContent(newData.notepad);
+          }
+
+          // Sync Assets: Update if different
+          if (newData.assets && JSON.stringify(newData.assets) !== JSON.stringify(assets)) {
+             setAssets(newData.assets);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [workspace.id, assets]); // Depend on workspace.id to reset on switch
+
+  // --- 3. REALTIME MEMBER COUNT SUBSCRIPTION ---
   useEffect(() => {
     const fetchCount = async () => {
       const { count } = await supabase
@@ -102,7 +129,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     return () => { supabase.removeChannel(channel); };
   }, [workspace.id]);
 
-  // --- 3. NOTEPAD HANDLER (Debounced Save) ---
+  // --- 4. NOTEPAD HANDLER (Debounced Save) ---
   const handleNotepadChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newVal = e.target.value;
     setNotepadContent(newVal);
@@ -121,10 +148,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       } finally {
         setIsSavingNotepad(false);
       }
-    }, 1500); // Auto-save after 1.5s of inactivity
+    }, 1500); // Auto-save after 1.5s
   };
 
-  // --- 4. ASSET HANDLERS (Direct Save) ---
+  // --- 5. ASSET HANDLERS (Direct Save) ---
   const saveAssetsToDB = async (newAssets: WorkspaceAsset[]) => {
     setIsSavingAssets(true);
     try {
@@ -132,8 +159,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         .from('workspaces')
         .update({ assets: newAssets })
         .eq('id', workspace.id);
-      // Local state is updated immediately by handlers, 
-      // but Prop update will come back from Supabase Realtime in App.tsx
     } catch (err) {
       console.error("Failed to save assets", err);
     } finally {
