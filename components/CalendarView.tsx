@@ -79,17 +79,24 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
 
-  // Helper untuk mengompensasi offset zona waktu browser
+  // Helper untuk mengompensasi offset zona waktu browser dengan SAFE CHECK
   const formatDate = (date: Date | string) => {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    const offset = d.getTimezoneOffset();
-    const adjustedDate = new Date(d.getTime() - (offset * 60 * 1000));
-    return adjustedDate.toISOString().split('T')[0];
+    try {
+      const d = typeof date === 'string' ? new Date(date) : date;
+      if (!d || isNaN(d.getTime())) return ''; // Return empty string if invalid
+      
+      const offset = d.getTimezoneOffset();
+      const adjustedDate = new Date(d.getTime() - (offset * 60 * 1000));
+      return adjustedDate.toISOString().split('T')[0];
+    } catch (e) {
+      return '';
+    }
   };
 
   const getTimeString = (dateStr?: string) => {
     if (!dateStr) return '';
     const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '';
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   };
 
@@ -131,7 +138,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       if (!activeCategories.includes(taskCat)) return false;
 
       const dDate = t.due_date ? formatDate(t.due_date) : null;
-      return dDate === todayStr;
+      return dDate && dDate === todayStr;
     });
   }, [tasks, googleEvents, activeCategories]);
 
@@ -220,6 +227,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
   const getTasksForDate = (date: Date) => {
     const dStr = formatDate(date);
+    if (!dStr) return [];
+
     return [...tasks, ...googleEvents]
       .filter(t => {
         // Filter by Category
@@ -232,8 +241,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           if (!visibleSources.includes(t.workspace_id)) return false;
         }
         if (t.is_archived) return false;
-        const startStr = formatDate(t.start_date || t.due_date!);
-        const endStr = formatDate(t.due_date!);
+        
+        const startStr = t.start_date || t.due_date ? formatDate(t.start_date || t.due_date!) : '';
+        const endStr = t.due_date ? formatDate(t.due_date) : '';
+        
+        if (!startStr || !endStr) return false;
+        
         return dStr >= startStr && dStr <= endStr;
       })
       .sort((a, b) => a.id.localeCompare(b.id));
@@ -487,9 +500,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           <div className="flex-1 grid grid-cols-7 auto-rows-fr bg-slate-50/10 relative z-30">
             {calendarDays.map((date, idx) => {
               if (!date) return <div key={`empty-${idx}`} className="bg-slate-50/5 border-r border-b border-slate-800/10" />;
-              const isToday = formatDate(new Date()) === formatDate(date);
-              const dayTasks = getTasksForDate(date);
               const dStr = formatDate(date);
+              const isToday = formatDate(new Date()) === dStr;
+              const dayTasks = getTasksForDate(date);
               const isSunday = date.getDay() === 0;
               const isSaturday = date.getDay() === 6;
 
@@ -514,7 +527,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       const isTaskStart = dStr === startStr;
                       const isTaskEnd = dStr === endStr;
                       
-                      const taskInThisWeek = dayTasks.filter(t => t.id === task.id); 
                       const segmentDays: string[] = [];
                       let tempDate = new Date(date);
                       while (tempDate.getDay() !== 0 && formatDate(tempDate) !== startStr) {
@@ -539,12 +551,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         ${!isTaskEnd && isSaturday ? 'rounded-r-md mr-0.5' : ''}
                       `;
                       
-                      // Use category color if available, else standard palette or workspace color
                       const catColor = categoryColors[task.category || 'General'];
                       const wsColor = sourceColors[task.workspace_id];
-                      // Prioritize category color for main visualization if desired, or stick to workspace/task logic
-                      // Here we use category color if dealing with personal tasks, or just use the logic from before
-                      // The prompt asked for filters to be changeable, so let's apply that logic here too
                       const taskColor = catColor || (task.parent_id ? (sourceColors['personal-subtasks'] || UI_PALETTE[0]) : (wsColor || UI_PALETTE[0]));
 
                       return (

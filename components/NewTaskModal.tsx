@@ -57,8 +57,19 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
       setTitle(initialData.title || '');
       setDescription(initialData.description || '');
       
-      const start = initialData.start_date ? new Date(initialData.start_date) : null;
-      const end = initialData.due_date ? new Date(initialData.due_date) : null;
+      let start: Date | null = null;
+      let end: Date | null = null;
+
+      try {
+        if (initialData.start_date) {
+           const d = new Date(initialData.start_date);
+           if (!isNaN(d.getTime())) start = d;
+        }
+        if (initialData.due_date) {
+           const d = new Date(initialData.due_date);
+           if (!isNaN(d.getTime())) end = d;
+        }
+      } catch (e) { console.error(e); }
       
       setStartDate(start ? start.toISOString().split('T')[0] : '');
       setStartTime(start ? start.toTimeString().slice(0, 5) : '09:00');

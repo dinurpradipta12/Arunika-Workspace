@@ -205,8 +205,6 @@ const App: React.FC = () => {
     isSettingsModalOpen
   ]);
 
-  // ... (Sisa kode useEffect, fetchData, dll tetap sama, hanya perbaikan Realtime Workspace di bawah)
-
   const getConnectionStatus = () => {
     if (!isOnline) return { color: 'text-secondary', label: 'Offline', icon: <WifiOff size={16} /> };
     if (isFetching) return { color: 'text-tertiary', label: 'Sinkronisasi...', icon: <Wifi size={16} className="animate-pulse" /> };
@@ -229,8 +227,6 @@ const App: React.FC = () => {
         }
     }
   };
-
-  // ... (Branding Effect, Click Outside Effect - Tetap Sama)
   
   useEffect(() => {
     const appName = globalBranding?.app_name || 'TaskPlay';
@@ -253,7 +249,6 @@ const App: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isNotifDropdownOpen]);
 
-  // ... (Category Effect, fetchData, fetchOrCreateUser - Tetap Sama)
   useEffect(() => {
     if (tasks.length > 0) {
       const usedCategories = new Set(tasks.map(t => t.category || 'General'));
@@ -353,7 +348,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // ... (Auth useEffects - Tetap Sama)
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -397,12 +391,10 @@ const App: React.FC = () => {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
         .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
       
-      // FIX: Realtime Workspace Update
       if (workspaceChannelRef.current) supabase.removeChannel(workspaceChannelRef.current);
       workspaceChannelRef.current = supabase
         .channel('workspaces-live')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, (payload) => {
-           // Jika ada update (misal notepad), update state local tanpa full refetch agar transisi smooth
            if (payload.eventType === 'UPDATE') {
               setWorkspaces(prev => prev.map(ws => 
                  ws.id === payload.new.id ? { ...ws, ...payload.new } : ws
@@ -413,7 +405,6 @@ const App: React.FC = () => {
         })
         .subscribe();
 
-      // ... (Config, Notif, Status Channel - Tetap Sama)
       if (configChannelRef.current) supabase.removeChannel(configChannelRef.current);
       configChannelRef.current = supabase.channel('app-config-live').on('postgres_changes', { event: '*', schema: 'public', table: 'app_config', filter: 'id=eq.1'}, (payload) => { setGlobalBranding(payload.new as AppConfig); }).subscribe();
 
@@ -437,7 +428,6 @@ const App: React.FC = () => {
     }
   }, [activeWorkspaceId]);
 
-  // ... (CRUD Handlers, Drag & Drop, Render - Tetap Sama)
   const handleCreateWorkspace = async (data: { name: string; category: string; description: string; type: WorkspaceType }) => {
     if (!currentUser) return;
     try {
@@ -559,7 +549,6 @@ const App: React.FC = () => {
     setIsNewTaskModalOpen(true);
   };
 
-  // ... (Notification Handlers - Tetap Sama)
   const handleMarkAllRead = async () => {
     if (!currentUser) return;
     try { const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', currentUser.id).eq('is_read', false); if (error) throw error; setNotifications(prev => prev.map(n => ({ ...n, is_read: true }))); } catch (err) { console.error(err); }
@@ -595,7 +584,6 @@ const App: React.FC = () => {
   const currentWorkspaceTasks = activeWorkspaceId ? tasks.filter(t => t.workspace_id === activeWorkspaceId) : [];
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
 
-  // ... (Loading & Auth Check - Tetap Sama)
   if (isAuthLoading || (isAuthenticated && isProfileLoading)) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
@@ -867,7 +855,7 @@ const App: React.FC = () => {
             </div>
           </header>
 
-          <div className="flex-1 p-6 max-w-7xl mx-auto w-full">
+          <div className={`flex-1 mx-auto w-full transition-all duration-300 ${activeTab === 'calendar' ? 'p-4 px-12 max-w-[1920px]' : 'p-6 max-w-6xl'}`}>
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
             {activeTab === 'team' && <TeamSpace currentWorkspace={activeWorkspace} currentUser={currentUser} workspaces={workspaces} />}

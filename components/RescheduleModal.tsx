@@ -17,7 +17,12 @@ export const RescheduleModal: React.FC<RescheduleModalProps> = ({ task, isOpen, 
 
   useEffect(() => {
     if (task?.due_date) {
-      setDate(new Date(task.due_date).toISOString().split('T')[0]);
+      const d = new Date(task.due_date);
+      if (!isNaN(d.getTime())) {
+        setDate(d.toISOString().split('T')[0]);
+      } else {
+        setDate('');
+      }
     } else {
       setDate('');
     }
