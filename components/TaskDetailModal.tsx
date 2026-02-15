@@ -1,8 +1,9 @@
 
-import React from 'react';
-import { Task, TaskStatus } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Task, TaskStatus, TaskPriority, WorkspaceAsset } from '../types';
 import { TaskDetailView } from './TaskDetailView';
-import { X } from 'lucide-react';
+import { X, Calendar, Flag, FileText, Link2, Plus, Save, ExternalLink, Trash2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface TaskDetailModalProps {
   isOpen: boolean;
@@ -31,34 +32,258 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onInspectTask,
   onRescheduleTask
 }) => {
+  const [internalActiveSubtask, setInternalActiveSubtask] = useState<Task | null>(null);
+  
+  const [assets, setAssets] = useState<WorkspaceAsset[]>([]);
+  const [isAddingAsset, setIsAddingAsset] = useState(false);
+  const [newAssetName, setNewAssetName] = useState('');
+  const [newAssetUrl, setNewAssetUrl] = useState('');
+  const [isSavingAsset, setIsSavingAsset] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+        setInternalActiveSubtask(null);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (internalActiveSubtask) {
+      setAssets(internalActiveSubtask.assets || []);
+    } else {
+      setAssets([]);
+    }
+  }, [internalActiveSubtask]);
+
   if (!isOpen || !parentTask) return null;
 
+  const handleInternalInspect = (task: Task) => {
+      setInternalActiveSubtask(task);
+  };
+
+  const handleCloseSubtask = () => {
+      setInternalActiveSubtask(null);
+  };
+
+  const handleSaveAsset = async () => {
+    if (!newAssetName || !newAssetUrl || !internalActiveSubtask) return;
+    setIsSavingAsset(true);
+    try {
+      const newAsset: WorkspaceAsset = {
+        id: Date.now(),
+        name: newAssetName,
+        url: newAssetUrl
+      };
+      const updatedAssets = [...assets, newAsset];
+      
+      const { error } = await supabase
+        .from('tasks')
+        .update({ assets: updatedAssets })
+        .eq('id', internalActiveSubtask.id);
+
+      if (error) throw error;
+      
+      setAssets(updatedAssets);
+      setNewAssetName('');
+      setNewAssetUrl('');
+      setIsAddingAsset(false);
+    } catch (err) {
+      console.error("Gagal simpan asset:", err);
+      alert("Gagal menyimpan asset");
+    } finally {
+      setIsSavingAsset(false);
+    }
+  };
+
+  const handleDeleteAsset = async (assetId: number) => {
+    if(!internalActiveSubtask || !confirm("Hapus asset ini?")) return;
+    try {
+      const updatedAssets = assets.filter(a => a.id !== assetId);
+      await supabase.from('tasks').update({ assets: updatedAssets }).eq('id', internalActiveSubtask.id);
+      setAssets(updatedAssets);
+    } catch(err) {
+      console.error(err);
+    }
+  };
+
+  const getPriorityConfig = (priority: TaskPriority) => {
+    switch (priority) {
+      case TaskPriority.HIGH: return { bg: 'bg-secondary', text: 'High Priority' }; 
+      case TaskPriority.MEDIUM: return { bg: 'bg-tertiary', text: 'Medium Priority' }; 
+      case TaskPriority.LOW: return { bg: 'bg-quaternary', text: 'Low Priority' }; 
+      default: return { bg: 'bg-slate-400', text: 'Normal' };
+    }
+  };
+
+  const parentPriorityConfig = getPriorityConfig(parentTask.priority);
+  const subtaskPriorityConfig = internalActiveSubtask ? getPriorityConfig(internalActiveSubtask.priority) : { bg: 'bg-slate-800' };
+
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="bg-white border-4 border-slate-800 rounded-3xl shadow-[16px_16px_0px_0px_#1E293B] w-full max-w-4xl h-[85vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-300 relative">
+    <div 
+        className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-500 ease-out"
+        onClick={onClose}
+    >
+      {/* Outer Flex Container: Added Padding here (px-4 md:px-8) */}
+      <div 
+        className="flex h-[85vh] w-full max-w-[98vw] items-center justify-center relative transition-all duration-500 px-4 md:px-8"
+        onClick={(e) => e.stopPropagation()} 
+      >
+        
+        {/* --- EXTERNAL FLOATING ELEMENTS --- */}
+        
+        {/* 1. Close Button (Top Right Outside) */}
         <button 
             onClick={onClose} 
-            className="absolute top-6 right-6 z-50 p-2 bg-white border-2 border-slate-800 rounded-xl hover:bg-slate-100 shadow-sm transition-all"
+            className="absolute -top-14 -right-2 z-[70] p-3 bg-white text-slate-800 border-2 border-slate-800 rounded-full hover:bg-slate-800 hover:text-white shadow-pop-active hover:scale-110 transition-all"
+            title="Tutup Modal"
         >
             <X size={24} strokeWidth={3} />
         </button>
-        
-        <div className="flex-1 overflow-y-auto p-8">
-           <TaskDetailView 
-             parentTask={parentTask}
-             subTasks={subTasks}
-             onBack={onClose} // Reuse Back button as Close
-             onStatusChange={onStatusChange}
-             onAddTask={onAddTask}
-             onEditTask={onEditTask}
-             onArchiveTask={onArchiveTask}
-             onDeleteTask={onDeleteTask}
-             priorityFilter="all"
-             onPriorityFilterChange={() => {}}
-             onInspectTask={onInspectTask}
-             onRescheduleTask={onRescheduleTask}
-           />
+
+        {/* 2. Priority Label (Top Left Outside) */}
+        <div className={`absolute -top-10 left-8 z-[60] px-5 py-2 rounded-t-2xl border-x-2 border-t-2 border-slate-800 ${parentPriorityConfig.bg} text-white shadow-sm flex items-center gap-2`}>
+            <Flag size={14} strokeWidth={3} />
+            <span className="text-xs font-black uppercase tracking-widest">{parentPriorityConfig.text}</span>
         </div>
+
+
+        {/* MAIN MODAL - Task Detail */}
+        <div className="bg-white border-4 border-slate-800 rounded-3xl rounded-tl-none shadow-[16px_16px_0px_0px_#1E293B] h-full flex-1 min-w-0 overflow-hidden flex flex-col animate-in zoom-in-95 duration-500 ease-out relative z-30">
+            <div className="flex-1 overflow-y-auto p-6 md:p-8">
+                <TaskDetailView 
+                    parentTask={parentTask}
+                    subTasks={subTasks}
+                    onBack={onClose} 
+                    onStatusChange={onStatusChange}
+                    onAddTask={onAddTask}
+                    onEditTask={onEditTask}
+                    onArchiveTask={onArchiveTask}
+                    onDeleteTask={onDeleteTask}
+                    priorityFilter="all"
+                    onPriorityFilterChange={() => {}}
+                    onInspectTask={handleInternalInspect} 
+                    onRescheduleTask={onRescheduleTask}
+                />
+            </div>
+        </div>
+
+        {/* SUBTASK POPUP (DETACHED SIDE PANEL) - Colorful Design */}
+        {internalActiveSubtask && (
+            <div className="w-[400px] shrink-0 ml-6 h-full bg-slate-50 border-4 border-slate-800 rounded-3xl shadow-[-8px_8px_0px_0px_#1E293B] flex flex-col animate-in slide-in-from-bottom-10 duration-500 ease-out z-20 relative overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                {/* Header Subtask - Colorful */}
+                <div className={`p-6 border-b-4 border-slate-800 flex justify-between items-start text-white ${subtaskPriorityConfig.bg === 'bg-slate-400' ? 'bg-slate-800' : subtaskPriorityConfig.bg}`}>
+                    <div className="flex-1 pr-2">
+                        <span className="text-[9px] font-black uppercase tracking-widest opacity-80 mb-1 block">Sub-Task Detail</span>
+                        <h3 className="text-xl font-heading leading-tight">{internalActiveSubtask.title}</h3>
+                    </div>
+                    <button onClick={handleCloseSubtask} className="p-2 bg-white/20 hover:bg-white/40 rounded-xl text-white transition-colors">
+                        <X size={20} strokeWidth={3} />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-5 space-y-6">
+                    {/* Actions */}
+                    <div className="flex items-center gap-2">
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-white border border-slate-800 ${internalActiveSubtask.status === TaskStatus.DONE ? 'bg-quaternary' : 'bg-slate-800'}`}>
+                            {internalActiveSubtask.status.replace('_', ' ')}
+                        </span>
+                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-slate-500 border border-slate-300 bg-white">
+                            {internalActiveSubtask.priority}
+                        </span>
+                    </div>
+
+                    {/* Deadline */}
+                    <button 
+                        onClick={() => onRescheduleTask(internalActiveSubtask)}
+                        className="w-full p-4 bg-white border-2 border-slate-200 rounded-2xl flex items-center justify-between hover:border-slate-800 hover:shadow-pop transition-all group"
+                    >
+                        <div className="flex items-center gap-3 text-xs font-bold text-slate-600">
+                            <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-accent group-hover:text-white transition-colors">
+                                <Calendar size={16} strokeWidth={3} /> 
+                            </div>
+                            {internalActiveSubtask.due_date ? new Date(internalActiveSubtask.due_date).toLocaleDateString() : 'Set Deadline'}
+                        </div>
+                        <div className="text-[10px] font-black uppercase text-accent opacity-0 group-hover:opacity-100 transition-opacity">Change</div>
+                    </button>
+
+                    {/* Description */}
+                    <div className="space-y-2">
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                            <FileText size={12} /> Description
+                        </h4>
+                        <div className="p-4 bg-white border-2 border-slate-200 rounded-2xl text-sm text-slate-700 min-h-[100px] leading-relaxed">
+                            {internalActiveSubtask.description || <span className="text-slate-400 italic">No description provided.</span>}
+                        </div>
+                    </div>
+
+                    {/* Assets */}
+                    <div className="space-y-3 pt-4 border-t-2 border-slate-200">
+                        <div className="flex items-center justify-between">
+                            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                                <Link2 size={12} /> Assets
+                            </h4>
+                            <button onClick={() => setIsAddingAsset(!isAddingAsset)} className="text-[10px] font-bold text-accent hover:underline flex items-center gap-1">
+                                <Plus size={10} /> Add
+                            </button>
+                        </div>
+
+                        {isAddingAsset && (
+                            <div className="p-3 bg-white border-2 border-dashed border-slate-300 rounded-xl space-y-2 animate-in fade-in">
+                                <input 
+                                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded outline-none focus:border-accent"
+                                    placeholder="Name..."
+                                    value={newAssetName}
+                                    onChange={e => setNewAssetName(e.target.value)}
+                                    autoFocus
+                                />
+                                <input 
+                                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded outline-none focus:border-accent"
+                                    placeholder="URL..."
+                                    value={newAssetUrl}
+                                    onChange={e => setNewAssetUrl(e.target.value)}
+                                />
+                                <div className="flex justify-end gap-2">
+                                    <button onClick={() => setIsAddingAsset(false)} className="text-[10px] text-slate-400">Cancel</button>
+                                    <button onClick={handleSaveAsset} disabled={isSavingAsset} className="text-[10px] font-bold text-accent">{isSavingAsset ? 'Saving...' : 'Save'}</button>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            {assets.map(asset => (
+                                <div key={asset.id} className="flex items-center justify-between p-2 bg-white border border-slate-200 rounded-lg group hover:border-slate-400 transition-colors">
+                                    <a href={asset.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 min-w-0 flex-1">
+                                        <ExternalLink size={12} className="text-slate-400 shrink-0" />
+                                        <span className="text-xs font-bold text-slate-700 truncate">{asset.name}</span>
+                                    </a>
+                                    <button onClick={() => handleDeleteAsset(asset.id)} className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Trash2 size={12} />
+                                    </button>
+                                </div>
+                            ))}
+                            {assets.length === 0 && !isAddingAsset && <p className="text-[10px] text-slate-400 italic text-center py-2">No assets attached.</p>}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Footer Subtask */}
+                <div className="p-5 bg-white border-t-2 border-slate-200 flex justify-between items-center">
+                    <button 
+                        onClick={() => { onEditTask(internalActiveSubtask); }}
+                        className="text-xs font-bold text-slate-500 hover:text-slate-800"
+                    >
+                        Edit Task
+                    </button>
+                    <button 
+                        onClick={() => { 
+                            onStatusChange(internalActiveSubtask.id, internalActiveSubtask.status === TaskStatus.DONE ? TaskStatus.TODO : TaskStatus.DONE);
+                        }}
+                        className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider border-2 border-slate-800 shadow-sm transition-all active:translate-y-0.5 ${internalActiveSubtask.status === TaskStatus.DONE ? 'bg-white text-slate-800' : 'bg-quaternary text-slate-900'}`}
+                    >
+                        {internalActiveSubtask.status === TaskStatus.DONE ? 'Reopen' : 'Complete'}
+                    </button>
+                </div>
+            </div>
+        )}
       </div>
     </div>
   );

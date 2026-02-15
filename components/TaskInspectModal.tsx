@@ -93,14 +93,25 @@ export const TaskInspectModal: React.FC<TaskInspectModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-300">
+    <div 
+        className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-500 ease-out"
+        onClick={onClose}
+    >
       {/* CARD CONTAINER: Playful Purple & Yellow Theme */}
       <div 
-        className="relative bg-white border-4 border-slate-800 rounded-[32px] w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300 shadow-[12px_12px_0px_0px_#FBBF24] flex flex-col max-h-[90vh]"
+        className="relative bg-white border-4 border-slate-800 rounded-[32px] w-full max-w-lg overflow-visible animate-in zoom-in-95 duration-500 ease-out shadow-[12px_12px_0px_0px_#FBBF24] flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Close Button Outside */}
+        <button 
+            onClick={onClose} 
+            className="absolute -top-12 -right-2 p-3 bg-tertiary text-slate-900 border-2 border-slate-800 rounded-full hover:bg-white hover:rotate-90 transition-all shadow-pop-active relative z-50"
+        >
+            <X size={24} strokeWidth={3} />
+        </button>
+
         {/* HEADER: Purple Background */}
-        <div className="bg-accent p-6 border-b-4 border-slate-800 flex items-start justify-between shrink-0 relative overflow-hidden">
+        <div className="bg-accent p-6 border-b-4 border-slate-800 flex items-start justify-between shrink-0 relative overflow-hidden rounded-t-[28px]">
           {/* Decorative Pattern in Header */}
           <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full blur-2xl -translate-y-10 translate-x-5" />
           
@@ -119,14 +130,6 @@ export const TaskInspectModal: React.FC<TaskInspectModalProps> = ({
               {task.title}
             </h2>
           </div>
-          
-          {/* Close Button: Yellow pop */}
-          <button 
-            onClick={onClose} 
-            className="p-2 bg-tertiary text-slate-900 border-2 border-slate-800 rounded-xl hover:bg-white hover:rotate-90 transition-all shadow-pop-active relative z-10"
-          >
-            <X size={24} strokeWidth={3} />
-          </button>
         </div>
 
         {/* BODY */}
@@ -255,7 +258,7 @@ export const TaskInspectModal: React.FC<TaskInspectModalProps> = ({
         </div>
 
         {/* FOOTER ACTIONS */}
-        <div className="p-5 bg-slate-50 border-t-4 border-slate-800 flex items-center justify-between shrink-0">
+        <div className="p-5 bg-slate-50 border-t-4 border-slate-800 flex items-center justify-between shrink-0 rounded-b-[28px]">
            <div className="flex gap-2">
              <button 
                onClick={() => { onArchive(task.id); onClose(); }} 

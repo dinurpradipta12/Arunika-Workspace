@@ -1,8 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Calendar, Clock, ArrowRight } from 'lucide-react';
 import { Task } from '../types';
-import { Button } from './ui/Button';
 
 interface RescheduleModalProps {
   task: Task | null;
@@ -13,7 +12,6 @@ interface RescheduleModalProps {
 
 export const RescheduleModal: React.FC<RescheduleModalProps> = ({ task, isOpen, onClose, onSave }) => {
   const [date, setDate] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (task?.due_date) {
@@ -37,39 +35,46 @@ export const RescheduleModal: React.FC<RescheduleModalProps> = ({ task, isOpen, 
   };
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
+    <div 
+        className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-500 ease-out"
+        onClick={onClose}
+    >
       <div 
-        className="bg-white border-4 border-slate-800 rounded-3xl shadow-[12px_12px_0px_0px_#FBBF24] w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-300"
+        className="relative bg-white border-4 border-slate-800 rounded-3xl shadow-[12px_12px_0px_0px_#FBBF24] w-full max-w-sm overflow-visible animate-in zoom-in-95 duration-500 ease-out"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="bg-tertiary p-6 border-b-4 border-slate-800 flex items-center justify-between">
+        {/* Close Button Outside */}
+        <button 
+            onClick={onClose} 
+            className="absolute -top-12 -right-2 p-3 bg-white text-slate-800 border-2 border-slate-800 rounded-full hover:bg-slate-800 hover:text-white shadow-pop-active transition-all"
+        >
+            <X size={24} strokeWidth={3} />
+        </button>
+
+        <div className="bg-tertiary p-6 border-b-4 border-slate-800 flex items-center justify-between rounded-t-[28px]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white border-2 border-slate-800 rounded-xl flex items-center justify-center shadow-sm">
               <Clock size={20} className="text-slate-800" strokeWidth={3} />
             </div>
             <h2 className="text-xl font-heading text-slate-900">Reschedule</h2>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-black/10 rounded-lg transition-colors">
-            <X size={24} strokeWidth={3} />
-          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">New Deadline</label>
-            <div className="relative">
+            <div className="relative group">
               <div 
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer hover:text-accent z-10"
-                onClick={() => inputRef.current?.showPicker()}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none group-hover:text-accent transition-colors"
               >
                  <Calendar size={20} />
               </div>
+              {/* FIXED: Native input completely covers the area, no showPicker() needed */}
               <input 
-                ref={inputRef}
                 type="date" 
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-800 rounded-2xl font-bold text-slate-800 focus:bg-white focus:shadow-pop transition-all outline-none"
+                className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-800 rounded-2xl font-bold text-slate-800 focus:bg-white focus:shadow-pop transition-all outline-none cursor-pointer"
                 required
               />
             </div>

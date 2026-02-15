@@ -313,7 +313,12 @@ const App: React.FC = () => {
   }, [currentUser?.id, visibleSources.length]);
 
   const fetchOrCreateUser = useCallback(async (sessionUser: any) => {
-    setIsProfileLoading(true);
+    // FIX: Hanya set loading jika currentUser belum ada (initial load)
+    // Jika sudah ada (refresh/tab switch), lakukan background update
+    if (!currentUser) {
+      setIsProfileLoading(true);
+    }
+    
     try {
       let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
       const isLegacyAdmin = sessionUser.email === 'arunika@taskplay.com' || sessionUser.user_metadata?.username === 'arunika' || sessionUser.email?.includes('arunika');
@@ -350,7 +355,7 @@ const App: React.FC = () => {
     } finally {
       setIsProfileLoading(false);
     }
-  }, []);
+  }, [currentUser]); // Add currentUser to dependency to check state
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -763,7 +768,10 @@ const App: React.FC = () => {
           onEditTask={openEditModal}
           onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); setDetailTask(null); }} 
           onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); setDetailTask(null); }} 
-          onInspectTask={(t) => { setInspectedTask(t); setDetailTask(null); }}
+          onInspectTask={(t) => {
+             // DO NOTHING HERE because TaskDetailModal handles subtask inspection internally now
+             // But we can trigger a refresh if needed
+          }}
           onRescheduleTask={(t) => setReschedulingTask(t)}
         />
 

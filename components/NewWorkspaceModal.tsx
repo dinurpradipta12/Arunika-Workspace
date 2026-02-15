@@ -30,8 +30,8 @@ export const NewWorkspaceModal: React.FC<NewWorkspaceModalProps> = ({ isOpen, on
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white border-4 border-slate-800 rounded-[32px] shadow-[12px_12px_0px_0px_#F472B6] w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-500 ease-out">
+      <div className="bg-white border-4 border-slate-800 rounded-[32px] shadow-[12px_12px_0px_0px_#F472B6] w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-500 ease-out">
         <div className="bg-secondary p-6 border-b-4 border-slate-800 flex items-center justify-between text-white">
           <div className="flex items-center gap-3">
             <Briefcase size={24} strokeWidth={3} />

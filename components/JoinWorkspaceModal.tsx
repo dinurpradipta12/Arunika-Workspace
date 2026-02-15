@@ -45,8 +45,8 @@ export const JoinWorkspaceModal: React.FC<JoinWorkspaceModalProps> = ({ isOpen, 
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="bg-white border-4 border-slate-800 rounded-3xl shadow-[12px_12px_0px_0px_#8B5CF6] w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-500 ease-out">
+      <div className="bg-white border-4 border-slate-800 rounded-3xl shadow-[12px_12px_0px_0px_#8B5CF6] w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-500 ease-out">
         <div className="bg-accent p-6 border-b-4 border-slate-800 flex items-center justify-between text-white">
           <div className="flex items-center gap-3">
             <Key size={24} strokeWidth={3} />

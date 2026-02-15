@@ -49,9 +49,6 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
 
-  const startDateRef = useRef<HTMLInputElement>(null);
-  const endDateRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     if (initialData) {
       setTitle(initialData.title || '');
@@ -145,18 +142,29 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   const isUpdating = !!initialData?.id;
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white border-4 border-slate-800 rounded-[32px] shadow-[12px_12px_0px_0px_#1E293B] w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
-        <div className={`p-6 border-b-4 border-slate-800 flex items-center justify-between text-white shrink-0 ${isSubTask ? 'bg-quaternary' : 'bg-accent'}`}>
+    <div 
+        className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-500 ease-out"
+        onClick={onClose}
+    >
+      <div 
+        className="relative bg-white border-4 border-slate-800 rounded-[32px] shadow-[12px_12px_0px_0px_#1E293B] w-full max-w-lg overflow-visible animate-in zoom-in-95 duration-500 ease-out flex flex-col max-h-[90vh]"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Close Button Outside */}
+        <button 
+            onClick={onClose} 
+            className="absolute -top-12 -right-2 p-3 bg-white text-slate-800 border-2 border-slate-800 rounded-full hover:bg-slate-800 hover:text-white shadow-pop-active transition-all"
+        >
+            <X size={24} strokeWidth={3} />
+        </button>
+
+        <div className={`p-6 border-b-4 border-slate-800 flex items-center justify-between text-white shrink-0 rounded-t-[28px] ${isSubTask ? 'bg-quaternary' : 'bg-accent'}`}>
           <div className="flex items-center gap-3">
             <Layout size={24} strokeWidth={3} />
             <h2 className="text-2xl font-heading">
               {isUpdating ? 'Perbarui Data' : 'Agenda / Task Baru'}
             </h2>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-xl transition-colors">
-            <X size={24} strokeWidth={3} />
-          </button>
         </div>
         
         <form className="p-6 overflow-y-auto space-y-6" onSubmit={handleSubmit}>
@@ -228,15 +236,13 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               <div className="space-y-2">
                 <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Mulai</label>
                 <div className="relative">
-                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer hover:text-accent" onClick={() => startDateRef.current?.showPicker()}>
-                      <Calendar size={18} />
-                   </div>
+                   <Calendar size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" />
+                   {/* SAFE PICKER: Input covers the icon, click works natively */}
                    <input 
-                    ref={startDateRef}
                     type="date" 
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full pl-10 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-accent text-sm"
+                    className="w-full pl-10 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-accent text-sm relative z-0"
                    />
                 </div>
                 {!isAllDay && (
@@ -251,15 +257,13 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               <div className="space-y-2">
                 <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Selesai</label>
                 <div className="relative">
-                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer hover:text-accent" onClick={() => endDateRef.current?.showPicker()}>
-                      <Calendar size={18} />
-                   </div>
+                   <Calendar size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" />
+                   {/* SAFE PICKER */}
                    <input 
-                    ref={endDateRef}
                     type="date" 
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full pl-10 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-accent text-sm"
+                    className="w-full pl-10 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-accent text-sm relative z-0"
                    />
                 </div>
                 {!isAllDay && (
@@ -360,7 +364,6 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               </div>
             </div>
 
-            {/* moved description here */}
             <Input 
               label="Keterangan Task / Deskripsi" 
               isTextArea

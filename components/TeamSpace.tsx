@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   UserPlus, 
@@ -383,7 +384,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   };
 
   return (
-    <div className="space-y-12 pt-6 animate-in fade-in slide-in-from-right-4 duration-500 pb-20">
+    <div className="space-y-12 pt-6 animate-in fade-in slide-in-from-right-4 duration-500 ease-out pb-20">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 px-1">
         <div>
           <h2 className="text-5xl font-heading text-slate-900 tracking-tight">Team Space</h2>
@@ -404,7 +405,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
             isHoverable={false}
           >
             {successData ? (
-              <div className="space-y-4 animate-in zoom-in-95 duration-300">
+              <div className="space-y-4 animate-in zoom-in-95 duration-500 ease-out">
                 <div className="p-5 bg-quaternary/10 border-2 border-quaternary rounded-2xl">
                    <div className="flex items-center gap-3 mb-3">
                       <div className="w-12 h-12 bg-white border-2 border-quaternary rounded-full flex items-center justify-center shadow-sm">
@@ -534,7 +535,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                   {members.map((member) => (
                     <tr 
                       key={member.id} 
-                      className="group animate-in fade-in duration-300 cursor-pointer"
+                      className="group animate-in fade-in duration-500 ease-out cursor-pointer"
                       onClick={() => handleRowClick(member)}
                     >
                       <td className="bg-slate-50 border-y-2 border-l-2 border-slate-800 rounded-l-2xl px-4 py-4 group-hover:bg-accent/5 transition-colors">
@@ -568,7 +569,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                            <MoreHorizontal size={18} />
                          </button>
                          {memberActionMenuId === member.id && (
-                           <div className="absolute right-4 top-14 bg-white border-2 border-slate-800 rounded-xl shadow-pop z-50 w-40 overflow-hidden animate-in fade-in zoom-in-95">
+                           <div className="absolute right-4 top-14 bg-white border-2 border-slate-800 rounded-xl shadow-pop z-50 w-40 overflow-hidden animate-in fade-in zoom-in-95 duration-500 ease-out">
                               <button onClick={(e) => { e.stopPropagation(); handleDeleteUser(member.user_id, member.id); }} className="w-full text-left px-4 py-3 text-xs font-bold text-secondary hover:bg-secondary/10 flex items-center gap-2">
                                  <Trash2 size={14} /> Hapus User
                               </button>
@@ -591,8 +592,8 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
 
       {/* Member Detail Modal */}
       {isDetailOpen && selectedMember && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white border-4 border-slate-800 rounded-3xl shadow-[16px_16px_0px_0px_#1E293B] w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-500 ease-out">
+          <div className="bg-white border-4 border-slate-800 rounded-3xl shadow-[16px_16px_0px_0px_#1E293B] w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-500 ease-out">
              <div className="p-6 bg-tertiary border-b-4 border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                    <Shield size={24} className="text-slate-900" strokeWidth={3} />
