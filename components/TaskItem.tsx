@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { CheckCircle2, Clock, Circle, AlertCircle, ChevronRight, MoreHorizontal, Edit2, Trash2, Calendar, Archive, GripVertical, RotateCcw, CornerDownRight } from 'lucide-react';
+import { CheckCircle2, Clock, Circle, ChevronRight, MoreHorizontal, Edit2, Trash2, Archive, GripVertical, RotateCcw, CornerDownRight, User } from 'lucide-react';
 import { Task, TaskPriority, TaskStatus } from '../types';
 
 interface TaskItemProps {
@@ -12,10 +12,24 @@ interface TaskItemProps {
   onArchive?: (id: string) => void;
   onReschedule?: (task: Task) => void;
   onRestore?: (id: string) => void;
-  parentTitle?: string; // New Prop for Subtask Indication
+  parentTitle?: string;
+  isSubtask?: boolean; // New prop for visual differentiation
+  assigneeName?: string; // New prop to show assignee
 }
 
-export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClick, onEdit, onDelete, onArchive, onReschedule, onRestore, parentTitle }) => {
+export const TaskItem: React.FC<TaskItemProps> = ({ 
+  task, 
+  onStatusChange, 
+  onClick, 
+  onEdit, 
+  onDelete, 
+  onArchive, 
+  onReschedule, 
+  onRestore, 
+  parentTitle,
+  isSubtask = false,
+  assigneeName
+}) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -41,12 +55,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClic
   }, [isMenuOpen]);
 
   const handleContainerClick = (e: React.MouseEvent) => {
-    // Prevent firing if clicking menu or checkbox
     if ((e.target as HTMLElement).closest('button')) return;
-    
-    if (onClick) {
-      onClick(task);
-    }
+    if (onClick) onClick(task);
   };
 
   const handleCheckboxClick = (e: React.MouseEvent) => {
@@ -60,33 +70,20 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClic
     setIsMenuOpen(!isMenuOpen);
   };
 
-  const handleDragStart = (e: React.DragEvent) => {
-    if (task.is_archived) {
-      e.preventDefault();
-      return;
-    }
-    e.dataTransfer.setData('taskId', task.id);
-    e.dataTransfer.effectAllowed = 'move';
-    const target = e.currentTarget as HTMLElement;
-    target.classList.add('opacity-50');
-  };
-
-  const handleDragEnd = (e: React.DragEvent) => {
-    const target = e.currentTarget as HTMLElement;
-    target.classList.remove('opacity-50');
-  };
+  // Visual differentiation styles
+  const containerStyles = isSubtask
+    ? "bg-slate-50 border-slate-300 shadow-none hover:border-slate-400 opacity-90 scale-[0.98] ml-4"
+    : "bg-white border-slate-800 shadow-sm hover:shadow-pop";
 
   return (
     <div 
       draggable={!task.is_archived}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
       onClick={handleContainerClick}
-      className={`group relative flex items-start justify-between p-4 border-2 border-slate-800 rounded-xl transition-all mb-3 cursor-grab active:cursor-grabbing ${onClick ? 'cursor-pointer hover:-translate-y-1' : ''} ${task.is_archived ? 'bg-slate-50 border-slate-400 grayscale opacity-75 shadow-none' : 'bg-white shadow-sm hover:shadow-pop'}`}
+      className={`group relative flex items-start justify-between p-4 border-2 rounded-xl transition-all mb-3 cursor-pointer ${containerStyles} ${task.is_archived ? 'grayscale opacity-75 shadow-none' : ''}`}
     >
       <div className="flex items-start gap-3 flex-1 min-w-0">
         {!task.is_archived && (
-          <div className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity pt-1 shrink-0">
+          <div className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity pt-1 shrink-0 cursor-grab active:cursor-grabbing">
             <GripVertical size={18} />
           </div>
         )}
@@ -112,10 +109,18 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClic
             
             {/* Parent Task Indicator */}
             {parentTitle && (
-              <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[9px] font-black uppercase tracking-widest border border-slate-200">
+              <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-200 text-slate-500 rounded text-[9px] font-black uppercase tracking-widest border border-slate-300">
                 <CornerDownRight size={10} strokeWidth={3} />
                 <span className="truncate max-w-[100px]">{parentTitle}</span>
               </div>
+            )}
+
+            {/* Assignee Indicator */}
+            {assigneeName && (
+               <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-black uppercase tracking-widest border border-blue-100">
+                 <User size={10} strokeWidth={3} />
+                 <span className="truncate max-w-[100px]">{assigneeName}</span>
+               </div>
             )}
 
             {task.due_date && (
@@ -124,6 +129,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClic
                 {new Date(task.due_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
               </div>
             )}
+            
             {task.is_archived && (
               <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-200 text-slate-500 rounded text-[9px] font-black uppercase tracking-widest border border-slate-300">
                 <Archive size={10} /> Archived
@@ -169,7 +175,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task, onStatusChange, onClic
                   onClick={() => { onReschedule?.(task); setIsMenuOpen(false); }}
                   className="w-full flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm font-bold text-slate-700 transition-colors"
                 >
-                  <Calendar size={14} /> Reschedule
+                  <Clock size={14} /> Reschedule
                 </button>
               </>
             ) : (

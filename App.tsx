@@ -56,6 +56,7 @@ const App: React.FC = () => {
   
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive' | 'workspace_view'>('dashboard');
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [activeWorkspaceMembers, setActiveWorkspaceMembers] = useState<any[]>([]); // New state for workspace members
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -320,6 +321,26 @@ const App: React.FC = () => {
     }
   }, [currentUser?.id, isAuthenticated, fetchData]);
 
+  // --- Fetch Workspace Members Logic ---
+  useEffect(() => {
+    if (activeWorkspaceId) {
+      const fetchMembers = async () => {
+        const { data } = await supabase
+          .from('workspace_members')
+          .select(`
+             id, role, user_id, 
+             users:user_id (id, name, email, avatar_url)
+          `)
+          .eq('workspace_id', activeWorkspaceId);
+        
+        setActiveWorkspaceMembers(data || []);
+      };
+      fetchMembers();
+    } else {
+      setActiveWorkspaceMembers([]);
+    }
+  }, [activeWorkspaceId]);
+
   const handleCreateWorkspace = async (data: { name: string; category: string; description: string; type: WorkspaceType }) => {
     if (!currentUser) return;
     try {
@@ -375,7 +396,8 @@ const App: React.FC = () => {
         is_all_day: taskData.is_all_day ?? true,
         is_archived: taskData.is_archived ?? false,
         category: taskData.category || 'General',
-        created_by: currentUser.id
+        created_by: currentUser.id,
+        assigned_to: taskData.assigned_to || null // Add assigned_to
       };
 
       if (editingTask && editingTask.id) {
@@ -570,6 +592,7 @@ const App: React.FC = () => {
               setCategoryColors(prev => ({...prev, [cat]: UI_PALETTE[categories.length % UI_PALETTE.length]}));
             }
           }}
+          members={activeWorkspaceMembers} // Pass active members to modal
         />
         
         <NewWorkspaceModal 
@@ -670,8 +693,8 @@ const App: React.FC = () => {
               <WorkspaceView 
                 workspace={activeWorkspace}
                 tasks={currentWorkspaceTasks}
-                onAddTask={() => {
-                  setEditingTask({ workspace_id: activeWorkspaceId } as Task);
+                onAddTask={(initialData) => {
+                  setEditingTask({ workspace_id: activeWorkspaceId, ...initialData } as Task);
                   setIsNewTaskModalOpen(true);
                 }}
                 onStatusChange={handleStatusChange}

@@ -28,14 +28,14 @@ import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 import { TaskItem } from './TaskItem';
-import { TaskInspectModal } from './TaskInspectModal';
+import { TaskDetailModal } from './TaskDetailModal'; 
 import { RescheduleModal } from './RescheduleModal';
 import { supabase } from '../lib/supabase';
 
 interface WorkspaceViewProps {
   workspace: Workspace;
   tasks: Task[];
-  onAddTask: () => void;
+  onAddTask: (initialData?: Partial<Task>) => void;
   onStatusChange: (id: string, status: TaskStatus) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
@@ -306,6 +306,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     return parent ? parent.title : 'Unknown Parent Task';
   };
 
+  // Filter Subtasks for selected inspected task
+  const inspectedSubTasks = useMemo(() => {
+    if (!inspectedTask) return [];
+    return tasks.filter(t => t.parent_id === inspectedTask.id && !t.is_archived);
+  }, [inspectedTask, tasks]);
+
   // --- RENDER MODAL CONTENT ---
   const renderModalContent = () => {
     if (!activeModal) return null;
@@ -383,6 +389,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                       onClick={() => { setInspectedTask(task); setActiveModal(null); }}
                       onEdit={() => { onEditTask(task); setActiveModal(null); }}
                       onDelete={(id) => { onDeleteTask(id); setActiveModal(null); }}
+                      assigneeName={members.find(m => m.user_id === task.assigned_to)?.users?.name}
                    />
                  ))
                }
@@ -406,10 +413,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                              <div 
                                key={st.id} 
                                onClick={() => { setInspectedTask(st); setActiveModal(null); }}
-                               className="flex items-center justify-between p-2 border border-slate-100 rounded-xl hover:bg-slate-50 cursor-pointer"
+                               className="cursor-pointer"
                              >
-                                <span className={`text-sm font-bold ${st.status === TaskStatus.DONE ? 'line-through text-slate-400' : 'text-slate-700'}`}>{st.title}</span>
-                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${st.status === TaskStatus.DONE ? 'bg-quaternary text-white' : 'bg-slate-200 text-slate-500'}`}>{st.status.replace('_', ' ')}</span>
+                                <TaskItem 
+                                  task={st} 
+                                  onStatusChange={onStatusChange} 
+                                  isSubtask 
+                                  assigneeName={members.find(m => m.user_id === st.assigned_to)?.users?.name}
+                                />
                              </div>
                           ))}
                        </div>
@@ -477,15 +488,20 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       {/* MODAL RENDER */}
       {renderModalContent()}
 
-      <TaskInspectModal 
-        task={inspectedTask} 
+      <TaskDetailModal 
+        parentTask={inspectedTask} 
+        subTasks={inspectedSubTasks}
         isOpen={!!inspectedTask} 
         onClose={() => setInspectedTask(null)} 
         onStatusChange={onStatusChange} 
-        onEdit={(t) => { setInspectedTask(null); onEditTask(t); }} 
-        onReschedule={(t) => setReschedulingTask(t)} 
-        onDelete={(id) => { setInspectedTask(null); onDeleteTask(id); }} 
-        onArchive={(id) => { setInspectedTask(null); onArchiveTask ? onArchiveTask(id) : onDeleteTask(id); }} 
+        onAddTask={() => {
+          if (inspectedTask) onAddTask({ parent_id: inspectedTask.id });
+        }}
+        onEditTask={(t) => { setInspectedTask(null); onEditTask(t); }} 
+        onRescheduleTask={(t) => setReschedulingTask(t)} 
+        onDeleteTask={(id) => { setInspectedTask(null); onDeleteTask(id); }} 
+        onArchiveTask={(id) => { setInspectedTask(null); onArchiveTask ? onArchiveTask(id) : onDeleteTask(id); }} 
+        onInspectTask={setInspectedTask}
       />
 
       <RescheduleModal 
@@ -514,7 +530,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             {workspace.description || 'Ruang kerja kolaboratif untuk mengelola proyek dan tugas tim.'}
           </p>
         </div>
-        <Button variant="primary" onClick={onAddTask} className="px-8 py-4 shadow-pop-active">
+        <Button variant="primary" onClick={() => onAddTask()} className="px-8 py-4 shadow-pop-active">
           <Plus size={20} className="mr-2" strokeWidth={3} /> Buat Task Baru
         </Button>
       </div>
@@ -631,7 +647,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                  </div>
                  <h4 className="text-lg font-heading text-slate-400">Belum ada task</h4>
                  <p className="text-xs text-slate-400 max-w-xs mt-1">Mulai tambahkan tugas untuk workspace ini agar tim dapat mulai bekerja.</p>
-                 <Button variant="ghost" onClick={onAddTask} className="mt-4 text-accent border-accent hover:bg-accent/5">
+                 <Button variant="ghost" onClick={() => onAddTask()} className="mt-4 text-accent border-accent hover:bg-accent/5">
                    + Tambah Task
                  </Button>
                </div>
@@ -646,6 +662,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   onDelete={onDeleteTask}
                   onArchive={(id) => onArchiveTask ? onArchiveTask(id) : onDeleteTask(id)}
                   parentTitle={task.parent_id ? getParentTitle(task.parent_id) : undefined} // Pass parent title
+                  assigneeName={members.find(m => m.user_id === task.assigned_to)?.users?.name}
                 />
               ))
             )}
