@@ -22,7 +22,11 @@ import {
   ArrowRight,
   Clock,
   Calendar,
-  Edit3
+  Edit3,
+  Info,
+  Key,   // Added
+  Copy,  // Added
+  Check  // Added
 } from 'lucide-react';
 import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
@@ -73,6 +77,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   
   const [isSavingNotepad, setIsSavingNotepad] = useState(false);
   const [isSavingAssets, setIsSavingAssets] = useState(false);
+  const [isCodeCopied, setIsCodeCopied] = useState(false); // Added State
 
   const notepadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const notepadRef = useRef<HTMLTextAreaElement>(null);
@@ -90,7 +95,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   }, [members, currentUserId]);
 
   // Sync state with props when workspace changes (Navigation persistence)
-  // Ensure we don't overwrite user's typing if they are active
   useEffect(() => {
     if (document.activeElement !== notepadRef.current) {
        setNotepadContent(workspace.notepad || '');
@@ -232,6 +236,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     }
   };
 
+  const handleCopyCode = () => {
+    if (workspace.join_code) {
+      navigator.clipboard.writeText(workspace.join_code);
+      setIsCodeCopied(true);
+      setTimeout(() => setIsCodeCopied(false), 2000);
+    }
+  };
+
   const totalTasks = tasks.filter(t => !t.parent_id && !t.is_archived).length;
   const subTasksCount = tasks.filter(t => t.parent_id && !t.is_archived).length;
   const allSubtasks = tasks.filter(t => t.parent_id);
@@ -274,8 +286,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       </div>
     );
 
-    // ... (Modal Switch cases omitted for brevity, keeping same logic as before)
-    // Assuming logic remains identical for Modal contents...
     switch (activeModal) {
       case 'members': return <ModalWrapper title="Anggota Workspace" icon={<Users size={24} />}>{/* Content */}</ModalWrapper>;
       case 'all_tasks': return <ModalWrapper title="Daftar Semua Task" icon={<Layout size={24} />}>{/* Content */}</ModalWrapper>;
@@ -289,61 +299,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   return (
     <div className="space-y-8 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
       
-      {/* NOTEPAD FULL WIDTH (MOVED HERE) */}
-      <Card 
-         title="Workspace Notepad" 
-         icon={<FileText size={18} />} 
-         variant="white" 
-         className="bg-yellow-50 border-yellow-400"
-         isHoverable={false}
-      >
-         <div className="relative">
-            {/* --- REALTIME TYPING INDICATOR --- */}
-            {typingUsers.length > 0 && (
-               <div className="absolute -top-1 right-0 z-[60] flex items-center gap-1.5 animate-in fade-in zoom-in duration-300 pointer-events-none">
-                  <div className="flex items-center gap-1 bg-slate-800 text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg border-2 border-white">
-                    <span className="relative flex h-2 w-2">
-                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
-                       <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
-                    </span>
-                    {typingUsers.length > 2 ? `${typingUsers[0]} & ${typingUsers.length - 1} lainnya...` : `${typingUsers.join(', ')} mengetik...`}
-                  </div>
-               </div>
-            )}
-
-            <textarea 
-              ref={notepadRef}
-              className="w-full h-32 pt-4 bg-transparent border-none outline-none resize-none font-medium text-slate-700 text-sm leading-relaxed font-mono focus:ring-0"
-              placeholder="Tulis catatan tim disini... (Otomatis tersimpan)"
-              value={notepadContent}
-              onChange={handleNotepadChange}
-            />
-            <div className="absolute bottom-0 right-0 opacity-50 pointer-events-none">
-               <Pin size={16} className="text-yellow-600 rotate-45" />
-            </div>
-         </div>
-         <div className="mt-1 pt-2 border-t border-yellow-200 flex justify-between items-center">
-            <div className="flex items-center gap-2">
-               {isSavingNotepad ? (
-                  <span className="flex items-center gap-1 text-[9px] font-bold text-yellow-700 animate-pulse"><Cloud size={10} /> Menyimpan...</span>
-               ) : (
-                  <span className="flex items-center gap-1 text-[9px] font-bold text-yellow-700"><CheckCircle2 size={10} /> Tersimpan</span>
-               )}
-            </div>
-            <div className="flex gap-2">
-               <button className="p-1 hover:bg-yellow-200 rounded text-yellow-800" title="Simpan Manual" onClick={handleManualSave} disabled={isSavingNotepad}>
-                 {isSavingNotepad ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-               </button>
-               <button className="p-1 hover:bg-yellow-200 rounded text-yellow-800" title="Clear Note" onClick={() => { if(confirm('Hapus semua catatan?')) setNotepadContent(''); }}>
-                 <Trash2 size={12} />
-               </button>
-            </div>
-         </div>
-      </Card>
+      {renderModalContent()}
 
       {/* --- HEADER --- */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b-2 border-slate-100 pb-6">
-        <div>
+      <div className="flex flex-col md:flex-row justify-between items-start gap-4 border-b-2 border-slate-100 pb-6">
+        {/* Left Side */}
+        <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
             <span className="px-3 py-1 bg-slate-800 text-white text-[10px] font-black uppercase rounded-full tracking-widest border-2 border-slate-800 shadow-sm">{workspace.type}</span>
             <span className="px-3 py-1 bg-white text-slate-500 text-[10px] font-black uppercase rounded-full tracking-widest border-2 border-slate-200">{workspace.category || 'General'}</span>
@@ -351,16 +312,35 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           <h2 className="text-5xl font-heading text-slate-900 tracking-tight">{workspace.name}</h2>
           <p className="text-slate-400 font-medium text-sm mt-2 max-w-xl">{workspace.description || 'Ruang kerja kolaboratif untuk mengelola proyek dan tugas tim.'}</p>
         </div>
-        <Button variant="primary" onClick={() => onAddTask()} className="px-8 py-4 shadow-pop-active">
-          <Plus size={20} className="mr-2" strokeWidth={3} /> Buat Task Baru
-        </Button>
-      </div>
 
-      {renderModalContent()}
+        {/* Right Side: Button & Copy Code */}
+        <div className="flex flex-col items-end gap-3 w-full md:w-auto shrink-0">
+          <Button variant="primary" onClick={() => onAddTask()} className="px-8 py-4 shadow-pop-active w-full md:w-auto">
+            <Plus size={20} className="mr-2" strokeWidth={3} /> Buat Task Baru
+          </Button>
+
+          {/* COPY CODE BUTTON (Replacing Info Card) */}
+          {workspace.join_code && (
+            <button
+              onClick={handleCopyCode}
+              className="group flex items-center justify-center gap-2 px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl text-xs font-black text-slate-500 uppercase tracking-widest hover:bg-white hover:border-slate-800 hover:text-slate-800 transition-all w-full md:w-auto animate-in fade-in slide-in-from-right-4 active:scale-95"
+              title="Klik untuk menyalin kode join"
+            >
+              <Key size={14} className={isCodeCopied ? "text-quaternary" : "text-slate-400 group-hover:text-slate-800"} />
+              <span>Code: {workspace.join_code}</span>
+              {isCodeCopied ? (
+                <Check size={14} className="text-quaternary animate-in zoom-in duration-300" strokeWidth={3} />
+              ) : (
+                <Copy size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400" />
+              )}
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* --- STATS GRID --- */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-        {/* Total Task */}
+        {/* Stats cards remain same */}
         <div onClick={() => setActiveModal('all_tasks')} className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none">
           <div className="flex items-center justify-between mb-2 text-slate-400">
             <div className="flex items-center gap-2"><Layout size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Total Task</span></div>
@@ -368,7 +348,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           </div>
           <p className="text-4xl font-heading text-slate-900">{totalTasks}</p>
         </div>
-        {/* Sub Tasks */}
         <div onClick={() => setActiveModal('subtasks')} className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none">
           <div className="flex items-center justify-between mb-2 text-accent">
             <div className="flex items-center gap-2"><Layers size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Sub-Tasks</span></div>
@@ -376,7 +355,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           </div>
           <p className="text-4xl font-heading text-accent">{subTasksCount}</p>
         </div>
-        {/* Completed */}
         <div onClick={() => setActiveModal('completed')} className="bg-quaternary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none text-slate-900">
           <div className="flex items-center justify-between mb-2 opacity-70">
             <div className="flex items-center gap-2"><CheckCircle2 size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Selesai</span></div>
@@ -384,7 +362,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           </div>
           <p className="text-4xl font-heading">{completedTasks}</p>
         </div>
-        {/* Overdue */}
         <div onClick={() => setActiveModal('overdue')} className="bg-secondary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none text-white">
           <div className="flex items-center justify-between mb-2 opacity-80">
             <div className="flex items-center gap-2"><AlertTriangle size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Terlambat</span></div>
@@ -392,7 +369,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           </div>
           <p className="text-4xl font-heading">{overdueTasks}</p>
         </div>
-        {/* Members */}
         <div onClick={() => setActiveModal('members')} className="bg-slate-800 p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer active:translate-y-0 active:shadow-none text-white group">
           <div className="flex items-center justify-between mb-2 text-tertiary group-hover:text-white transition-colors">
             <div className="flex items-center gap-2"><Users size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Anggota</span></div>
@@ -439,22 +415,56 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         {/* RIGHT COLUMN: WIDGETS (1/3 width) */}
         <div className="space-y-6">
           
-          {/* Workspace Info */}
-          <Card title="Informasi" isHoverable={false}>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Dibuat Pada</span>
-                 <span className="text-xs font-black text-slate-800">{new Date(workspace.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Owner</span>
-                 <span className="text-xs font-black text-slate-800 flex items-center gap-1"><div className="w-4 h-4 bg-accent rounded-full" /> Admin Workspace</span>
-              </div>
-              <div className="flex items-center justify-between">
-                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Join Code</span>
-                 <code className="bg-slate-100 px-2 py-1 rounded text-xs font-mono font-bold text-slate-600">{workspace.join_code || 'N/A'}</code>
-              </div>
-            </div>
+          {/* Notepad Card (Restored Here) */}
+          <Card 
+             title="Workspace Notepad" 
+             icon={<FileText size={18} />} 
+             variant="white" 
+             className="bg-yellow-50 border-yellow-400"
+             isHoverable={false}
+          >
+             <div className="relative">
+                {/* --- REALTIME TYPING INDICATOR --- */}
+                {typingUsers.length > 0 && (
+                   <div className="absolute top-2 left-2 z-[60] flex items-center gap-1.5 animate-in fade-in zoom-in duration-300 pointer-events-none">
+                      <div className="flex items-center gap-1 bg-slate-800 text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg border-2 border-white">
+                        <span className="relative flex h-2 w-2">
+                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+                           <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
+                        </span>
+                        {typingUsers.length > 2 ? `${typingUsers[0]} & ${typingUsers.length - 1} lainnya...` : `${typingUsers.join(', ')} mengetik...`}
+                      </div>
+                   </div>
+                )}
+
+                <textarea 
+                  ref={notepadRef}
+                  className="w-full h-40 pt-8 bg-transparent border-none outline-none resize-none font-medium text-slate-700 text-sm leading-relaxed font-mono focus:ring-0"
+                  placeholder="Tulis catatan tim disini... (Otomatis tersimpan)"
+                  value={notepadContent}
+                  onChange={handleNotepadChange}
+                />
+                <div className="absolute bottom-0 right-0 opacity-50 pointer-events-none">
+                   <Pin size={16} className="text-yellow-600 rotate-45" />
+                </div>
+             </div>
+             <div className="mt-2 pt-2 border-t border-yellow-200 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                   {isSavingNotepad ? (
+                      <span className="flex items-center gap-1 text-[9px] font-bold text-yellow-700 animate-pulse"><Cloud size={10} /> Menyimpan...</span>
+                   ) : (
+                      <span className="flex items-center gap-1 text-[9px] font-bold text-yellow-700"><CheckCircle2 size={10} /> Tersimpan</span>
+                   )}
+                </div>
+                <div className="flex gap-2">
+                   <button className="p-1 hover:bg-yellow-200 rounded text-yellow-800" title="Simpan Manual" onClick={handleManualSave} disabled={isSavingNotepad}>
+                     {isSavingNotepad ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                   </button>
+                   <button className="p-1 hover:bg-yellow-200 rounded text-yellow-800" title="Clear Note" onClick={() => { if(confirm('Hapus semua catatan?')) setNotepadContent(''); }}>
+                     <Trash2 size={12} />
+                   </button>
+                </div>
+             </div>
           </Card>
 
           {/* Asset Upload */}
