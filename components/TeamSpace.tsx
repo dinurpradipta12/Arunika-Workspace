@@ -22,7 +22,8 @@ import {
   Plus,
   Eye,
   EyeOff,
-  UserCheck
+  UserCheck,
+  RefreshCw
 } from 'lucide-react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
@@ -68,6 +69,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   const isOwner = currentWorkspace?.owner_id === currentUser?.id;
   const joinCode = currentWorkspace?.join_code;
   const [isCodeCopied, setIsCodeCopied] = useState(false);
+  const [isRegeneratingCode, setIsRegeneratingCode] = useState(false);
 
   useEffect(() => {
     if (currentWorkspace) {
@@ -139,6 +141,19 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     }
   }, [fetchMembers, targetWorkspaceId, currentWorkspace?.id]);
 
+  // --- REALTIME USER PROFILE SYNC (Requested by Admin Arunika) ---
+  useEffect(() => {
+    const userChannel = supabase.channel('public-users-sync')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users' }, (payload) => {
+         // Re-fetch members list to reflect profile changes (photo, name, email) immediately
+         fetchMembers(false);
+      })
+      .subscribe();
+      
+    return () => { supabase.removeChannel(userChannel); };
+  }, [fetchMembers]);
+
+
   const handleRegisterMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (retryCountdown > 0) return;
@@ -156,17 +171,17 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     try {
       // 1. SignUp User
       const { data: authData, error: authError } = await supabase.auth.signUp({
-  email: cleanEmail,
-  password: newPassword,
-  options: {
-    emailRedirectTo: `${window.location.origin}/auth/callback`,
-    data: {
+      email: cleanEmail,
+      password: newPassword,
+      options: {
+      emailRedirectTo: `${window.location.origin}/auth/callback`,
+      data: {
       name: newName,
       username: cleanUsername,
       avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
-      }
+     }
     }
-      });
+    });
       if (authError) throw authError;
 
       if (authData.user) {
@@ -213,6 +228,28 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
       navigator.clipboard.writeText(joinCode);
       setIsCodeCopied(true);
       setTimeout(() => setIsCodeCopied(false), 2000);
+    }
+  };
+  
+  const handleRegenerateCode = async () => {
+    if (!currentWorkspace || !isOwner) return;
+    if(!confirm("Anda yakin ingin mengganti kode akses workspace ini? Kode lama tidak akan berlaku lagi.")) return;
+    
+    setIsRegeneratingCode(true);
+    const newCode = Math.random().toString(36).substring(2, 9).toUpperCase(); // Simple unique code generation
+    
+    try {
+       const { error } = await supabase
+         .from('workspaces')
+         .update({ join_code: newCode })
+         .eq('id', currentWorkspace.id);
+         
+       if(error) throw error;
+       alert("Kode akses berhasil diperbarui!");
+    } catch(err:any) {
+       alert("Gagal update kode: " + err.message);
+    } finally {
+       setIsRegeneratingCode(false);
     }
   };
 
@@ -379,8 +416,20 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                  <Button variant="ghost" className="bg-white text-secondary flex-1 hover:bg-white/90" onClick={copyJoinCode}>
                     {isCodeCopied ? <Check size={16} /> : <Copy size={16} />} {isCodeCopied ? 'Tersalin' : 'Salin Kode'}
                  </Button>
+                 <Button 
+                    variant="ghost" 
+                    className="bg-white/20 text-white hover:bg-white/40" 
+                    onClick={handleRegenerateCode} 
+                    disabled={isRegeneratingCode}
+                    title="Buat kode baru yang unik untuk workspace ini"
+                 >
+                    {isRegeneratingCode ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                 </Button>
                </div>
-               <p className="text-[10px] font-bold mt-3 opacity-80 text-center">Bagikan kode ini ke member untuk join otomatis ke workspace ini.</p>
+               <p className="text-[10px] font-bold mt-3 opacity-80 text-center">
+                 Bagikan kode ini ke member untuk join otomatis ke workspace ini. <br/> 
+                 Klik icon Refresh untuk membuat kode unik baru.
+               </p>
             </Card>
           )}
         </div>

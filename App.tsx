@@ -91,6 +91,7 @@ const App: React.FC = () => {
 
   const taskChannelRef = useRef<any>(null);
   const notificationChannelRef = useRef<any>(null);
+  const workspaceChannelRef = useRef<any>(null);
 
   const getConnectionStatus = () => {
     if (!isOnline) return { color: 'text-secondary', label: 'Offline', icon: <WifiOff size={16} /> };
@@ -261,6 +262,13 @@ const App: React.FC = () => {
         .channel('tasks-live-v7')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
         .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
+      
+      // Workspace Subscription (For Realtime Join Code updates & Name changes)
+      if (workspaceChannelRef.current) supabase.removeChannel(workspaceChannelRef.current);
+      workspaceChannelRef.current = supabase
+        .channel('workspaces-live')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, () => fetchData())
+        .subscribe();
 
       // Notification Subscription (Owner/User Specific)
       if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
