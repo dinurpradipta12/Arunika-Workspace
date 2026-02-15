@@ -855,7 +855,7 @@ const App: React.FC = () => {
             </div>
           </header>
 
-          <div className={`flex-1 mx-auto w-full transition-all duration-300 ${activeTab === 'calendar' ? 'p-4 px-12 max-w-[1920px]' : 'p-6 max-w-6xl'}`}>
+          <div className="flex-1 mx-auto w-full transition-all duration-300 p-4 px-12 max-w-[1920px]">
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
             {activeTab === 'team' && <TeamSpace currentWorkspace={activeWorkspace} currentUser={currentUser} workspaces={workspaces} />}
