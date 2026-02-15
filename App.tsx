@@ -11,7 +11,9 @@ import {
   Loader2,
   AlertTriangle,
   Bell,
-  X
+  X,
+  Ban,
+  LogOut
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -47,6 +49,8 @@ const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [isProfileLoading, setIsProfileLoading] = useState<boolean>(false);
+  // State untuk menangani pemblokiran akun secara realtime
+  const [isAccountLocked, setIsAccountLocked] = useState<boolean>(false);
   
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive' | 'workspace_view'>('dashboard');
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
@@ -59,7 +63,7 @@ const App: React.FC = () => {
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isNewWorkspaceModalOpen, setIsNewWorkspaceModalOpen] = useState(false);
-  const [isJoinWorkspaceModalOpen, setIsJoinWorkspaceModalOpen] = useState(false); // Join Modal State
+  const [isJoinWorkspaceModalOpen, setIsJoinWorkspaceModalOpen] = useState(false); 
 
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [inspectedTask, setInspectedTask] = useState<Task | null>(null);
@@ -104,18 +108,12 @@ const App: React.FC = () => {
     return { color: 'text-secondary', label: 'Menyambungkan', icon: <WifiOff size={16} /> };
   };
 
-  // --- BRANDING SYNC EFFECT ---
-  // Secara otomatis menerapkan Nama App & Favicon ke browser saat data user berubah
   useEffect(() => {
     if (currentUser?.app_settings) {
       const { appName, appFavicon } = currentUser.app_settings;
-      
-      // Update Title
       if (appName && document.title !== appName) {
         document.title = appName;
       }
-      
-      // Update Favicon
       if (appFavicon) {
         let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
         if (!link) {
@@ -200,7 +198,8 @@ const App: React.FC = () => {
           name: sessionUser.user_metadata?.name || generatedUsername,
           avatar_url: sessionUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${sessionUser.id}`,
           status: isLegacyAdmin ? 'Admin' : 'Member',
-          app_settings: { appName: 'TaskPlay' }
+          app_settings: { appName: 'TaskPlay' },
+          is_active: true
         };
         const { data: createdData } = await supabase.from('users').upsert(newUser).select().single();
         data = createdData || newUser;
@@ -210,6 +209,13 @@ const App: React.FC = () => {
       }
 
       if (data) {
+        // Cek apakah user terkunci saat awal load
+        if (data.is_active === false) {
+           setIsAccountLocked(true);
+        } else {
+           setIsAccountLocked(false);
+        }
+
         setCurrentUser(data as User);
         const role = (data.status?.toLowerCase() === 'admin' || data.status?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(role);
@@ -243,6 +249,7 @@ const App: React.FC = () => {
       } else {
         setIsAuthenticated(false);
         setCurrentUser(null);
+        setIsAccountLocked(false);
       }
       setIsAuthLoading(false);
     });
@@ -258,21 +265,18 @@ const App: React.FC = () => {
     if (currentUser && isAuthenticated) {
       fetchData();
       
-      // Task Subscription
       if (taskChannelRef.current) supabase.removeChannel(taskChannelRef.current);
       taskChannelRef.current = supabase
         .channel('tasks-live-v7')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
         .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
       
-      // Workspace Subscription (For Realtime Join Code updates & Name changes)
       if (workspaceChannelRef.current) supabase.removeChannel(workspaceChannelRef.current);
       workspaceChannelRef.current = supabase
         .channel('workspaces-live')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, () => fetchData())
         .subscribe();
 
-      // Notification Subscription (Owner/User Specific)
       if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
       notificationChannelRef.current = supabase
         .channel(`notifications:${currentUser.id}`)
@@ -282,14 +286,12 @@ const App: React.FC = () => {
             table: 'notifications',
             filter: `user_id=eq.${currentUser.id}`
         }, (payload) => {
-           // Show Notification Toast
            setCurrentNotification(payload.new as Notification);
-           // Auto dismiss after 5 seconds
            setTimeout(() => setCurrentNotification(null), 5000);
         })
         .subscribe();
 
-      // Monitor Account Status (Auto Logout if deactivated)
+      // Monitor Account Status (Realtime Lockout)
       if (userStatusChannelRef.current) supabase.removeChannel(userStatusChannelRef.current);
       userStatusChannelRef.current = supabase
         .channel(`user-status-${currentUser.id}`)
@@ -298,13 +300,15 @@ const App: React.FC = () => {
             schema: 'public', 
             table: 'users',
             filter: `id=eq.${currentUser.id}`
-        }, async (payload: any) => {
-             // If status becomes inactive, force logout
+        }, (payload: any) => {
+             // Jika status berubah jadi non-aktif, langsung kunci layar
              if (payload.new.is_active === false) {
-                 await supabase.auth.signOut();
-                 setLoginMessage("Akses aplikasi telah ditutup oleh Administrator. Silakan hubungi admin.");
-                 setIsAuthenticated(false);
-                 setCurrentUser(null);
+                 setIsAccountLocked(true);
+                 setCurrentUser(prev => prev ? { ...prev, is_active: false } : null);
+             } else if (payload.new.is_active === true) {
+                 // Jika diaktifkan kembali
+                 setIsAccountLocked(false);
+                 setCurrentUser(prev => prev ? { ...prev, is_active: true } : null);
              }
         })
         .subscribe();
@@ -400,14 +404,9 @@ const App: React.FC = () => {
              ...settingsUpdate
           } 
         };
-        
-        // Simpan ke Database
         const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
         if (error) throw error;
-        
-        // Update Local State langsung agar UI responsif
         setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
-        
         const calculatedRole = (newRole?.toLowerCase() === 'admin' || newRole?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(calculatedRole);
         alert("Data profil berhasil disimpan & disinkronkan!");
@@ -429,6 +428,8 @@ const App: React.FC = () => {
     await supabase.auth.signOut();
     setIsAuthenticated(false);
     setCurrentUser(null);
+    setIsAccountLocked(false);
+    setLoginMessage(null);
   };
 
   const openEditModal = (task: Task) => {
@@ -465,7 +466,34 @@ const App: React.FC = () => {
     );
   }
 
+  // Laman Login
   if (!isAuthenticated) return <Login onLoginSuccess={() => { setIsAuthenticated(true); setLoginMessage(null); }} initialMessage={loginMessage} />;
+  
+  // TAMPILAN LOCK SCREEN (Blank & Disabled)
+  // Jika akun dikunci, tampilkan ini menutupi segalanya
+  if (isAuthenticated && isAccountLocked) {
+    return (
+      <div className="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
+         <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mb-6">
+            <Ban size={48} className="text-red-500" strokeWidth={3} />
+         </div>
+         <h1 className="text-3xl font-heading text-slate-900 mb-2 max-w-lg">
+           Akses Aplikasi Dihentikan
+         </h1>
+         <p className="text-slate-500 font-medium mb-8 max-w-md leading-relaxed">
+           Mohon maaf akses anda sudah diakhiri, mohon hubungi administrator untuk membuka kembali.
+         </p>
+         <Button 
+            variant="secondary" 
+            className="border-2 border-slate-200 hover:border-slate-800 shadow-sm"
+            onClick={handleLogout}
+         >
+            <LogOut size={18} className="mr-2" /> Keluar Aplikasi
+         </Button>
+      </div>
+    );
+  }
+
   if (!currentUser) return <div className="h-screen w-full flex items-center justify-center">Failed to load profile.</div>;
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
