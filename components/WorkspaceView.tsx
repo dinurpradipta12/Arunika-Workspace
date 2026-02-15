@@ -28,7 +28,7 @@ import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 import { TaskItem } from './TaskItem';
-import { TaskDetailModal } from './TaskDetailModal'; 
+import { TaskInspectModal } from './TaskInspectModal'; // Changed from TaskDetailModal
 import { RescheduleModal } from './RescheduleModal';
 import { supabase } from '../lib/supabase';
 
@@ -308,12 +308,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     return parent ? parent.title : 'Unknown Parent Task';
   };
 
-  // Filter Subtasks for selected inspected task
-  const inspectedSubTasks = useMemo(() => {
-    if (!inspectedTask) return [];
-    return tasks.filter(t => t.parent_id === inspectedTask.id && !t.is_archived);
-  }, [inspectedTask, tasks]);
-
   // --- RENDER MODAL CONTENT ---
   const renderModalContent = () => {
     if (!activeModal) return null;
@@ -490,26 +484,16 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       {/* MODAL RENDER */}
       {renderModalContent()}
 
-      <TaskDetailModal 
-        parentTask={inspectedTask} 
-        subTasks={inspectedSubTasks}
+      {/* USING SIMPLE MODAL FOR INSPECTION INSTEAD OF COMPLEX DETAIL MODAL */}
+      <TaskInspectModal 
+        task={inspectedTask} 
         isOpen={!!inspectedTask} 
         onClose={() => setInspectedTask(null)} 
         onStatusChange={onStatusChange} 
-        onAddTask={() => {
-          // FIX: Pass workspace_id to ensure the backend can save it correctly
-          if (inspectedTask) {
-             onAddTask({ 
-                parent_id: inspectedTask.id, 
-                workspace_id: inspectedTask.workspace_id 
-             });
-          }
-        }}
-        onEditTask={(t) => { setInspectedTask(null); onEditTask(t); }} 
-        onRescheduleTask={(t) => setReschedulingTask(t)} 
-        onDeleteTask={(id) => { setInspectedTask(null); onDeleteTask(id); }} 
-        onArchiveTask={(id) => { setInspectedTask(null); onArchiveTask ? onArchiveTask(id) : onDeleteTask(id); }} 
-        onInspectTask={setInspectedTask}
+        onEdit={(t) => { setInspectedTask(null); onEditTask(t); }} 
+        onReschedule={(t) => setReschedulingTask(t)} 
+        onDelete={(id) => { setInspectedTask(null); onDeleteTask(id); }} 
+        onArchive={(id) => { setInspectedTask(null); onArchiveTask ? onArchiveTask(id) : onDeleteTask(id); }} 
       />
 
       <RescheduleModal 
@@ -665,7 +649,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   key={task.id} 
                   task={task} 
                   onStatusChange={onStatusChange}
-                  onClick={() => setInspectedTask(task)} // Open modal on click
+                  onClick={() => setInspectedTask(task)} // Open simple modal on click
                   onEdit={onEditTask}
                   onDelete={onDeleteTask}
                   onArchive={(id) => onArchiveTask ? onArchiveTask(id) : onDeleteTask(id)}
