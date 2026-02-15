@@ -167,7 +167,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       supabase.removeChannel(channel); 
       channelRef.current = null;
     };
-  }, [workspace.id, assets, currentUserId]); // Removed 'assets' from dependency to avoid reconnect loops, handled internally
+  }, [workspace.id, assets, currentUserId]); 
 
   // --- 3. MEMBERS DATA & REALTIME ---
   const fetchMembers = async () => {
@@ -198,6 +198,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   }, [workspace.id]);
 
   // --- 4. NOTEPAD HANDLER (Debounced Save + Broadcast) ---
+  const saveNotepadToDB = async (content: string) => {
+    try {
+      await supabase
+        .from('workspaces')
+        .update({ notepad: content })
+        .eq('id', workspace.id);
+    } catch (err) {
+      console.error("Failed to save notepad", err);
+    }
+  };
+
   const handleNotepadChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newVal = e.target.value;
     setNotepadContent(newVal);
@@ -217,17 +228,16 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     if (notepadTimeoutRef.current) clearTimeout(notepadTimeoutRef.current);
 
     notepadTimeoutRef.current = setTimeout(async () => {
-      try {
-        await supabase
-          .from('workspaces')
-          .update({ notepad: newVal })
-          .eq('id', workspace.id);
-      } catch (err) {
-        console.error("Failed to save notepad", err);
-      } finally {
-        setIsSavingNotepad(false);
-      }
+      await saveNotepadToDB(newVal);
+      setIsSavingNotepad(false);
     }, 1000); 
+  };
+
+  // Manual Save Handler
+  const handleManualSave = async () => {
+    setIsSavingNotepad(true);
+    await saveNotepadToDB(notepadContent);
+    setIsSavingNotepad(false);
   };
 
   // --- 5. ASSET HANDLERS ---
@@ -354,7 +364,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         );
 
       case 'all_tasks':
-        // Show only Top Level Tasks (No Subtasks)
         const rootTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
         return (
           <ModalWrapper title="Daftar Semua Task" icon={<Layout size={24} strokeWidth={3} />}>
@@ -621,17 +630,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
              isHoverable={false}
           >
              <div className="relative">
-                {/* --- REALTIME TYPING INDICATOR --- */}
+                {/* --- REALTIME TYPING INDICATOR (TOP LEFT) --- */}
                 {typingUsers.length > 0 && (
-                   <div className="absolute -top-10 right-0 left-0 flex items-center justify-end gap-1.5 animate-in fade-in zoom-in slide-in-from-bottom-2 duration-300 pointer-events-none">
-                      <div className="flex items-center gap-1 bg-slate-800 text-white px-3 py-1.5 rounded-t-lg rounded-bl-lg text-[9px] font-bold shadow-lg">
-                        <span className="relative flex h-2 w-2">
+                   <div className="absolute top-2 left-2 z-20 flex items-center gap-1.5 animate-in fade-in zoom-in duration-300 pointer-events-none">
+                      <div className="flex items-center gap-1 bg-slate-800 text-white px-2 py-1 rounded text-[9px] font-bold shadow-sm opacity-90">
+                        <span className="relative flex h-1.5 w-1.5">
                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
-                           <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
+                           <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent"></span>
                         </span>
                         {typingUsers.length > 2 
-                          ? `${typingUsers[0]}, ${typingUsers[1]} & ${typingUsers.length - 2} lainnya sedang mengetik...`
-                          : `${typingUsers.join(', ')} sedang mengetik...`
+                          ? `${typingUsers[0]} & ${typingUsers.length - 1} lainnya...`
+                          : `${typingUsers.join(', ')} mengetik...`
                         }
                       </div>
                    </div>
@@ -639,7 +648,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
                 <textarea 
                   ref={notepadRef}
-                  className="w-full h-40 bg-transparent border-none outline-none resize-none font-medium text-slate-700 text-sm leading-relaxed font-mono"
+                  className="w-full h-40 pt-8 bg-transparent border-none outline-none resize-none font-medium text-slate-700 text-sm leading-relaxed font-mono"
                   placeholder="Tulis catatan tim disini... (Otomatis tersimpan)"
                   value={notepadContent}
                   onChange={handleNotepadChange}
@@ -661,6 +670,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                    )}
                 </div>
                 <div className="flex gap-2">
+                   <button 
+                     className="p-1 hover:bg-yellow-200 rounded text-yellow-800" 
+                     title="Simpan Manual" 
+                     onClick={handleManualSave}
+                     disabled={isSavingNotepad}
+                   >
+                     {isSavingNotepad ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                   </button>
                    <button className="p-1 hover:bg-yellow-200 rounded text-yellow-800" title="Edit Mode">
                      <Edit3 size={12} />
                    </button>
