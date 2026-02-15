@@ -122,24 +122,29 @@ const App: React.FC = () => {
     if (!currentUser) return;
     setIsFetching(true);
     try {
-      // Fetch Workspaces & Tasks
-      // Karena RLS sudah aktif, query ini hanya akan mengembalikan data yang BOLEH dilihat user
-      const [{ data: wsData }, { data: tData }] = await Promise.all([
+      // Use Promise.allSettled to allow partial data loading if one table fails (robustness)
+      const [wsResult, tasksResult] = await Promise.allSettled([
         supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false })
       ]);
+
+      const wsData = wsResult.status === 'fulfilled' ? wsResult.value.data : [];
+      const tData = tasksResult.status === 'fulfilled' ? tasksResult.value.data : [];
       
+      if (wsResult.status === 'rejected') console.error("Workspaces fetch failed:", wsResult.reason);
+      if (tasksResult.status === 'rejected') console.error("Tasks fetch failed:", tasksResult.reason);
+
       setIsApiConnected(true);
       
       if (wsData) {
         setWorkspaces(wsData as Workspace[]);
         if (visibleSources.length === 0) {
-          setVisibleSources(wsData.map(ws => ws.id));
+          setVisibleSources((wsData as Workspace[]).map(ws => ws.id));
         }
       }
       if (tData) setTasks(tData as Task[]);
     } catch (err) {
-      console.error("Fetch error:", err);
+      console.error("Fetch fatal error:", err);
       setIsApiConnected(false);
     } finally {
       setIsFetching(false);
@@ -151,64 +156,41 @@ const App: React.FC = () => {
     try {
       let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
       
-      // Deteksi jika ini adalah super admin 'arunika'
       const isLegacyAdmin = 
         sessionUser.email === 'arunika@taskplay.com' || 
         sessionUser.user_metadata?.username === 'arunika' ||
         sessionUser.email?.includes('arunika');
 
       if (error || !data) {
-        console.warn("User profile not found in DB, attempting self-healing...", error);
-        
+        console.warn("User profile missing, creating default...");
         const generatedUsername = sessionUser.email?.split('@')[0] || `user_${sessionUser.id.substring(0,6)}`;
-        const generatedName = sessionUser.user_metadata?.name || generatedUsername;
         
         const newUser = {
           id: sessionUser.id,
           email: sessionUser.email,
           username: sessionUser.user_metadata?.username || generatedUsername,
-          name: generatedName,
+          name: sessionUser.user_metadata?.name || generatedUsername,
           avatar_url: sessionUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${sessionUser.id}`,
-          // FORCE ADMIN jika username adalah arunika
           status: isLegacyAdmin ? 'Admin' : 'Member',
           app_settings: { appName: 'TaskPlay' }
         };
 
-        const { data: createdData, error: createError } = await supabase
-          .from('users')
-          .upsert(newUser)
-          .select()
-          .single();
-        
-        if (createError) {
-          console.error("Self-healing failed:", createError);
-          data = newUser; 
-        } else {
-          data = createdData;
-        }
+        const { data: createdData } = await supabase.from('users').upsert(newUser).select().single();
+        data = createdData || newUser;
       } else if (data && isLegacyAdmin && data.status !== 'Admin') {
-        // Self-healing level 2: Jika user ada tapi statusnya salah (turun jadi member), naikkan lagi jadi Admin
         await supabase.from('users').update({ status: 'Admin' }).eq('id', sessionUser.id);
         data.status = 'Admin';
       }
 
       if (data) {
         setCurrentUser(data as User);
-        // Pastikan logic role mapping benar
         const role = (data.status?.toLowerCase() === 'admin' || data.status?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(role);
       }
     } catch (e) {
-      console.error("Critical error profile sync:", e);
-      if (sessionUser) {
-         setCurrentUser({
-            id: sessionUser.id,
-            email: sessionUser.email,
-            name: 'User',
-            avatar_url: '',
-            created_at: new Date().toISOString()
-         } as User);
-      }
+      console.error("Profile sync error:", e);
+      // Fallback UI
+      if (sessionUser) setCurrentUser({ id: sessionUser.id, email: sessionUser.email, name: 'User', avatar_url: '', created_at: '' } as User);
     } finally {
       setIsProfileLoading(false);
     }
@@ -252,15 +234,8 @@ const App: React.FC = () => {
       if (taskChannelRef.current) supabase.removeChannel(taskChannelRef.current);
       taskChannelRef.current = supabase
         .channel('tasks-live-v7')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-          // Hanya update jika event relevan dengan user (RLS handle security, tapi UI update harus cerdas)
-          // Namun dengan RLS aktif, Supabase Realtime kadang memfilter otomatis.
-          // Untuk amannya, kita fetch ulang saja agar konsisten.
-          fetchData(); 
-        })
-        .subscribe((status) => {
-           setIsRealtimeConnected(status === 'SUBSCRIBED');
-        });
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
+        .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
     }
   }, [currentUser?.id, isAuthenticated, fetchData]);
 
@@ -278,36 +253,26 @@ const App: React.FC = () => {
       if (error) throw error;
 
       if (newWs) {
-        const { error: memberError } = await supabase.from('workspace_members').insert({
+        await supabase.from('workspace_members').insert({
           workspace_id: newWs.id,
           user_id: currentUser.id,
           role: 'owner'
         });
-
-        if (memberError) console.error("Warning: Gagal insert member owner", memberError);
         setWorkspaces(prev => [...prev, newWs as Workspace]);
         setActiveWorkspaceId(newWs.id);
         setActiveTab('workspace_view');
       }
     } catch (err: any) {
-      console.error("Gagal membuat workspace:", err);
-      alert("Gagal membuat workspace: " + (err.message || "Unknown error"));
+      console.error("Create workspace failed:", err);
+      alert("Gagal membuat workspace: " + err.message);
     }
   };
 
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
     setIsFetching(true);
-    
     try {
-      // LOGIKA CERDAS: Pemilihan Workspace Default
-      // 1. Jika user sudah memilih workspace (dari dropdown modal), gunakan itu.
-      // 2. Jika tidak, dan user sedang di tab 'workspace_view', gunakan workspace aktif.
-      // 3. Jika tidak (misal dari Dashboard 'My Tasks'), prioritaskan workspace tipe 'PERSONAL'.
-      // 4. Jika tidak ada personal, baru fallback ke workspace pertama.
-      
       let targetWorkspaceId = taskData.workspace_id;
-
       if (!targetWorkspaceId) {
         if (activeTab === 'workspace_view' && activeWorkspaceId) {
            targetWorkspaceId = activeWorkspaceId;
@@ -346,7 +311,7 @@ const App: React.FC = () => {
       fetchData();
     } catch (err: any) {
       console.error("Save task failure:", err);
-      alert("Gagal menyimpan agenda: " + (err.message || "Unknown error"));
+      alert("Gagal menyimpan agenda.");
     } finally {
       setIsFetching(false);
     }
@@ -355,8 +320,7 @@ const App: React.FC = () => {
   const handleStatusChange = async (id: string, status: TaskStatus) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
     try {
-      const { error } = await supabase.from('tasks').update({ status }).eq('id', id);
-      if (error) throw error;
+      await supabase.from('tasks').update({ status }).eq('id', id);
     } catch (err) {
       fetchData(); 
     }
@@ -373,16 +337,11 @@ const App: React.FC = () => {
     setIsNewTaskModalOpen(true);
   };
 
-  // Helper untuk membuka modal new task dengan inisialisasi cerdas
   const openNewTaskModal = () => {
-    // Jika sedang di dashboard, set initial workspace ke Personal (jika ada)
     if (activeTab === 'dashboard' || activeTab === 'tasks') {
        const personalWs = workspaces.find(w => w.type === 'personal');
-       if (personalWs) {
-         setEditingTask({ workspace_id: personalWs.id } as Task);
-       } else {
-         setEditingTask(null);
-       }
+       if (personalWs) setEditingTask({ workspace_id: personalWs.id } as Task);
+       else setEditingTask(null);
     } else {
       setEditingTask(null);
     }
@@ -390,11 +349,7 @@ const App: React.FC = () => {
   };
 
   const parentTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
-  
-  const currentWorkspaceTasks = activeWorkspaceId 
-    ? tasks.filter(t => t.workspace_id === activeWorkspaceId)
-    : [];
-
+  const currentWorkspaceTasks = activeWorkspaceId ? tasks.filter(t => t.workspace_id === activeWorkspaceId) : [];
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
 
   if (isAuthLoading || (isAuthenticated && isProfileLoading)) {
@@ -407,7 +362,6 @@ const App: React.FC = () => {
           </div>
         </div>
         <h2 className="mt-10 font-heading text-3xl text-slate-800">Menyiapkan Profil...</h2>
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mt-4 animate-pulse">Syncing User Data</p>
       </div>
     );
   }
@@ -419,9 +373,8 @@ const App: React.FC = () => {
         <div className="h-screen w-full flex flex-col items-center justify-center bg-background p-4 text-center">
            <AlertTriangle size={48} className="text-secondary mb-4" />
            <h2 className="text-2xl font-heading text-slate-900">Gagal Memuat Profil</h2>
-           <p className="text-sm text-slate-500 mb-6">Sesi login terdeteksi, tetapi data user tidak dapat diambil.</p>
-           <Button variant="primary" onClick={() => window.location.reload()}>Muat Ulang Halaman</Button>
-           <button onClick={handleLogout} className="mt-4 text-xs font-bold text-slate-400 hover:text-secondary uppercase">Logout & Login Ulang</button>
+           <Button variant="primary" onClick={() => window.location.reload()}>Muat Ulang</Button>
+           <button onClick={handleLogout} className="mt-4 text-xs font-bold text-slate-400 uppercase">Logout & Reset</button>
         </div>
      );
   }
@@ -605,7 +558,6 @@ const App: React.FC = () => {
                       <h2 className="text-4xl font-heading tracking-tighter">My Board</h2>
                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola alur kerja personal Anda</p>
                     </div>
-                    {/* Menggunakan openNewTaskModal agar default workspace = Personal */}
                     <Button variant="primary" onClick={openNewTaskModal} className="px-6 py-3 shadow-pop text-md font-black">+ New Task</Button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-10">
