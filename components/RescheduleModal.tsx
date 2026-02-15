@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Calendar, Clock, ArrowRight } from 'lucide-react';
 import { Task } from '../types';
 import { Button } from './ui/Button';
@@ -13,6 +13,7 @@ interface RescheduleModalProps {
 
 export const RescheduleModal: React.FC<RescheduleModalProps> = ({ task, isOpen, onClose, onSave }) => {
   const [date, setDate] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (task?.due_date) {
@@ -52,8 +53,14 @@ export const RescheduleModal: React.FC<RescheduleModalProps> = ({ task, isOpen, 
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">New Deadline</label>
             <div className="relative">
-              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+              <div 
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer hover:text-accent z-10"
+                onClick={() => inputRef.current?.showPicker()}
+              >
+                 <Calendar size={20} />
+              </div>
               <input 
+                ref={inputRef}
                 type="date" 
                 value={date}
                 onChange={(e) => setDate(e.target.value)}

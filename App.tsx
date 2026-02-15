@@ -30,7 +30,7 @@ import { ProfileView } from './components/ProfileView';
 import { TeamSpace } from './components/TeamSpace';
 import { TaskItem } from './components/TaskItem';
 import { TaskInspectModal } from './components/TaskInspectModal';
-import { TaskDetailModal } from './components/TaskDetailModal'; // Import Modal Detail Besar
+import { TaskDetailModal } from './components/TaskDetailModal'; 
 import { RescheduleModal } from './components/RescheduleModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CalendarView } from './components/CalendarView';
@@ -60,7 +60,7 @@ const App: React.FC = () => {
   // GLOBAL BRANDING STATE
   const [globalBranding, setGlobalBranding] = useState<AppConfig | null>(null);
 
-  // NAVIGATION PERSISTENCE: Read from localStorage
+  // NAVIGATION PERSISTENCE
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive' | 'workspace_view'>(() => {
     const saved = localStorage.getItem('taskplay_activeTab');
     return (saved as any) || 'dashboard';
@@ -72,7 +72,6 @@ const App: React.FC = () => {
 
   const [activeWorkspaceMembers, setActiveWorkspaceMembers] = useState<any[]>([]); 
 
-  // Save to localStorage whenever navigation changes
   useEffect(() => {
     localStorage.setItem('taskplay_activeTab', activeTab);
   }, [activeTab]);
@@ -96,9 +95,9 @@ const App: React.FC = () => {
   const [isJoinWorkspaceModalOpen, setIsJoinWorkspaceModalOpen] = useState(false); 
 
   // --- STATE MODALS & VIEWS ---
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null); // Untuk tampilan Inline di tab 'tasks'
-  const [detailTask, setDetailTask] = useState<Task | null>(null); // Untuk Modal Besar (Main Task)
-  const [inspectedTask, setInspectedTask] = useState<Task | null>(null); // Untuk Modal Simple (Subtask)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null); 
+  const [detailTask, setDetailTask] = useState<Task | null>(null); 
+  const [inspectedTask, setInspectedTask] = useState<Task | null>(null); 
   
   const [reschedulingTask, setReschedulingTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -140,6 +139,74 @@ const App: React.FC = () => {
   const userStatusChannelRef = useRef<any>(null);
   const configChannelRef = useRef<any>(null);
 
+  // --- GLOBAL ESC KEY HANDLER (STACK LOGIC) ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // Priority 1: Dropdowns / Popovers
+        if (isNotifDropdownOpen) {
+          setIsNotifDropdownOpen(false);
+          return;
+        }
+        
+        // Priority 2: Leaf Modals (Reschedule, etc)
+        if (reschedulingTask) {
+          setReschedulingTask(null);
+          return;
+        }
+
+        // Priority 3: Creation Modals
+        if (isNewTaskModalOpen) {
+          setIsNewTaskModalOpen(false);
+          setEditingTask(null);
+          return;
+        }
+        
+        if (isNewWorkspaceModalOpen) {
+          setIsNewWorkspaceModalOpen(false);
+          return;
+        }
+
+        if (isJoinWorkspaceModalOpen) {
+          setIsJoinWorkspaceModalOpen(false);
+          return;
+        }
+
+        // Priority 4: Task Inspection (Subtask Simple Modal)
+        if (inspectedTask) {
+          setInspectedTask(null);
+          return;
+        }
+
+        // Priority 5: Main Task Detail (Large Modal)
+        if (detailTask) {
+          setDetailTask(null);
+          return;
+        }
+
+        // Priority 6: Settings
+        if (isSettingsModalOpen) {
+          setIsSettingsModalOpen(false);
+          return;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    isNotifDropdownOpen, 
+    reschedulingTask, 
+    isNewTaskModalOpen, 
+    isNewWorkspaceModalOpen, 
+    isJoinWorkspaceModalOpen,
+    inspectedTask, 
+    detailTask, 
+    isSettingsModalOpen
+  ]);
+
+  // ... (Sisa kode useEffect, fetchData, dll tetap sama, hanya perbaikan Realtime Workspace di bawah)
+
   const getConnectionStatus = () => {
     if (!isOnline) return { color: 'text-secondary', label: 'Offline', icon: <WifiOff size={16} /> };
     if (isFetching) return { color: 'text-tertiary', label: 'Sinkronisasi...', icon: <Wifi size={16} className="animate-pulse" /> };
@@ -149,65 +216,49 @@ const App: React.FC = () => {
     return { color: 'text-secondary', label: 'Menyambungkan', icon: <WifiOff size={16} /> };
   };
 
-  // --- GLOBAL TASK CLICK HANDLER ---
   const handleGlobalTaskClick = (task: Task) => {
-    // 1. Cek apakah ini Subtask (punya parent_id)
     if (task.parent_id) {
-        // Jika Subtask -> Buka Simple Modal (Inspect Modal)
         setInspectedTask(task);
         setDetailTask(null);
     } else {
-        // Jika Main Task
         if (activeTab === 'tasks') {
-            // Jika sedang di tab Board, buka detail inline view
             setSelectedTaskId(task.id);
         } else {
-            // Jika di tab lain (Dashboard, Workspace, Calendar), buka Modal Besar
             setDetailTask(task);
             setInspectedTask(null);
         }
     }
   };
 
-  // --- BRANDING EFFECT ---
+  // ... (Branding Effect, Click Outside Effect - Tetap Sama)
+  
   useEffect(() => {
     const appName = globalBranding?.app_name || 'TaskPlay';
     const appFavicon = globalBranding?.app_favicon;
-
-    if (document.title !== appName) {
-      document.title = appName;
-    }
-    
+    if (document.title !== appName) document.title = appName;
     if (appFavicon) {
       let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
-      if (!link) {
-        link = document.createElement('link');
-        link.rel = 'icon';
-        document.head.appendChild(link);
-      }
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
       link.href = appFavicon;
     }
   }, [globalBranding]);
 
-  // Click Outside for Notification Dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (notifDropdownRef.current && !notifDropdownRef.current.contains(event.target as Node)) {
         setIsNotifDropdownOpen(false);
       }
     };
-    if (isNotifDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
+    if (isNotifDropdownOpen) document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isNotifDropdownOpen]);
 
+  // ... (Category Effect, fetchData, fetchOrCreateUser - Tetap Sama)
   useEffect(() => {
     if (tasks.length > 0) {
       const usedCategories = new Set(tasks.map(t => t.category || 'General'));
       const allCats = Array.from(new Set([...categories, ...Array.from(usedCategories)]));
       setCategories(prev => Array.from(new Set([...prev, ...allCats])));
-      
       setCategoryColors(prev => {
         const next = { ...prev };
         allCats.forEach((cat, idx) => {
@@ -266,11 +317,7 @@ const App: React.FC = () => {
     setIsProfileLoading(true);
     try {
       let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
-      
-      const isLegacyAdmin = 
-        sessionUser.email === 'arunika@taskplay.com' || 
-        sessionUser.user_metadata?.username === 'arunika' ||
-        sessionUser.email?.includes('arunika');
+      const isLegacyAdmin = sessionUser.email === 'arunika@taskplay.com' || sessionUser.user_metadata?.username === 'arunika' || sessionUser.email?.includes('arunika');
 
       if (error || !data) {
         const generatedUsername = sessionUser.email?.split('@')[0] || `user_${sessionUser.id.substring(0,6)}`;
@@ -292,12 +339,8 @@ const App: React.FC = () => {
       }
 
       if (data) {
-        if (data.is_active === false) {
-           setIsAccountLocked(true);
-        } else {
-           setIsAccountLocked(false);
-        }
-
+        if (data.is_active === false) setIsAccountLocked(true);
+        else setIsAccountLocked(false);
         setCurrentUser(data as User);
         const role = (data.status?.toLowerCase() === 'admin' || data.status?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(role);
@@ -310,6 +353,7 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // ... (Auth useEffects - Tetap Sama)
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -353,70 +397,38 @@ const App: React.FC = () => {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
         .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
       
+      // FIX: Realtime Workspace Update
       if (workspaceChannelRef.current) supabase.removeChannel(workspaceChannelRef.current);
       workspaceChannelRef.current = supabase
         .channel('workspaces-live')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, () => fetchData())
-        .subscribe();
-
-      if (configChannelRef.current) supabase.removeChannel(configChannelRef.current);
-      configChannelRef.current = supabase
-        .channel('app-config-live')
-        .on('postgres_changes', { 
-            event: '*', schema: 'public', table: 'app_config', filter: 'id=eq.1'
-        }, (payload) => {
-            setGlobalBranding(payload.new as AppConfig);
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, (payload) => {
+           // Jika ada update (misal notepad), update state local tanpa full refetch agar transisi smooth
+           if (payload.eventType === 'UPDATE') {
+              setWorkspaces(prev => prev.map(ws => 
+                 ws.id === payload.new.id ? { ...ws, ...payload.new } : ws
+              ));
+           } else {
+              fetchData();
+           }
         })
         .subscribe();
+
+      // ... (Config, Notif, Status Channel - Tetap Sama)
+      if (configChannelRef.current) supabase.removeChannel(configChannelRef.current);
+      configChannelRef.current = supabase.channel('app-config-live').on('postgres_changes', { event: '*', schema: 'public', table: 'app_config', filter: 'id=eq.1'}, (payload) => { setGlobalBranding(payload.new as AppConfig); }).subscribe();
 
       if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
-      notificationChannelRef.current = supabase
-        .channel(`notifications:${currentUser.id}`)
-        .on('postgres_changes', { 
-            event: 'INSERT', 
-            schema: 'public', 
-            table: 'notifications',
-            filter: `user_id=eq.${currentUser.id}`
-        }, (payload) => {
-           const newNotif = payload.new as Notification;
-           setNotifications(prev => [newNotif, ...prev]); 
-           setCurrentNotification(newNotif); 
-           setTimeout(() => setCurrentNotification(null), 5000);
-        })
-        .subscribe();
+      notificationChannelRef.current = supabase.channel(`notifications:${currentUser.id}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}`}, (payload) => { const newNotif = payload.new as Notification; setNotifications(prev => [newNotif, ...prev]); setCurrentNotification(newNotif); setTimeout(() => setCurrentNotification(null), 5000); }).subscribe();
 
       if (userStatusChannelRef.current) supabase.removeChannel(userStatusChannelRef.current);
-      userStatusChannelRef.current = supabase
-        .channel(`user-status-${currentUser.id}`)
-        .on('postgres_changes', { 
-            event: 'UPDATE', 
-            schema: 'public', 
-            table: 'users',
-            filter: `id=eq.${currentUser.id}`
-        }, (payload: any) => {
-             if (payload.new.is_active === false) {
-                 setIsAccountLocked(true);
-                 setCurrentUser(prev => prev ? { ...prev, is_active: false } : null);
-             } else if (payload.new.is_active === true) {
-                 setIsAccountLocked(false);
-                 setCurrentUser(prev => prev ? { ...prev, is_active: true } : null);
-             }
-        })
-        .subscribe();
+      userStatusChannelRef.current = supabase.channel(`user-status-${currentUser.id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}`}, (payload: any) => { if (payload.new.is_active === false) { setIsAccountLocked(true); setCurrentUser(prev => prev ? { ...prev, is_active: false } : null); } else if (payload.new.is_active === true) { setIsAccountLocked(false); setCurrentUser(prev => prev ? { ...prev, is_active: true } : null); } }).subscribe();
     }
   }, [currentUser?.id, isAuthenticated, fetchData]);
 
   useEffect(() => {
     if (activeWorkspaceId) {
       const fetchMembers = async () => {
-        const { data } = await supabase
-          .from('workspace_members')
-          .select(`
-             id, role, user_id, 
-             users:user_id (id, name, email, avatar_url)
-          `)
-          .eq('workspace_id', activeWorkspaceId);
-        
+        const { data } = await supabase.from('workspace_members').select(`id, role, user_id, users:user_id (id, name, email, avatar_url)`).eq('workspace_id', activeWorkspaceId);
         setActiveWorkspaceMembers(data || []);
       };
       fetchMembers();
@@ -425,25 +437,14 @@ const App: React.FC = () => {
     }
   }, [activeWorkspaceId]);
 
+  // ... (CRUD Handlers, Drag & Drop, Render - Tetap Sama)
   const handleCreateWorkspace = async (data: { name: string; category: string; description: string; type: WorkspaceType }) => {
     if (!currentUser) return;
     try {
-      const { data: newWs, error } = await supabase.from('workspaces').insert({
-        name: data.name,
-        type: data.type,
-        owner_id: currentUser.id,
-        category: data.category,
-        description: data.description
-      }).select().single();
-
+      const { data: newWs, error } = await supabase.from('workspaces').insert({ name: data.name, type: data.type, owner_id: currentUser.id, category: data.category, description: data.description }).select().single();
       if (error) throw error;
-
       if (newWs) {
-        await supabase.from('workspace_members').insert({
-          workspace_id: newWs.id,
-          user_id: currentUser.id,
-          role: 'owner'
-        });
+        await supabase.from('workspace_members').insert({ workspace_id: newWs.id, user_id: currentUser.id, role: 'owner' });
         setWorkspaces(prev => [...prev, newWs as Workspace]);
         setActiveWorkspaceId(newWs.id);
         setActiveTab('workspace_view');
@@ -467,23 +468,7 @@ const App: React.FC = () => {
            targetWorkspaceId = personalWs ? personalWs.id : (workspaces[0]?.id || null);
         }
       }
-
-      const payload: any = {
-        title: taskData.title,
-        description: taskData.description || null,
-        status: taskData.status || TaskStatus.TODO,
-        priority: taskData.priority || TaskPriority.MEDIUM,
-        workspace_id: targetWorkspaceId,
-        parent_id: taskData.parent_id || null, 
-        due_date: taskData.due_date || null,
-        start_date: taskData.start_date || null,
-        is_all_day: taskData.is_all_day ?? true,
-        is_archived: taskData.is_archived ?? false,
-        category: taskData.category || 'General',
-        created_by: currentUser.id,
-        assigned_to: taskData.assigned_to || null
-      };
-
+      const payload: any = { title: taskData.title, description: taskData.description || null, status: taskData.status || TaskStatus.TODO, priority: taskData.priority || TaskPriority.MEDIUM, workspace_id: targetWorkspaceId, parent_id: taskData.parent_id || null, due_date: taskData.due_date || null, start_date: taskData.start_date || null, is_all_day: taskData.is_all_day ?? true, is_archived: taskData.is_archived ?? false, category: taskData.category || 'General', created_by: currentUser.id, assigned_to: taskData.assigned_to || null };
       if (editingTask && editingTask.id) {
         const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
         if (error) throw error;
@@ -492,7 +477,6 @@ const App: React.FC = () => {
         const { error } = await supabase.from('tasks').insert(payload);
         if (error) throw error;
       }
-      
       setIsNewTaskModalOpen(false);
       setEditingTask(null);
       fetchData();
@@ -504,53 +488,22 @@ const App: React.FC = () => {
     }
   };
 
-  // UPDATE PROFILE & GLOBAL CONFIG LOGIC
   const handleUpdateProfile = async (profileData: Partial<User>, newRole: string, settingsUpdate: any) => {
     if (!currentUser) return;
     try {
-        const personalSettings = {
-           notificationsEnabled: settingsUpdate.notificationsEnabled,
-           googleConnected: settingsUpdate.googleConnected,
-           sourceColors: currentUser.app_settings?.sourceColors,
-           visibleSources: currentUser.app_settings?.visibleSources,
-           googleAccessToken: settingsUpdate.googleAccessToken || currentUser.app_settings?.googleAccessToken
-        };
-
-        const updates = { 
-          ...profileData, 
-          status: newRole, 
-          app_settings: personalSettings
-        };
-        
+        const personalSettings = { notificationsEnabled: settingsUpdate.notificationsEnabled, googleConnected: settingsUpdate.googleConnected, sourceColors: currentUser.app_settings?.sourceColors, visibleSources: currentUser.app_settings?.visibleSources, googleAccessToken: settingsUpdate.googleAccessToken || currentUser.app_settings?.googleAccessToken };
+        const updates = { ...profileData, status: newRole, app_settings: personalSettings };
         const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
         if (error) throw error;
-
         const isAdmin = newRole.toLowerCase() === 'admin' || newRole.toLowerCase() === 'owner' || accountRole === 'Owner';
-        
         if (isAdmin) {
-           const { error: configError } = await supabase.from('app_config').upsert({
-              id: 1, 
-              app_name: settingsUpdate.appName,
-              app_logo: settingsUpdate.appLogo,
-              app_favicon: settingsUpdate.appFavicon,
-              updated_by: currentUser.id,
-              updated_at: new Date().toISOString()
-           });
-           
+           const { error: configError } = await supabase.from('app_config').upsert({ id: 1, app_name: settingsUpdate.appName, app_logo: settingsUpdate.appLogo, app_favicon: settingsUpdate.appFavicon, updated_by: currentUser.id, updated_at: new Date().toISOString() });
            if (configError) throw configError;
-           
-           setGlobalBranding({
-              id: 1,
-              app_name: settingsUpdate.appName,
-              app_logo: settingsUpdate.appLogo,
-              app_favicon: settingsUpdate.appFavicon
-           });
+           setGlobalBranding({ id: 1, app_name: settingsUpdate.appName, app_logo: settingsUpdate.appLogo, app_favicon: settingsUpdate.appFavicon });
         }
-
         setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
         const calculatedRole = (newRole?.toLowerCase() === 'admin' || newRole?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(calculatedRole);
-        
         alert("Pengaturan berhasil disimpan! Perubahan global akan terlihat oleh semua user.");
     } catch (err: any) {
         console.error(err);
@@ -560,25 +513,15 @@ const App: React.FC = () => {
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-    try {
-      await supabase.from('tasks').update({ status }).eq('id', id);
-    } catch (err) {
-      fetchData(); 
-    }
+    try { await supabase.from('tasks').update({ status }).eq('id', id); } catch (err) { fetchData(); }
   };
 
-  const handleBoardDragOver = (e: React.DragEvent, status: TaskStatus) => {
-    e.preventDefault();
-    setDragOverColumn(status);
-  };
-
+  const handleBoardDragOver = (e: React.DragEvent, status: TaskStatus) => { e.preventDefault(); setDragOverColumn(status); };
   const handleBoardDrop = async (e: React.DragEvent, status: TaskStatus) => {
     e.preventDefault();
     setDragOverColumn(null);
     const taskId = e.dataTransfer.getData('taskId');
-    if (taskId) {
-       await handleStatusChange(taskId, status);
-    }
+    if (taskId) { await handleStatusChange(taskId, status); }
   };
 
   const getDragOverStyle = (status: TaskStatus) => {
@@ -616,34 +559,16 @@ const App: React.FC = () => {
     setIsNewTaskModalOpen(true);
   };
 
-  // --- NOTIFICATION HANDLERS ---
+  // ... (Notification Handlers - Tetap Sama)
   const handleMarkAllRead = async () => {
     if (!currentUser) return;
-    try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ is_read: true })
-        .eq('user_id', currentUser.id)
-        .eq('is_read', false);
-
-      if (error) throw error;
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-    } catch (err) { console.error(err); }
+    try { const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', currentUser.id).eq('is_read', false); if (error) throw error; setNotifications(prev => prev.map(n => ({ ...n, is_read: true }))); } catch (err) { console.error(err); }
   };
 
   const handleDeleteAllNotifications = async () => {
     if (!currentUser) return;
     if (!confirm("Hapus semua notifikasi?")) return;
-    try {
-       const { error } = await supabase
-        .from('notifications')
-        .delete()
-        .eq('user_id', currentUser.id);
-
-       if (error) throw error;
-       setNotifications([]);
-       setIsNotifDropdownOpen(false);
-    } catch (err) { console.error(err); }
+    try { const { error } = await supabase.from('notifications').delete().eq('user_id', currentUser.id); if (error) throw error; setNotifications([]); setIsNotifDropdownOpen(false); } catch (err) { console.error(err); }
   };
 
   const handleNotificationClick = async (notif: Notification) => {
@@ -653,18 +578,10 @@ const App: React.FC = () => {
      }
      setIsNotifDropdownOpen(false);
      setCurrentNotification(null); 
-
      const metadata = notif.metadata || {};
-
      if (metadata.task_id) {
         const targetTask = tasks.find(t => t.id === metadata.task_id);
-        if (targetTask) {
-           handleGlobalTaskClick(targetTask); // Use Global Handler
-        } else {
-           const { data } = await supabase.from('tasks').select('*').eq('id', metadata.task_id).single();
-           if (data) handleGlobalTaskClick(data as Task);
-           else alert("Task tidak ditemukan atau sudah dihapus.");
-        }
+        if (targetTask) { handleGlobalTaskClick(targetTask); } else { const { data } = await supabase.from('tasks').select('*').eq('id', metadata.task_id).single(); if (data) handleGlobalTaskClick(data as Task); else alert("Task tidak ditemukan atau sudah dihapus."); }
      } else if (metadata.workspace_id) {
         setActiveWorkspaceId(metadata.workspace_id);
         setActiveTab('workspace_view');
@@ -678,6 +595,7 @@ const App: React.FC = () => {
   const currentWorkspaceTasks = activeWorkspaceId ? tasks.filter(t => t.workspace_id === activeWorkspaceId) : [];
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
 
+  // ... (Loading & Auth Check - Tetap Sama)
   if (isAuthLoading || (isAuthenticated && isProfileLoading)) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">

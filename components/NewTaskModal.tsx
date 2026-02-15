@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { X, Clock, Globe, Layout, AlignLeft, ChevronDown, List, Tag, Plus, Check, UserPlus } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Clock, Globe, Layout, AlignLeft, ChevronDown, List, Tag, Plus, Check, UserPlus, Calendar } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { TaskPriority, Task, Workspace, WorkspaceType } from '../types';
@@ -17,7 +17,7 @@ interface NewTaskModalProps {
   parentTasks?: Task[]; 
   categories?: string[];
   onAddCategory?: (category: string) => void;
-  members?: any[]; // New Prop: Members list for assignment
+  members?: any[]; 
 }
 
 export const NewTaskModal: React.FC<NewTaskModalProps> = ({ 
@@ -31,7 +31,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   parentTasks = [],
   categories = [],
   onAddCategory,
-  members = [] // Default empty if not provided (e.g. personal mode)
+  members = [] 
 }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -48,6 +48,9 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
+
+  const startDateRef = useRef<HTMLInputElement>(null);
+  const endDateRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (initialData) {
@@ -156,7 +159,6 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               className="text-lg font-bold py-4"
             />
 
-            {/* Parent Task Selection */}
             <div className="space-y-2">
               <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Tambahkan ke List Task (Parent)</label>
               <div className="relative">
@@ -175,7 +177,6 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               </div>
             </div>
             
-            {/* Assignee Selection - Only visible if members are available */}
             {members.length > 0 && (
               <div className="space-y-2 bg-blue-50/50 p-3 rounded-2xl border-2 border-blue-100">
                 <label className="block text-[10px] font-black uppercase tracking-widest text-blue-400 px-1">Tugaskan Ke (Assign To)</label>
@@ -215,12 +216,18 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Mulai</label>
-                <input 
-                  type="date" 
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-accent text-sm"
-                />
+                <div className="relative">
+                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer hover:text-accent" onClick={() => startDateRef.current?.showPicker()}>
+                      <Calendar size={18} />
+                   </div>
+                   <input 
+                    ref={startDateRef}
+                    type="date" 
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full pl-10 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-accent text-sm"
+                   />
+                </div>
                 {!isAllDay && (
                   <input 
                     type="time" 
@@ -232,12 +239,18 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               </div>
               <div className="space-y-2">
                 <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Selesai</label>
-                <input 
-                  type="date" 
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-accent text-sm"
-                />
+                <div className="relative">
+                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer hover:text-accent" onClick={() => endDateRef.current?.showPicker()}>
+                      <Calendar size={18} />
+                   </div>
+                   <input 
+                    ref={endDateRef}
+                    type="date" 
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full pl-10 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-accent text-sm"
+                   />
+                </div>
                 {!isAllDay && (
                   <input 
                     type="time" 
@@ -249,7 +262,6 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               </div>
             </div>
 
-            {/* Workspace & Category */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Lokasi / Workspace</label>
