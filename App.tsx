@@ -94,6 +94,7 @@ const App: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const currentUserRef = useRef<User | null>(null); // Ref to track user without triggering dependencies
   
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
@@ -145,6 +146,11 @@ const App: React.FC = () => {
   const workspaceChannelRef = useRef<any>(null);
   const userStatusChannelRef = useRef<any>(null);
   const configChannelRef = useRef<any>(null);
+
+  // Sync ref with state
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   // --- GLOBAL ESC KEY HANDLER (STACK LOGIC) ---
   useEffect(() => {
@@ -313,9 +319,8 @@ const App: React.FC = () => {
   }, [currentUser?.id, visibleSources.length]);
 
   const fetchOrCreateUser = useCallback(async (sessionUser: any) => {
-    // FIX: Hanya set loading jika currentUser belum ada (initial load)
-    // Jika sudah ada (refresh/tab switch), lakukan background update
-    if (!currentUser) {
+    // Prevent dependency loop by checking ref instead of state
+    if (!currentUserRef.current) {
       setIsProfileLoading(true);
     }
     
@@ -355,7 +360,7 @@ const App: React.FC = () => {
     } finally {
       setIsProfileLoading(false);
     }
-  }, [currentUser]); // Add currentUser to dependency to check state
+  }, []); // REMOVED currentUser DEPENDENCY TO FIX LOOP
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
