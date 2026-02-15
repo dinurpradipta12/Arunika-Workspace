@@ -45,6 +45,12 @@ export interface User {
   };
 }
 
+export interface WorkspaceAsset {
+  id: number;
+  name: string;
+  url: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -54,6 +60,8 @@ export interface Workspace {
   description?: string;
   category?: string;
   join_code?: string;
+  notepad?: string; // New: Persisted Notepad Content
+  assets?: WorkspaceAsset[]; // New: Persisted Assets List
 }
 
 export interface Task {

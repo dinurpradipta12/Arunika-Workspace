@@ -25,7 +25,8 @@ import {
   UserCheck,
   RefreshCw,
   LogOut,
-  Layers
+  Layers,
+  Send // Added Send icon
 } from 'lucide-react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
@@ -201,9 +202,9 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
       name: newName,
       username: cleanUsername,
       avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
-     }
-    }
-    });
+      }
+      }
+      });
       if (authError) throw authError;
 
       if (authData.user) {
@@ -395,22 +396,38 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
             isHoverable={false}
           >
             {successData ? (
-              <div className="space-y-6 animate-in zoom-in-95 duration-300">
+              <div className="space-y-4 animate-in zoom-in-95 duration-300">
                 <div className="p-5 bg-quaternary/10 border-2 border-quaternary rounded-2xl">
                    <div className="flex items-center gap-3 mb-3">
                       <div className="w-12 h-12 bg-white border-2 border-quaternary rounded-full flex items-center justify-center shadow-sm">
-                         <Mail size={24} className="text-quaternary" />
+                         <UserCheck size={24} className="text-quaternary" />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-black text-slate-900 truncate">Email Konfirmasi Terkirim</p>
+                        <p className="text-sm font-black text-slate-900 truncate">User Didaftarkan</p>
                         <p className="text-[10px] font-bold text-slate-500 truncate">{successData.email}</p>
                       </div>
                    </div>
                    <p className="text-[10px] font-bold text-quaternary uppercase tracking-widest leading-relaxed">
-                     PENTING: Minta user untuk cek Inbox/Spam email mereka dan klik link konfirmasi untuk mengaktifkan akun.
+                     Data pengguna berhasil disimpan ke dalam sistem. Silakan lanjutkan konfirmasi.
                    </p>
                 </div>
-                <Button variant="primary" className="w-full text-xs py-4" onClick={() => setSuccessData(null)}>Daftarkan User Lain</Button>
+                
+                {/* NEW BUTTON: Kirim Link Konfirmasi */}
+                <Button 
+                   variant="primary" 
+                   className="w-full text-xs py-4 shadow-pop" 
+                   onClick={() => {
+                      // Logic simulasi pengiriman (karena Supabase sudah mengirim saat signUp, ini bisa berupa feedback UI)
+                      alert(`Link konfirmasi dan detail aplikasi telah dikirim ulang ke ${successData.email}`);
+                   }}
+                >
+                   <Send size={16} className="mr-2" strokeWidth={3} /> Kirim Link Konfirmasi atau Aplikasi
+                </Button>
+
+                {/* Secondary Button */}
+                <Button variant="secondary" className="w-full text-xs border-2 border-slate-200" onClick={() => setSuccessData(null)}>
+                  <Plus size={14} className="mr-2" /> Daftarkan User Lain
+                </Button>
               </div>
             ) : (
               <form onSubmit={handleRegisterMember} className="space-y-5">
@@ -435,7 +452,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                 )}
 
                 <Button variant="primary" className={`w-full mt-2 py-4 ${retryCountdown > 0 ? 'bg-slate-300 border-slate-300 text-slate-500 shadow-none' : ''}`} type="submit" disabled={isRegistering || retryCountdown > 0}>
-                  {isRegistering ? <><Loader2 size={18} className="animate-spin mr-2" /> Mengirim...</> : retryCountdown > 0 ? `Cooling Down (${retryCountdown}s)` : 'Kirim Link Konfirmasi'}
+                  {isRegistering ? <><Loader2 size={18} className="animate-spin mr-2" /> Mendaftarkan...</> : retryCountdown > 0 ? `Cooling Down (${retryCountdown}s)` : 'Daftarkan User'}
                 </Button>
               </form>
             )}

@@ -13,7 +13,9 @@ import {
   Bell,
   X,
   Ban,
-  LogOut
+  LogOut,
+  Archive,
+  RotateCcw
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -93,6 +95,9 @@ const App: React.FC = () => {
   // Notification & Logout Message State
   const [currentNotification, setCurrentNotification] = useState<Notification | null>(null);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
+
+  // Drag and Drop State for Board
+  const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
 
   const taskChannelRef = useRef<any>(null);
   const notificationChannelRef = useRef<any>(null);
@@ -424,6 +429,34 @@ const App: React.FC = () => {
     }
   };
 
+  const handleBoardDragOver = (e: React.DragEvent, status: TaskStatus) => {
+    e.preventDefault();
+    setDragOverColumn(status);
+  };
+
+  const handleBoardDrop = async (e: React.DragEvent, status: TaskStatus) => {
+    e.preventDefault();
+    setDragOverColumn(null);
+    const taskId = e.dataTransfer.getData('taskId');
+    if (taskId) {
+       await handleStatusChange(taskId, status);
+    }
+  };
+
+  // Helper to get visual feedback classes based on status and drag state
+  const getDragOverStyle = (status: TaskStatus) => {
+    switch (status) {
+      case TaskStatus.TODO:
+        return 'bg-slate-100 border-slate-400 scale-[1.01]';
+      case TaskStatus.IN_PROGRESS:
+        return 'bg-yellow-50 border-tertiary scale-[1.01]';
+      case TaskStatus.DONE:
+        return 'bg-emerald-50 border-quaternary scale-[1.01]';
+      default:
+        return '';
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setIsAuthenticated(false);
@@ -695,7 +728,7 @@ const App: React.FC = () => {
                   onInspectTask={setInspectedTask} onRescheduleTask={setReschedulingTask}
                 />
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-8 pb-20">
                   <div className="flex justify-between items-end">
                     <div>
                       <h2 className="text-4xl font-heading tracking-tighter">My Board</h2>
@@ -703,16 +736,24 @@ const App: React.FC = () => {
                     </div>
                     <Button variant="primary" onClick={openNewTaskModal} className="px-6 py-3 shadow-pop text-md font-black">+ New Task</Button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-10">
+                  
+                  {/* DRAGGABLE COLUMNS */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.DONE].map(status => (
-                      <div key={status} className="space-y-4">
+                      <div 
+                        key={status} 
+                        className={`space-y-4 rounded-3xl p-4 transition-all duration-300 border-2 ${dragOverColumn === status ? getDragOverStyle(status) : 'border-transparent'}`}
+                        onDragOver={(e) => handleBoardDragOver(e, status)}
+                        onDragLeave={() => setDragOverColumn(null)}
+                        onDrop={(e) => handleBoardDrop(e, status)}
+                      >
                         <div className="flex items-center justify-between border-b-2 border-slate-800 pb-2">
                            <h3 className="font-heading text-lg uppercase tracking-widest">{status.replace('_', ' ')}</h3>
                            <span className="text-[9px] font-black bg-slate-800 text-white px-2 py-0.5 rounded-lg">
                              {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length}
                            </span>
                         </div>
-                        <div className="space-y-3">
+                        <div className="space-y-3 min-h-[200px]">
                           {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).map(task => (
                             <TaskItem 
                               key={task.id} 
@@ -732,6 +773,37 @@ const App: React.FC = () => {
                         </div>
                       </div>
                     ))}
+                  </div>
+
+                  {/* ARCHIVE SECTION */}
+                  <div className="mt-12 pt-8 border-t-4 border-slate-800">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 bg-slate-200 border-2 border-slate-800 rounded-xl flex items-center justify-center text-slate-500 shadow-sm">
+                        <Archive size={20} />
+                      </div>
+                      <h3 className="text-2xl font-heading text-slate-400">Archived Tasks</h3>
+                      <span className="text-xs font-black bg-slate-200 text-slate-500 px-3 py-1 rounded-full">{tasks.filter(t => t.is_archived && !t.parent_id).length} items</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70 hover:opacity-100 transition-opacity">
+                      {tasks.filter(t => t.is_archived && !t.parent_id).map(task => (
+                        <div key={task.id} className="relative group">
+                          <TaskItem 
+                            task={task} 
+                            onStatusChange={() => {}} // Disabled for archived
+                            onClick={setInspectedTask}
+                            onEdit={openEditModal}
+                            onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+                            onRestore={async (id) => { await supabase.from('tasks').update({ is_archived: false }).eq('id', id); fetchData(); }}
+                          />
+                        </div>
+                      ))}
+                      {tasks.filter(t => t.is_archived && !t.parent_id).length === 0 && (
+                        <div className="col-span-full py-8 text-center border-2 border-dashed border-slate-200 rounded-2xl">
+                          <p className="text-xs font-bold text-slate-300 uppercase tracking-widest">No archived tasks</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )
