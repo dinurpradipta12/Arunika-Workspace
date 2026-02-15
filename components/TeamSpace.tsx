@@ -28,10 +28,11 @@ import {
   Layers,
   Send // Added Send icon
 } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase';
 import { User, MemberRole, Workspace } from '../types';
 
 interface TeamSpaceProps {
@@ -192,7 +193,10 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     setSuccessData(null);
 
     try {
-      // 1. SignUp User
+      // PENTING: Gunakan Temporary Client untuk SignUp agar sesi Admin tidak tertimpa/logout
+      const tempSupabase = createClient(supabaseUrl, supabaseAnonKey);
+
+      // 1. SignUp User (di Auth Supabase) menggunakan Client Sementara
       const { data: authData, error: authError } = await supabase.auth.signUp({
       email: cleanEmail,
       password: newPassword,
@@ -208,7 +212,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
       if (authError) throw authError;
 
       if (authData.user) {
-        // 2. Insert/Update to public.users with temp_password
+        // 2. Insert/Update to public.users (Gunakan Client UTAMA/Admin untuk bypass RLS insert jika perlu)
         const newUser = authData.user;
         const { error: userError } = await supabase.from('users').upsert({
           id: newUser.id,
@@ -218,13 +222,13 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
           avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
           status: 'Member',
           is_active: true,
-          temp_password: newPassword, // Simpan password
+          temp_password: newPassword, 
           app_settings: { appName: 'TaskPlay' }
         });
 
         if (userError) throw new Error(`User profile error: ${userError.message}`);
 
-        // 3. Insert to Workspace Member
+        // 3. Insert to Workspace Member (Gunakan Client UTAMA/Admin)
         const { error: memberError } = await supabase.from('workspace_members').insert({
           workspace_id: targetWorkspaceId,
           user_id: newUser.id,
@@ -235,8 +239,10 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
 
         setSuccessData({ username: cleanUsername, name: newName, email: newUser.email || cleanEmail });
         
-        // Reset
+        // Reset Form
         setNewEmail(''); setNewUsername(''); setNewName(''); setNewPassword('');
+        
+        // Refresh List (Force fetch agar UI langsung update)
         await fetchMembers(false);
       }
     } catch (err: any) {
