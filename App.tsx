@@ -31,10 +31,10 @@ import { RescheduleModal } from './components/RescheduleModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CalendarView } from './components/CalendarView';
 import { NewWorkspaceModal } from './components/NewWorkspaceModal';
-import { JoinWorkspaceModal } from './components/JoinWorkspaceModal'; // Imported
+import { JoinWorkspaceModal } from './components/JoinWorkspaceModal'; 
 import { WorkspaceView } from './components/WorkspaceView';
 import { supabase } from './lib/supabase';
-import { Task, TaskStatus, TaskPriority, Workspace, User, Notification, WorkspaceType } from './types';
+import { Task, TaskStatus, TaskPriority, Workspace, User, Notification, WorkspaceType, AppConfig } from './types';
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
 
 const UI_PALETTE = [
@@ -51,12 +51,14 @@ const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [isProfileLoading, setIsProfileLoading] = useState<boolean>(false);
-  // State untuk menangani pemblokiran akun secara realtime
   const [isAccountLocked, setIsAccountLocked] = useState<boolean>(false);
   
+  // GLOBAL BRANDING STATE
+  const [globalBranding, setGlobalBranding] = useState<AppConfig | null>(null);
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive' | 'workspace_view'>('dashboard');
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
-  const [activeWorkspaceMembers, setActiveWorkspaceMembers] = useState<any[]>([]); // New state for workspace members
+  const [activeWorkspaceMembers, setActiveWorkspaceMembers] = useState<any[]>([]); 
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -104,6 +106,7 @@ const App: React.FC = () => {
   const notificationChannelRef = useRef<any>(null);
   const workspaceChannelRef = useRef<any>(null);
   const userStatusChannelRef = useRef<any>(null);
+  const configChannelRef = useRef<any>(null);
 
   const getConnectionStatus = () => {
     if (!isOnline) return { color: 'text-secondary', label: 'Offline', icon: <WifiOff size={16} /> };
@@ -114,23 +117,26 @@ const App: React.FC = () => {
     return { color: 'text-secondary', label: 'Menyambungkan', icon: <WifiOff size={16} /> };
   };
 
+  // --- BRANDING EFFECT ---
   useEffect(() => {
-    if (currentUser?.app_settings) {
-      const { appName, appFavicon } = currentUser.app_settings;
-      if (appName && document.title !== appName) {
-        document.title = appName;
-      }
-      if (appFavicon) {
-        let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
-        if (!link) {
-          link = document.createElement('link');
-          link.rel = 'icon';
-          document.head.appendChild(link);
-        }
-        link.href = appFavicon;
-      }
+    // Gunakan Global Branding jika ada, jika tidak fallback ke default
+    const appName = globalBranding?.app_name || 'TaskPlay';
+    const appFavicon = globalBranding?.app_favicon;
+
+    if (document.title !== appName) {
+      document.title = appName;
     }
-  }, [currentUser]);
+    
+    if (appFavicon) {
+      let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = appFavicon;
+    }
+  }, [globalBranding]);
 
   useEffect(() => {
     if (tasks.length > 0) {
@@ -160,13 +166,15 @@ const App: React.FC = () => {
     if (!currentUser) return;
     setIsFetching(true);
     try {
-      const [wsResult, tasksResult] = await Promise.allSettled([
+      const [wsResult, tasksResult, brandingResult] = await Promise.allSettled([
         supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
-        supabase.from('tasks').select('*').order('created_at', { ascending: false })
+        supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+        supabase.from('app_config').select('*').single()
       ]);
 
       const wsData = wsResult.status === 'fulfilled' ? wsResult.value.data : [];
       const tData = tasksResult.status === 'fulfilled' ? tasksResult.value.data : [];
+      const bData = brandingResult.status === 'fulfilled' ? brandingResult.value.data : null;
       
       setIsApiConnected(true);
       
@@ -177,6 +185,8 @@ const App: React.FC = () => {
         }
       }
       if (tData) setTasks(tData as Task[]);
+      if (bData) setGlobalBranding(bData as AppConfig);
+
     } catch (err) {
       console.error("Fetch fatal error:", err);
       setIsApiConnected(false);
@@ -204,7 +214,7 @@ const App: React.FC = () => {
           name: sessionUser.user_metadata?.name || generatedUsername,
           avatar_url: sessionUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${sessionUser.id}`,
           status: isLegacyAdmin ? 'Admin' : 'Member',
-          app_settings: { appName: 'TaskPlay' },
+          app_settings: { }, // Empty for new users, they use global config
           is_active: true
         };
         const { data: createdData } = await supabase.from('users').upsert(newUser).select().single();
@@ -215,7 +225,6 @@ const App: React.FC = () => {
       }
 
       if (data) {
-        // Cek apakah user terkunci saat awal load
         if (data.is_active === false) {
            setIsAccountLocked(true);
         } else {
@@ -283,6 +292,18 @@ const App: React.FC = () => {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, () => fetchData())
         .subscribe();
 
+      // --- CONFIG REALTIME ---
+      if (configChannelRef.current) supabase.removeChannel(configChannelRef.current);
+      configChannelRef.current = supabase
+        .channel('app-config-live')
+        .on('postgres_changes', { 
+            event: '*', schema: 'public', table: 'app_config', filter: 'id=eq.1'
+        }, (payload) => {
+            console.log("Global config updated:", payload.new);
+            setGlobalBranding(payload.new as AppConfig);
+        })
+        .subscribe();
+
       if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
       notificationChannelRef.current = supabase
         .channel(`notifications:${currentUser.id}`)
@@ -297,7 +318,6 @@ const App: React.FC = () => {
         })
         .subscribe();
 
-      // Monitor Account Status (Realtime Lockout)
       if (userStatusChannelRef.current) supabase.removeChannel(userStatusChannelRef.current);
       userStatusChannelRef.current = supabase
         .channel(`user-status-${currentUser.id}`)
@@ -307,12 +327,10 @@ const App: React.FC = () => {
             table: 'users',
             filter: `id=eq.${currentUser.id}`
         }, (payload: any) => {
-             // Jika status berubah jadi non-aktif, langsung kunci layar
              if (payload.new.is_active === false) {
                  setIsAccountLocked(true);
                  setCurrentUser(prev => prev ? { ...prev, is_active: false } : null);
              } else if (payload.new.is_active === true) {
-                 // Jika diaktifkan kembali
                  setIsAccountLocked(false);
                  setCurrentUser(prev => prev ? { ...prev, is_active: true } : null);
              }
@@ -321,7 +339,6 @@ const App: React.FC = () => {
     }
   }, [currentUser?.id, isAuthenticated, fetchData]);
 
-  // --- Fetch Workspace Members Logic ---
   useEffect(() => {
     if (activeWorkspaceId) {
       const fetchMembers = async () => {
@@ -397,7 +414,7 @@ const App: React.FC = () => {
         is_archived: taskData.is_archived ?? false,
         category: taskData.category || 'General',
         created_by: currentUser.id,
-        assigned_to: taskData.assigned_to || null // Add assigned_to
+        assigned_to: taskData.assigned_to || null
       };
 
       if (editingTask && editingTask.id) {
@@ -420,24 +437,60 @@ const App: React.FC = () => {
     }
   };
 
+  // UPDATE PROFILE & GLOBAL CONFIG LOGIC
   const handleUpdateProfile = async (profileData: Partial<User>, newRole: string, settingsUpdate: any) => {
     if (!currentUser) return;
     try {
+        // 1. Update Personal Profile & Settings
+        // Pisahkan setting personal (notif, google)
+        const personalSettings = {
+           notificationsEnabled: settingsUpdate.notificationsEnabled,
+           googleConnected: settingsUpdate.googleConnected,
+           sourceColors: currentUser.app_settings?.sourceColors,
+           visibleSources: currentUser.app_settings?.visibleSources,
+           googleAccessToken: settingsUpdate.googleAccessToken || currentUser.app_settings?.googleAccessToken
+        };
+
         const updates = { 
           ...profileData, 
           status: newRole, 
-          app_settings: {
-             ...currentUser.app_settings,
-             ...settingsUpdate
-          } 
+          app_settings: personalSettings
         };
+        
         const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
         if (error) throw error;
+
+        // 2. Update Global Branding (Only if Admin/Owner)
+        const isAdmin = newRole.toLowerCase() === 'admin' || newRole.toLowerCase() === 'owner' || accountRole === 'Owner';
+        
+        if (isAdmin) {
+           const { error: configError } = await supabase.from('app_config').upsert({
+              id: 1, // Always row 1
+              app_name: settingsUpdate.appName,
+              app_logo: settingsUpdate.appLogo,
+              app_favicon: settingsUpdate.appFavicon,
+              updated_by: currentUser.id,
+              updated_at: new Date().toISOString()
+           });
+           
+           if (configError) throw configError;
+           
+           // Update local state immediately for admin
+           setGlobalBranding({
+              id: 1,
+              app_name: settingsUpdate.appName,
+              app_logo: settingsUpdate.appLogo,
+              app_favicon: settingsUpdate.appFavicon
+           });
+        }
+
         setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
         const calculatedRole = (newRole?.toLowerCase() === 'admin' || newRole?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(calculatedRole);
-        alert("Data profil berhasil disimpan & disinkronkan!");
+        
+        alert("Pengaturan berhasil disimpan! Perubahan global akan terlihat oleh semua user.");
     } catch (err: any) {
+        console.error(err);
         alert("Gagal menyimpan perubahan: " + err.message);
     }
   };
@@ -521,11 +574,8 @@ const App: React.FC = () => {
     );
   }
 
-  // Laman Login
   if (!isAuthenticated) return <Login onLoginSuccess={() => { setIsAuthenticated(true); setLoginMessage(null); }} initialMessage={loginMessage} />;
   
-  // TAMPILAN LOCK SCREEN (Blank & Disabled)
-  // Jika akun dikunci, tampilkan ini menutupi segalanya
   if (isAuthenticated && isAccountLocked) {
     return (
       <div className="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
@@ -557,7 +607,6 @@ const App: React.FC = () => {
   return (
     <div className="h-full w-full bg-background overflow-hidden flex justify-center">
       
-      {/* GLOBAL NOTIFICATION TOAST */}
       {currentNotification && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-top-4 duration-500">
            <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop p-4 flex items-start gap-4 max-w-sm">
@@ -592,7 +641,7 @@ const App: React.FC = () => {
               setCategoryColors(prev => ({...prev, [cat]: UI_PALETTE[categories.length % UI_PALETTE.length]}));
             }
           }}
-          members={activeWorkspaceMembers} // Pass active members to modal
+          members={activeWorkspaceMembers} 
         />
         
         <NewWorkspaceModal 
@@ -623,7 +672,8 @@ const App: React.FC = () => {
           onLogout={handleLogout} 
           currentUser={currentUser} 
           role={accountRole}
-          customBranding={{ name: currentUser.app_settings?.appName, logo: currentUser.app_settings?.appLogo }} 
+          // Pass GLOBAL branding here
+          customBranding={{ name: globalBranding?.app_name, logo: globalBranding?.app_logo }} 
           onAddWorkspace={() => setIsNewWorkspaceModalOpen(true)}
           onSelectWorkspace={(id) => { setActiveWorkspaceId(id); setActiveTab('workspace_view'); }}
           activeWorkspaceId={activeWorkspaceId}
@@ -656,7 +706,9 @@ const App: React.FC = () => {
           notificationsEnabled={currentUser.app_settings?.notificationsEnabled ?? true} 
           onSaveProfile={handleUpdateProfile} 
           googleAccessToken={googleAccessToken} 
-          setGoogleAccessToken={setGoogleAccessToken} 
+          setGoogleAccessToken={setGoogleAccessToken}
+          // Pass Global Branding to Modal
+          currentBranding={globalBranding}
         />
         
         <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0">

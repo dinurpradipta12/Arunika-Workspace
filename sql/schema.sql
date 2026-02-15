@@ -4,6 +4,7 @@
 -- ==========================================
 
 -- 1. DROP EXISTING TABLES (CLEANUP)
+DROP TABLE IF EXISTS public.app_config CASCADE; -- Added
 DROP TABLE IF EXISTS public.notifications CASCADE;
 DROP TABLE IF EXISTS public.tasks CASCADE;
 DROP TABLE IF EXISTS public.workspace_members CASCADE;
@@ -33,6 +34,20 @@ CREATE TABLE public.users (
   temp_password TEXT -- Disimpan untuk Admin (Sesuai Request)
 );
 
+-- Table for Global App Configuration (Single Row)
+CREATE TABLE public.app_config (
+  id INT PRIMARY KEY DEFAULT 1,
+  app_name TEXT DEFAULT 'TaskPlay',
+  app_logo TEXT,
+  app_favicon TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT single_row CHECK (id = 1)
+);
+
+-- Insert Default Config
+INSERT INTO public.app_config (id, app_name) VALUES (1, 'TaskPlay') ON CONFLICT DO NOTHING;
+
 CREATE TABLE public.workspaces (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   name TEXT NOT NULL,
@@ -41,7 +56,9 @@ CREATE TABLE public.workspaces (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   category TEXT DEFAULT 'General',
   description TEXT,
-  join_code TEXT DEFAULT UPPER(substring(md5(random()::text) from 0 for 7)) 
+  join_code TEXT DEFAULT UPPER(substring(md5(random()::text) from 0 for 7)),
+  notepad TEXT,
+  assets JSONB DEFAULT '[]'::jsonb
 );
 
 CREATE TABLE public.workspace_members (
@@ -65,6 +82,7 @@ CREATE TABLE public.tasks (
   start_date TIMESTAMP WITH TIME ZONE,
   is_all_day BOOLEAN DEFAULT true,
   created_by TEXT,
+  assigned_to TEXT REFERENCES public.users(id), -- Added assigned_to column
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   completed_at TIMESTAMP WITH TIME ZONE,
   is_archived BOOLEAN DEFAULT false,
@@ -202,8 +220,14 @@ RETURNS SETOF text
 LANGUAGE sql SECURITY DEFINER SET search_path = public STABLE
 AS $$ SELECT workspace_id FROM public.workspace_members WHERE user_id = auth.uid()::text $$;
 
+CREATE OR REPLACE FUNCTION public.is_admin_or_owner()
+RETURNS BOOLEAN
+LANGUAGE sql SECURITY DEFINER SET search_path = public STABLE
+AS $$ SELECT EXISTS(SELECT 1 FROM public.users WHERE id = auth.uid()::text AND status IN ('Admin', 'Owner')) $$;
+
 -- 6. RLS POLICIES
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspace_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
@@ -211,8 +235,12 @@ ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
 -- Users
 CREATE POLICY "Users view all" ON public.users FOR SELECT USING (true);
-CREATE POLICY "Users update self or admin" ON public.users FOR UPDATE USING (true); -- Simplified for Admin functionality
+CREATE POLICY "Users update self or admin" ON public.users FOR UPDATE USING (true); 
 CREATE POLICY "System insert users" ON public.users FOR INSERT WITH CHECK (true);
+
+-- App Config
+CREATE POLICY "Everyone view config" ON public.app_config FOR SELECT USING (true);
+CREATE POLICY "Admins update config" ON public.app_config FOR UPDATE USING (public.is_admin_or_owner());
 
 -- Workspaces
 CREATE POLICY "View workspaces" ON public.workspaces FOR SELECT USING (

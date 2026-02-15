@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
-import { User as UserType } from '../types';
+import { User as UserType, AppConfig } from '../types';
 import { GoogleCalendarService } from '../services/googleCalendarService';
 import { supabase } from '../lib/supabase';
 
@@ -21,10 +21,11 @@ interface SettingsModalProps {
   onSaveProfile: (userData: Partial<UserType>, newRole: string, settingsUpdate?: any) => void;
   googleAccessToken: string | null;
   setGoogleAccessToken: (token: string | null) => void;
+  currentBranding?: AppConfig | null; // NEW PROP for Global Branding
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
-  isOpen, onClose, user, role, notificationsEnabled, onSaveProfile, googleAccessToken, setGoogleAccessToken 
+  isOpen, onClose, user, role, notificationsEnabled, onSaveProfile, googleAccessToken, setGoogleAccessToken, currentBranding 
 }) => {
   const [expandedSection, setExpandedSection] = useState<'profile' | 'app' | 'branding' | null>('profile');
   const [isSyncing, setIsSyncing] = useState(false);
@@ -34,9 +35,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [tempEmail, setTempEmail] = useState('');
   const [tempAvatar, setTempAvatar] = useState('');
   const [tempRole, setTempRole] = useState('');
+  
+  // Branding State (From AppConfig)
   const [tempAppName, setTempAppName] = useState('');
   const [tempAppLogo, setTempAppLogo] = useState('');
   const [tempFavicon, setTempFavicon] = useState('');
+  
+  // Personal Settings
   const [tempNotifications, setTempNotifications] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,12 +62,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setTempEmail(user.email || '');
       setTempAvatar(user.avatar_url || '');
       setTempRole(role || 'Owner');
-      setTempAppName(user.app_settings?.appName || 'TaskPlay');
-      setTempAppLogo(user.app_settings?.appLogo || '');
-      setTempFavicon(user.app_settings?.appFavicon || '');
+      
+      // Initialize from GLOBAL branding config
+      setTempAppName(currentBranding?.app_name || 'TaskPlay');
+      setTempAppLogo(currentBranding?.app_logo || '');
+      setTempFavicon(currentBranding?.app_favicon || '');
+      
       setTempNotifications(user.app_settings?.notificationsEnabled ?? true);
     }
-  }, [isOpen, user, role]);
+  }, [isOpen, user, role, currentBranding]);
 
   const validateAndReadImage = (file: File, callback: (base64: string) => void) => {
     if (file.size > 800 * 1024) { // Limit 800KB
@@ -101,7 +109,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       appFavicon: tempFavicon,
       notificationsEnabled: tempNotifications,
       // Persist connection status (boolean) so UI remembers it
-      googleConnected: !!googleAccessToken || user.app_settings?.googleConnected
+      googleConnected: !!googleAccessToken || user.app_settings?.googleConnected,
+      googleAccessToken: googleAccessToken || user.app_settings?.googleAccessToken
     };
 
     const finalProfile = {
@@ -200,13 +209,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               >
                 <div className="flex items-center gap-3">
                   <Palette size={20} strokeWidth={3} />
-                  <span className="font-heading text-lg">Branding Aplikasi</span>
+                  <span className="font-heading text-lg">Branding Aplikasi (Global)</span>
                 </div>
                 <ChevronDown className={`transition-transform duration-300 ${expandedSection === 'branding' ? 'rotate-180' : ''}`} />
               </button>
 
               {expandedSection === 'branding' && (
                 <div className="p-6 bg-white space-y-6 animate-in slide-in-from-top-4 duration-300">
+                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-4 text-[10px] font-bold text-yellow-800">
+                     Perubahan di sini akan langsung diterapkan ke seluruh pengguna aplikasi.
+                  </div>
+
                   <Input 
                     label="Nama Custom Dashboard" 
                     value={tempAppName} 

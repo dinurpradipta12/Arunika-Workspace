@@ -34,15 +34,22 @@ export interface User {
   is_active?: boolean;
   temp_password?: string;
   app_settings?: {
-    appName?: string;
-    appLogo?: string;
-    appFavicon?: string;
+    // appName, appLogo, appFavicon moved to AppConfig for global sync
     notificationsEnabled?: boolean;
     sourceColors?: Record<string, string>;
     visibleSources?: string[];
     googleAccessToken?: string; 
     googleConnected?: boolean; // New field to persist connection status
   };
+}
+
+// New Interface for Global Branding
+export interface AppConfig {
+  id: number;
+  app_name: string;
+  app_logo: string;
+  app_favicon: string;
+  updated_at?: string;
 }
 
 export interface WorkspaceAsset {
