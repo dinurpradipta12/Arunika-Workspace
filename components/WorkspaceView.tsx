@@ -21,7 +21,8 @@ import {
   User,
   ArrowRight,
   Clock,
-  Calendar
+  Calendar,
+  Edit3
 } from 'lucide-react';
 import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
@@ -62,6 +63,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     { id: 1, name: 'Project Drive', url: '#' }, 
   ]);
   
+  // Typing Indicator State
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const typingTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const channelRef = useRef<any>(null); // Ref to hold the channel instance
+  const lastTypingSentRef = useRef<number>(0); // Throttle sending typing events
+
   // Asset Form State
   const [newAssetName, setNewAssetName] = useState('');
   const [newAssetUrl, setNewAssetUrl] = useState('');
@@ -82,6 +89,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     });
   }, []);
 
+  // Get Current User Name for Broadcast
+  const currentUserName = useMemo(() => {
+    if (!currentUserId || members.length === 0) return 'Seseorang';
+    const member = members.find(m => m.user_id === currentUserId);
+    return member?.users?.name || 'Member';
+  }, [members, currentUserId]);
+
   // --- 1. SYNC FROM PROP (Initial Load / Workspace Switch) ---
   useEffect(() => {
     if (document.activeElement !== notepadRef.current && workspace.notepad !== undefined) {
@@ -92,9 +106,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     }
   }, [workspace.id, workspace.notepad, workspace.assets]);
 
-  // --- 2. DEDICATED REALTIME SUBSCRIPTION (Notepad & Assets) ---
+  // --- 2. REALTIME SUBSCRIPTION (Notepad, Assets, & Typing Broadcast) ---
   useEffect(() => {
-    const channel = supabase.channel(`workspace-updates-${workspace.id}`)
+    // Clean up previous channel if exists to prevent duplicates
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
+
+    const channel = supabase.channel(`workspace-room-${workspace.id}`)
       .on(
         'postgres_changes', 
         { 
@@ -106,7 +123,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         (payload) => {
           const newData = payload.new as Workspace;
           
-          // Fix Realtime Notepad: Update if user is NOT focusing the textarea
+          // Sync Notepad Content
           if (document.activeElement !== notepadRef.current && newData.notepad !== undefined) {
              setNotepadContent(newData.notepad);
           }
@@ -117,10 +134,40 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           }
         }
       )
+      .on('broadcast', { event: 'typing' }, (payload) => {
+          // Logic: When receiving 'typing' event
+          const typerName = payload.payload.user;
+          const typerId = payload.payload.userId;
+
+          // Don't show own typing status
+          if (typerId === currentUserId) return;
+
+          // Add user to typing list
+          setTypingUsers((prev) => {
+             if (!prev.includes(typerName)) return [...prev, typerName];
+             return prev;
+          });
+
+          // Clear existing timeout for this user if any (debounce logic)
+          if (typingTimeoutsRef.current[typerId]) {
+             clearTimeout(typingTimeoutsRef.current[typerId]);
+          }
+
+          // Remove user from list after 3 seconds of inactivity
+          typingTimeoutsRef.current[typerId] = setTimeout(() => {
+             setTypingUsers((prev) => prev.filter(name => name !== typerName));
+             delete typingTimeoutsRef.current[typerId];
+          }, 3000);
+      })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [workspace.id, assets]);
+    channelRef.current = channel;
+
+    return () => { 
+      supabase.removeChannel(channel); 
+      channelRef.current = null;
+    };
+  }, [workspace.id, assets, currentUserId]); // Removed 'assets' from dependency to avoid reconnect loops, handled internally
 
   // --- 3. MEMBERS DATA & REALTIME ---
   const fetchMembers = async () => {
@@ -150,11 +197,22 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     return () => { supabase.removeChannel(channel); };
   }, [workspace.id]);
 
-  // --- 4. NOTEPAD HANDLER (Debounced Save) ---
+  // --- 4. NOTEPAD HANDLER (Debounced Save + Broadcast) ---
   const handleNotepadChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newVal = e.target.value;
     setNotepadContent(newVal);
     setIsSavingNotepad(true);
+
+    // Broadcast Typing Event (Throttled: Send max once every 1s)
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > 1000 && channelRef.current) {
+       channelRef.current.send({
+          type: 'broadcast',
+          event: 'typing',
+          payload: { user: currentUserName, userId: currentUserId }
+       });
+       lastTypingSentRef.current = now;
+    }
 
     if (notepadTimeoutRef.current) clearTimeout(notepadTimeoutRef.current);
 
@@ -169,7 +227,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       } finally {
         setIsSavingNotepad(false);
       }
-    }, 1000); // Faster save (1s)
+    }, 1000); 
   };
 
   // --- 5. ASSET HANDLERS ---
@@ -563,6 +621,22 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
              isHoverable={false}
           >
              <div className="relative">
+                {/* --- REALTIME TYPING INDICATOR --- */}
+                {typingUsers.length > 0 && (
+                   <div className="absolute -top-10 right-0 left-0 flex items-center justify-end gap-1.5 animate-in fade-in zoom-in slide-in-from-bottom-2 duration-300 pointer-events-none">
+                      <div className="flex items-center gap-1 bg-slate-800 text-white px-3 py-1.5 rounded-t-lg rounded-bl-lg text-[9px] font-bold shadow-lg">
+                        <span className="relative flex h-2 w-2">
+                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+                           <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
+                        </span>
+                        {typingUsers.length > 2 
+                          ? `${typingUsers[0]}, ${typingUsers[1]} & ${typingUsers.length - 2} lainnya sedang mengetik...`
+                          : `${typingUsers.join(', ')} sedang mengetik...`
+                        }
+                      </div>
+                   </div>
+                )}
+
                 <textarea 
                   ref={notepadRef}
                   className="w-full h-40 bg-transparent border-none outline-none resize-none font-medium text-slate-700 text-sm leading-relaxed font-mono"
@@ -586,9 +660,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                       </span>
                    )}
                 </div>
-                <button className="p-1 hover:bg-yellow-200 rounded text-yellow-800" title="Clear Note" onClick={() => setNotepadContent('')}>
-                  <Trash2 size={12} />
-                </button>
+                <div className="flex gap-2">
+                   <button className="p-1 hover:bg-yellow-200 rounded text-yellow-800" title="Edit Mode">
+                     <Edit3 size={12} />
+                   </button>
+                   <button className="p-1 hover:bg-yellow-200 rounded text-yellow-800" title="Clear Note" onClick={() => { if(confirm('Hapus semua catatan?')) setNotepadContent(''); }}>
+                     <Trash2 size={12} />
+                   </button>
+                </div>
              </div>
           </Card>
 
