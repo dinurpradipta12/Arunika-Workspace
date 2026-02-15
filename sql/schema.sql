@@ -1,10 +1,26 @@
 
 -- ==========================================
--- SCRIPT DATABASE TASKPLAY (RLS TYPE CAST FIX FINAL)
+-- SCRIPT DATABASE TASKPLAY (DEV MODE: AUTO CONFIRM v13 - JOIN CODE & NOTIFS)
 -- ==========================================
 
--- 1. Setup Tabel Dasar (Idempotent)
-CREATE TABLE IF NOT EXISTS public.users (
+-- 1. DROP EXISTING TABLES (CLEANUP)
+DROP TABLE IF EXISTS public.notifications CASCADE;
+DROP TABLE IF EXISTS public.tasks CASCADE;
+DROP TABLE IF EXISTS public.workspace_members CASCADE;
+DROP TABLE IF EXISTS public.workspaces CASCADE;
+DROP TABLE IF EXISTS public.users CASCADE;
+
+-- Cleanup Triggers & Functions
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS on_auth_user_signup_confirm ON auth.users;
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+DROP FUNCTION IF EXISTS public.auto_confirm_email() CASCADE;
+DROP FUNCTION IF EXISTS public.get_my_workspace_ids() CASCADE;
+DROP FUNCTION IF EXISTS public.get_my_owned_workspace_ids() CASCADE;
+DROP FUNCTION IF EXISTS public.join_workspace_by_code(text) CASCADE;
+
+-- 2. CREATE TABLES
+CREATE TABLE public.users (
   id TEXT PRIMARY KEY,
   email TEXT,
   username TEXT,
@@ -15,25 +31,27 @@ CREATE TABLE IF NOT EXISTS public.users (
   app_settings JSONB DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE IF NOT EXISTS public.workspaces (
+CREATE TABLE public.workspaces (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   name TEXT NOT NULL,
   type TEXT NOT NULL,
-  owner_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   category TEXT DEFAULT 'General',
-  description TEXT
+  description TEXT,
+  join_code TEXT DEFAULT UPPER(substring(md5(random()::text) from 0 for 7)) -- Kode Unik 6 Karakter
 );
 
-CREATE TABLE IF NOT EXISTS public.workspace_members (
+CREATE TABLE public.workspace_members (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   workspace_id TEXT REFERENCES public.workspaces(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   role TEXT DEFAULT 'member',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(workspace_id, user_id) -- Mencegah duplikat member
 );
 
-CREATE TABLE IF NOT EXISTS public.tasks (
+CREATE TABLE public.tasks (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   workspace_id TEXT REFERENCES public.workspaces(id) ON DELETE CASCADE,
   parent_id UUID REFERENCES public.tasks(id) ON DELETE CASCADE,
@@ -53,114 +71,176 @@ CREATE TABLE IF NOT EXISTS public.tasks (
   google_calendar_id TEXT
 );
 
--- 2. RESET TOTAL POLICY & FUNCTION
-DO $$ 
-DECLARE 
-    pol record; 
-BEGIN 
-    FOR pol IN 
-        SELECT policyname, tablename 
-        FROM pg_policies 
-        WHERE tablename IN ('workspaces', 'workspace_members', 'tasks', 'users') 
-    LOOP 
-        EXECUTE 'DROP POLICY IF EXISTS "' || pol.policyname || '" ON public.' || pol.tablename; 
-    END LOOP;
-END $$;
+CREATE TABLE public.notifications (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT REFERENCES public.users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL, -- 'join_workspace', 'task_assigned', etc
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  is_read BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  metadata JSONB DEFAULT '{}'::jsonb
+);
 
--- 3. FUNGSI BYPASS RLS (Jalur Cepat dengan Casting)
-DROP FUNCTION IF EXISTS public.get_my_workspace_ids();
-CREATE OR REPLACE FUNCTION public.get_my_workspace_ids()
-RETURNS SETOF text
-LANGUAGE sql
+-- 3. FUNCTIONS & TRIGGERS
+
+-- Auto Confirm Email
+CREATE OR REPLACE FUNCTION public.auto_confirm_email()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.email_confirmed_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_auth_user_signup_confirm
+  BEFORE INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.auto_confirm_email();
+
+-- User Sync
+CREATE OR REPLACE FUNCTION public.handle_new_user() 
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.users (id, email, name, username, avatar_url, status)
+  VALUES (
+    new.id::text, 
+    new.email, 
+    COALESCE(new.raw_user_meta_data->>'name', new.email),
+    COALESCE(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1)),
+    COALESCE(new.raw_user_meta_data->>'avatar_url', ''),
+    'Member'
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    name = EXCLUDED.name,
+    avatar_url = EXCLUDED.avatar_url;
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- FUNCTION: Join Workspace By Code
+CREATE OR REPLACE FUNCTION public.join_workspace_by_code(code_input TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
-STABLE
 AS $$
-    SELECT workspace_id::text  -- Pastikan output selalu text
-    FROM public.workspace_members 
-    WHERE user_id::text = auth.uid()::text -- Bandingkan Text vs Text
+DECLARE
+  target_ws RECORD;
+  is_member BOOLEAN;
+  current_user_id TEXT;
+  current_user_name TEXT;
+BEGIN
+  current_user_id := auth.uid()::text;
+  
+  -- 1. Cari Workspace
+  SELECT * INTO target_ws FROM public.workspaces WHERE join_code = UPPER(code_input);
+  
+  IF target_ws.id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'message', 'Kode workspace tidak valid.');
+  END IF;
+
+  -- 2. Cek apakah sudah member
+  SELECT EXISTS(SELECT 1 FROM public.workspace_members WHERE workspace_id = target_ws.id AND user_id = current_user_id) INTO is_member;
+  
+  IF is_member THEN
+    RETURN jsonb_build_object('success', false, 'message', 'Anda sudah menjadi anggota workspace ini.');
+  END IF;
+
+  -- 3. Masukkan sebagai Member
+  INSERT INTO public.workspace_members (workspace_id, user_id, role)
+  VALUES (target_ws.id, current_user_id, 'member');
+
+  -- 4. Kirim Notifikasi ke Owner
+  SELECT name INTO current_user_name FROM public.users WHERE id = current_user_id;
+
+  INSERT INTO public.notifications (user_id, type, title, message, metadata)
+  VALUES (
+    target_ws.owner_id, 
+    'join_workspace', 
+    'Anggota Baru Bergabung', 
+    COALESCE(current_user_name, 'Seseorang') || ' telah bergabung ke workspace ' || target_ws.name || ' menggunakan kode akses.',
+    jsonb_build_object('workspace_id', target_ws.id, 'joiner_id', current_user_id)
+  );
+
+  RETURN jsonb_build_object('success', true, 'message', 'Berhasil bergabung ke ' || target_ws.name, 'workspace_id', target_ws.id);
+END;
 $$;
 
--- 4. PERBAIKI CONSTRAINT FOREIGN KEY (Safe Mode)
+-- 4. BACKFILL & SYNC
 DO $$
 BEGIN
-    BEGIN
-        ALTER TABLE public.workspace_members DROP CONSTRAINT IF EXISTS workspace_members_user_id_fkey;
-        ALTER TABLE public.workspace_members 
-          ADD CONSTRAINT workspace_members_user_id_fkey 
-          FOREIGN KEY (user_id) 
-          REFERENCES public.users(id) 
-          ON DELETE CASCADE;
-    EXCEPTION
-        WHEN OTHERS THEN
-            RAISE NOTICE 'Skipping Foreign Key creation due to type mismatch: %', SQLERRM;
-    END;
+    UPDATE auth.users SET email_confirmed_at = NOW() WHERE email_confirmed_at IS NULL;
 END $$;
 
--- 5. GRANT PERMISSIONS
-GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
-GRANT ALL ON TABLE public.users TO authenticated, service_role;
-GRANT SELECT ON TABLE public.users TO anon;
-GRANT ALL ON TABLE public.workspaces TO authenticated, service_role;
-GRANT ALL ON TABLE public.workspace_members TO authenticated, service_role;
-GRANT ALL ON TABLE public.tasks TO authenticated, service_role;
+INSERT INTO public.users (id, email, name, username, avatar_url, status)
+SELECT 
+  id::text, 
+  email, 
+  COALESCE(raw_user_meta_data->>'name', email), 
+  COALESCE(raw_user_meta_data->>'username', split_part(email, '@', 1)), 
+  COALESCE(raw_user_meta_data->>'avatar_url', ''),
+  'Member'
+FROM auth.users
+ON CONFLICT (id) DO NOTHING;
 
--- 6. AKTIFKAN RLS
+-- 5. RLS HELPERS
+CREATE OR REPLACE FUNCTION public.get_my_owned_workspace_ids()
+RETURNS SETOF text
+LANGUAGE sql SECURITY DEFINER SET search_path = public STABLE
+AS $$ SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text $$;
+
+CREATE OR REPLACE FUNCTION public.get_my_workspace_ids()
+RETURNS SETOF text
+LANGUAGE sql SECURITY DEFINER SET search_path = public STABLE
+AS $$ SELECT workspace_id FROM public.workspace_members WHERE user_id = auth.uid()::text $$;
+
+-- 6. RLS POLICIES
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspace_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
--- 7. POLICY: USERS
-CREATE POLICY "view_all_users" ON public.users FOR SELECT USING (true);
-CREATE POLICY "update_own_profile" ON public.users FOR UPDATE USING (auth.uid()::text = id::text);
-CREATE POLICY "insert_own_profile" ON public.users FOR INSERT WITH CHECK (auth.uid()::text = id::text);
+-- Users
+CREATE POLICY "Users view all" ON public.users FOR SELECT USING (true);
+CREATE POLICY "Users update self" ON public.users FOR UPDATE USING (auth.uid()::text = id);
+CREATE POLICY "System insert users" ON public.users FOR INSERT WITH CHECK (true);
 
--- 8. POLICY: WORKSPACES
--- Casting id::text di sisi kiri memastikan perbandingan IN selalu Text vs Text
-CREATE POLICY "view_accessible_workspaces" ON public.workspaces FOR SELECT USING (
-  owner_id::text = auth.uid()::text 
-  OR 
-  id::text IN (SELECT public.get_my_workspace_ids())
+-- Workspaces
+CREATE POLICY "View workspaces" ON public.workspaces FOR SELECT USING (
+  owner_id = auth.uid()::text OR id IN (SELECT public.get_my_workspace_ids())
+);
+CREATE POLICY "Manage owned workspaces" ON public.workspaces FOR ALL USING (owner_id = auth.uid()::text);
+CREATE POLICY "Create workspaces" ON public.workspaces FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+-- Members
+CREATE POLICY "View members" ON public.workspace_members FOR SELECT USING (
+  workspace_id IN (SELECT public.get_my_owned_workspace_ids()) OR workspace_id IN (SELECT public.get_my_workspace_ids())
+);
+CREATE POLICY "Manage members" ON public.workspace_members FOR ALL USING (
+  workspace_id IN (SELECT public.get_my_owned_workspace_ids())
+);
+CREATE POLICY "Self leave" ON public.workspace_members FOR DELETE USING (user_id = auth.uid()::text);
+
+-- Tasks
+CREATE POLICY "View tasks" ON public.tasks FOR SELECT USING (
+  workspace_id IN (SELECT public.get_my_owned_workspace_ids()) OR workspace_id IN (SELECT public.get_my_workspace_ids())
+);
+CREATE POLICY "Manage tasks" ON public.tasks FOR ALL USING (
+  workspace_id IN (SELECT public.get_my_owned_workspace_ids()) OR workspace_id IN (SELECT public.get_my_workspace_ids())
 );
 
-CREATE POLICY "create_workspaces" ON public.workspaces FOR INSERT WITH CHECK (owner_id::text = auth.uid()::text);
-CREATE POLICY "update_own_workspaces" ON public.workspaces FOR UPDATE USING (owner_id::text = auth.uid()::text);
-CREATE POLICY "delete_own_workspaces" ON public.workspaces FOR DELETE USING (owner_id::text = auth.uid()::text);
+-- Notifications
+CREATE POLICY "View own notifications" ON public.notifications FOR SELECT USING (user_id = auth.uid()::text);
+CREATE POLICY "System insert notifications" ON public.notifications FOR INSERT WITH CHECK (true);
+CREATE POLICY "Update own notifications" ON public.notifications FOR UPDATE USING (user_id = auth.uid()::text);
 
--- 9. POLICY: WORKSPACE MEMBERS
--- Casting workspace_id::text di sisi kiri sangat penting di sini
-CREATE POLICY "view_members" ON public.workspace_members FOR SELECT USING (
-  workspace_id::text IN (SELECT public.get_my_workspace_ids())
-);
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated, service_role;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
 
--- Manage Members: Owner Only
-CREATE POLICY "manage_members" ON public.workspace_members FOR ALL USING (
-  workspace_id::text IN (SELECT id::text FROM public.workspaces WHERE owner_id::text = auth.uid()::text)
-);
-
-CREATE POLICY "leave_workspace" ON public.workspace_members FOR DELETE USING (
-  user_id::text = auth.uid()::text
-);
-
--- 10. POLICY: TASKS
--- Casting workspace_id::text di sisi kiri
-CREATE POLICY "view_tasks" ON public.tasks FOR SELECT USING (
-  workspace_id::text IN (SELECT public.get_my_workspace_ids())
-  OR
-  workspace_id::text IN (SELECT id::text FROM public.workspaces WHERE owner_id::text = auth.uid()::text)
-);
-
-CREATE POLICY "create_tasks" ON public.tasks FOR INSERT WITH CHECK (created_by::text = auth.uid()::text);
-
-CREATE POLICY "manage_tasks" ON public.tasks FOR ALL USING (
-  created_by::text = auth.uid()::text
-  OR
-  workspace_id::text IN (SELECT id::text FROM public.workspaces WHERE owner_id::text = auth.uid()::text)
-);
-
--- 11. FIX USER ADMIN
-UPDATE public.users SET status = 'Admin' WHERE email = 'arunika@taskplay.com' OR username = 'arunika';
-
--- 12. RELOAD SCHEMA
 NOTIFY pgrst, 'reload schema';

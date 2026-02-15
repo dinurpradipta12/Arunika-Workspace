@@ -10,7 +10,8 @@ import {
   X, 
   FolderArchive, 
   ChevronDown,
-  Briefcase
+  Briefcase,
+  QrCode
 } from 'lucide-react';
 import { Task, Workspace, User } from '../types';
 
@@ -37,6 +38,7 @@ interface SidebarProps {
   onAddWorkspace?: () => void;
   onSelectWorkspace?: (workspaceId: string) => void;
   activeWorkspaceId?: string | null;
+  onJoinWorkspace?: () => void; // New prop
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -56,7 +58,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   customBranding,
   onAddWorkspace,
   onSelectWorkspace,
-  activeWorkspaceId
+  activeWorkspaceId,
+  onJoinWorkspace
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -176,7 +179,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <NavItem icon={<CalendarIcon size={18} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
             
-            {/* Team Space & Archive Moved ABOVE Workspaces */}
             {!isMember && (
               <NavItem icon={<Users size={18} />} label="Team Space" active={activeTab === 'team'} onClick={() => setActiveTab('team')} />
             )}
@@ -185,7 +187,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <NavItem icon={<FolderArchive size={18} />} label="Archive" active={activeTab === 'archive'} onClick={() => setActiveTab('archive')} />
             </div>
 
-            {/* WORKSPACES SECTION - Moved to Bottom (inside scrollable area) */}
+            {/* WORKSPACES SECTION */}
             <div className="pt-4 mt-2 border-t-2 border-slate-100">
               <div className="flex items-center justify-between px-3 mb-2 pb-2 border-b border-slate-50">
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Workspaces</span>
@@ -199,6 +201,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 )}
               </div>
+              
+              {onJoinWorkspace && (
+                <button 
+                  onClick={onJoinWorkspace}
+                  className="w-full mb-2 flex items-center justify-center gap-2 px-3 py-2 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-[10px] font-bold text-slate-500 hover:border-accent hover:text-accent transition-all uppercase tracking-wide"
+                >
+                  <QrCode size={14} /> Gabung via Kode
+                </button>
+              )}
+
               <div className="space-y-1">
                 {workspaces.map(ws => (
                    <button 

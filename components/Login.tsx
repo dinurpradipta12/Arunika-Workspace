@@ -160,7 +160,10 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                      <p>{errorState.message}</p>
                      {errorState.isConfirmationError && (
                        <p className="mt-2 text-[10px] text-slate-500">
-                         <strong>Tips Admin:</strong> Jalankan script SQL <code>UPDATE auth.users SET email_confirmed_at = NOW()...</code> di Dashboard untuk akun lama.
+                         <strong>Tips Admin:</strong> Jalankan script SQL berikut di Dashboard untuk mem-bypass verifikasi:<br/>
+                         <code className="block bg-slate-100 p-1 mt-1 rounded border border-slate-300">
+                           UPDATE auth.users SET email_confirmed_at = NOW() WHERE email = '...';
+                         </code>
                        </p>
                      )}
                    </div>

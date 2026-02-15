@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
@@ -9,7 +8,9 @@ import {
   WifiOff,
   RefreshCw,
   Loader2,
-  AlertTriangle
+  AlertTriangle,
+  Bell,
+  X
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -25,19 +26,20 @@ import { RescheduleModal } from './components/RescheduleModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CalendarView } from './components/CalendarView';
 import { NewWorkspaceModal } from './components/NewWorkspaceModal';
+import { JoinWorkspaceModal } from './components/JoinWorkspaceModal'; // Imported
 import { WorkspaceView } from './components/WorkspaceView';
 import { supabase } from './lib/supabase';
-import { Task, TaskStatus, TaskPriority, Workspace, User, WorkspaceType } from './types';
+import { Task, TaskStatus, TaskPriority, Workspace, User, Notification, WorkspaceType } from './types';
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
 
 const UI_PALETTE = [
-  '#8B5CF6', // Accent (Purple)
-  '#F472B6', // Secondary (Pink)
-  '#FBBF24', // Tertiary (Amber)
-  '#34D399', // Quaternary (Emerald)
-  '#38BDF8', // Sky Blue
-  '#FB7185', // Rose
-  '#1E293B', // Slate
+  '#8B5CF6', 
+  '#F472B6', 
+  '#FBBF24', 
+  '#34D399', 
+  '#38BDF8', 
+  '#FB7185', 
+  '#1E293B', 
 ];
 
 const App: React.FC = () => {
@@ -56,6 +58,7 @@ const App: React.FC = () => {
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isNewWorkspaceModalOpen, setIsNewWorkspaceModalOpen] = useState(false);
+  const [isJoinWorkspaceModalOpen, setIsJoinWorkspaceModalOpen] = useState(false); // Join Modal State
 
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [inspectedTask, setInspectedTask] = useState<Task | null>(null);
@@ -66,7 +69,6 @@ const App: React.FC = () => {
   const [sourceColors, setSourceColors] = useState<Record<string, string>>({});
   const [visibleSources, setVisibleSources] = useState<string[]>([]);
   
-  // Default Categories
   const defaultCategories = ['General', 'Meeting', 'Design', 'Development'];
   const [categories, setCategories] = useState<string[]>(defaultCategories); 
   const [activeCategories, setActiveCategories] = useState<string[]>(defaultCategories);
@@ -83,7 +85,11 @@ const App: React.FC = () => {
   const [accountRole, setAccountRole] = useState('Owner');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
+  // Notification State
+  const [currentNotification, setCurrentNotification] = useState<Notification | null>(null);
+
   const taskChannelRef = useRef<any>(null);
+  const notificationChannelRef = useRef<any>(null);
 
   const getConnectionStatus = () => {
     if (!isOnline) return { color: 'text-secondary', label: 'Offline', icon: <WifiOff size={16} /> };
@@ -122,7 +128,6 @@ const App: React.FC = () => {
     if (!currentUser) return;
     setIsFetching(true);
     try {
-      // Use Promise.allSettled to allow partial data loading if one table fails (robustness)
       const [wsResult, tasksResult] = await Promise.allSettled([
         supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false })
@@ -131,9 +136,6 @@ const App: React.FC = () => {
       const wsData = wsResult.status === 'fulfilled' ? wsResult.value.data : [];
       const tData = tasksResult.status === 'fulfilled' ? tasksResult.value.data : [];
       
-      if (wsResult.status === 'rejected') console.error("Workspaces fetch failed:", wsResult.reason);
-      if (tasksResult.status === 'rejected') console.error("Tasks fetch failed:", tasksResult.reason);
-
       setIsApiConnected(true);
       
       if (wsData) {
@@ -162,9 +164,7 @@ const App: React.FC = () => {
         sessionUser.email?.includes('arunika');
 
       if (error || !data) {
-        console.warn("User profile missing, creating default...");
         const generatedUsername = sessionUser.email?.split('@')[0] || `user_${sessionUser.id.substring(0,6)}`;
-        
         const newUser = {
           id: sessionUser.id,
           email: sessionUser.email,
@@ -174,7 +174,6 @@ const App: React.FC = () => {
           status: isLegacyAdmin ? 'Admin' : 'Member',
           app_settings: { appName: 'TaskPlay' }
         };
-
         const { data: createdData } = await supabase.from('users').upsert(newUser).select().single();
         data = createdData || newUser;
       } else if (data && isLegacyAdmin && data.status !== 'Admin') {
@@ -189,7 +188,6 @@ const App: React.FC = () => {
       }
     } catch (e) {
       console.error("Profile sync error:", e);
-      // Fallback UI
       if (sessionUser) setCurrentUser({ id: sessionUser.id, email: sessionUser.email, name: 'User', avatar_url: '', created_at: '' } as User);
     } finally {
       setIsProfileLoading(false);
@@ -231,11 +229,30 @@ const App: React.FC = () => {
   useEffect(() => {
     if (currentUser && isAuthenticated) {
       fetchData();
+      
+      // Task Subscription
       if (taskChannelRef.current) supabase.removeChannel(taskChannelRef.current);
       taskChannelRef.current = supabase
         .channel('tasks-live-v7')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
         .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
+
+      // Notification Subscription (Owner/User Specific)
+      if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
+      notificationChannelRef.current = supabase
+        .channel(`notifications:${currentUser.id}`)
+        .on('postgres_changes', { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'notifications',
+            filter: `user_id=eq.${currentUser.id}`
+        }, (payload) => {
+           // Show Notification Toast
+           setCurrentNotification(payload.new as Notification);
+           // Auto dismiss after 5 seconds
+           setTimeout(() => setCurrentNotification(null), 5000);
+        })
+        .subscribe();
     }
   }, [currentUser?.id, isAuthenticated, fetchData]);
 
@@ -319,42 +336,15 @@ const App: React.FC = () => {
 
   const handleUpdateProfile = async (profileData: Partial<User>, newRole: string, settingsUpdate: any) => {
     if (!currentUser) return;
-    
     try {
-        const updates = {
-            ...profileData,
-            status: newRole,
-            app_settings: settingsUpdate
-        };
-
-        const { error } = await supabase
-            .from('users')
-            .update(updates)
-            .eq('id', currentUser.id);
-        
+        const updates = { ...profileData, status: newRole, app_settings: settingsUpdate };
+        const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
         if (error) throw error;
-
-        // CRITICAL FIX: Update state lokal agar UI langsung berubah
-        setCurrentUser(prev => {
-            if (!prev) return null;
-            return {
-                ...prev,
-                ...profileData,
-                status: newRole,
-                app_settings: settingsUpdate
-            };
-        });
-        
-        // Update Role state jika berubah
+        setCurrentUser(prev => prev ? { ...prev, ...profileData, status: newRole, app_settings: settingsUpdate } : null);
         const calculatedRole = (newRole?.toLowerCase() === 'admin' || newRole?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(calculatedRole);
-        
-        // Optional: Trigger global fetch jika diperlukan (tapi state update di atas sudah cukup untuk UI)
-        fetchData(); 
-        
         alert("Data profil berhasil disimpan!");
     } catch (err: any) {
-        console.error("Update profil gagal:", err);
         alert("Gagal menyimpan perubahan: " + err.message);
     }
   };
@@ -409,23 +399,32 @@ const App: React.FC = () => {
   }
 
   if (!isAuthenticated) return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
-  
-  if (!currentUser) {
-     return (
-        <div className="h-screen w-full flex flex-col items-center justify-center bg-background p-4 text-center">
-           <AlertTriangle size={48} className="text-secondary mb-4" />
-           <h2 className="text-2xl font-heading text-slate-900">Gagal Memuat Profil</h2>
-           <Button variant="primary" onClick={() => window.location.reload()}>Muat Ulang</Button>
-           <button onClick={handleLogout} className="mt-4 text-xs font-bold text-slate-400 uppercase">Logout & Reset</button>
-        </div>
-     );
-  }
+  if (!currentUser) return <div className="h-screen w-full flex items-center justify-center">Failed to load profile.</div>;
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const connStatus = getConnectionStatus();
 
   return (
     <div className="h-full w-full bg-background overflow-hidden flex justify-center">
+      
+      {/* GLOBAL NOTIFICATION TOAST */}
+      {currentNotification && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-top-4 duration-500">
+           <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop p-4 flex items-start gap-4 max-w-sm">
+              <div className="w-10 h-10 bg-accent rounded-xl border-2 border-slate-800 flex items-center justify-center text-white shrink-0">
+                 <Bell size={20} />
+              </div>
+              <div className="flex-1">
+                 <h4 className="text-sm font-black text-slate-900">{currentNotification.title}</h4>
+                 <p className="text-xs font-bold text-slate-500 mt-1">{currentNotification.message}</p>
+              </div>
+              <button onClick={() => setCurrentNotification(null)} className="text-slate-400 hover:text-slate-600">
+                 <X size={18} />
+              </button>
+           </div>
+        </div>
+      )}
+
       <div className="h-full w-full dot-grid flex overflow-hidden">
         <NewTaskModal 
           isOpen={isNewTaskModalOpen} 
@@ -451,6 +450,12 @@ const App: React.FC = () => {
           onSave={handleCreateWorkspace}
         />
         
+        <JoinWorkspaceModal 
+          isOpen={isJoinWorkspaceModalOpen}
+          onClose={() => setIsJoinWorkspaceModalOpen(false)}
+          onSuccess={() => { fetchData(); alert('Berhasil bergabung ke workspace!'); }}
+        />
+        
         <Sidebar 
           isOpen={isSidebarOpen} 
           setSidebarOpen={setSidebarOpen} 
@@ -471,6 +476,7 @@ const App: React.FC = () => {
           onAddWorkspace={() => setIsNewWorkspaceModalOpen(true)}
           onSelectWorkspace={(id) => { setActiveWorkspaceId(id); setActiveTab('workspace_view'); }}
           activeWorkspaceId={activeWorkspaceId}
+          onJoinWorkspace={() => setIsJoinWorkspaceModalOpen(true)}
         />
 
         <TaskInspectModal 
@@ -530,7 +536,7 @@ const App: React.FC = () => {
           <div className="flex-1 p-6 max-w-7xl mx-auto w-full">
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
-            {activeTab === 'team' && <TeamSpace currentWorkspace={workspaces.find(w => w.type === 'team') || null} currentUser={currentUser} workspaces={workspaces} />}
+            {activeTab === 'team' && <TeamSpace currentWorkspace={activeWorkspace} currentUser={currentUser} workspaces={workspaces} />}
             
             {activeTab === 'workspace_view' && activeWorkspace && (
               <WorkspaceView 

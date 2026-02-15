@@ -25,7 +25,7 @@ export enum MemberRole {
 export interface User {
   id: string;
   email: string;
-  username?: string; // Field baru
+  username?: string; 
   name: string;
   avatar_url: string;
   created_at: string;
@@ -50,6 +50,7 @@ export interface Workspace {
   created_at: string;
   description?: string;
   category?: string;
+  join_code?: string; // New field
 }
 
 export interface Task {
@@ -76,11 +77,12 @@ export interface Task {
 export interface Notification {
   id: string;
   user_id: string;
-  type: 'task_assigned' | 'due_soon' | 'overdue' | 'completed' | 'invitation';
-  reference_id: string;
+  type: string;
+  title: string;
+  message: string;
   is_read: boolean;
   created_at: string;
-  message: string;
+  metadata?: any;
 }
 
 export interface MessageReaction {
