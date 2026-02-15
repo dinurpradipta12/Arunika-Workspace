@@ -16,23 +16,20 @@ import {
   Loader2,
   Cloud,
   X,
-  Crown,
-  Shield,
   User,
   ArrowRight,
   Clock,
   Calendar,
   Edit3,
   Info,
-  Key,   // Added
-  Copy,  // Added
-  Check  // Added
+  Key,
+  Copy,
+  Check
 } from 'lucide-react';
 import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 import { TaskItem } from './TaskItem';
-import { RescheduleModal } from './RescheduleModal';
 import { supabase } from '../lib/supabase';
 
 interface WorkspaceViewProps {
@@ -77,7 +74,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   
   const [isSavingNotepad, setIsSavingNotepad] = useState(false);
   const [isSavingAssets, setIsSavingAssets] = useState(false);
-  const [isCodeCopied, setIsCodeCopied] = useState(false); // Added State
+  const [isCodeCopied, setIsCodeCopied] = useState(false);
 
   const notepadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const notepadRef = useRef<HTMLTextAreaElement>(null);
@@ -252,16 +249,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const overdueTasksList = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE);
   const overdueTasks = overdueTasksList.length;
   const activeTasks = tasks.filter(t => !t.is_archived && !t.parent_id);
-
-  const groupedSubtasks = useMemo(() => {
-    const groups: Record<string, Task[]> = {};
-    allSubtasks.forEach(st => {
-      const pid = st.parent_id || 'unknown';
-      if (!groups[pid]) groups[pid] = [];
-      groups[pid].push(st);
-    });
-    return groups;
-  }, [allSubtasks]);
 
   const getParentTitle = (parentId: string) => {
     const parent = tasks.find(t => t.id === parentId);
