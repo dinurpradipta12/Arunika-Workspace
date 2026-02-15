@@ -5,7 +5,7 @@ import {
   Layout, 
   CheckCircle2, 
   Pin,
-  Users,
+  Users, 
   AlertTriangle,
   Layers,
   FileText,
@@ -288,7 +288,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const completedTasks = completedTasksList.length;
   const overdueTasksList = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE);
   const overdueTasks = overdueTasksList.length;
-  const activeTasks = tasks.filter(t => !t.is_archived);
+  
+  // FIX: Hanya tampilkan Task Utama (bukan subtask) di list utama workspace
+  const activeTasks = tasks.filter(t => !t.is_archived && !t.parent_id);
 
   // Group Subtasks by Parent
   const groupedSubtasks = useMemo(() => {
@@ -495,7 +497,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         onClose={() => setInspectedTask(null)} 
         onStatusChange={onStatusChange} 
         onAddTask={() => {
-          if (inspectedTask) onAddTask({ parent_id: inspectedTask.id });
+          // FIX: Pass workspace_id to ensure the backend can save it correctly
+          if (inspectedTask) {
+             onAddTask({ 
+                parent_id: inspectedTask.id, 
+                workspace_id: inspectedTask.workspace_id 
+             });
+          }
         }}
         onEditTask={(t) => { setInspectedTask(null); onEditTask(t); }} 
         onRescheduleTask={(t) => setReschedulingTask(t)} 
