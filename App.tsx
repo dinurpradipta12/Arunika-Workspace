@@ -85,17 +85,12 @@ const App: React.FC = () => {
 
   const taskChannelRef = useRef<any>(null);
 
-  // Perbaikan Logika Status Koneksi
   const getConnectionStatus = () => {
     if (!isOnline) return { color: 'text-secondary', label: 'Offline', icon: <WifiOff size={16} /> };
     if (isFetching) return { color: 'text-tertiary', label: 'Sinkronisasi...', icon: <Wifi size={16} className="animate-pulse" /> };
-    
-    // Cukup cek isApiConnected. Realtime bersifat opsional/enhancement.
     if (isApiConnected) {
-       // Jika Realtime juga aktif, itu bonus (Live Sync), jika tidak, tetap "Terhubung" (via HTTP)
        return { color: 'text-quaternary', label: isRealtimeConnected ? 'Live Sync' : 'Terhubung', icon: <Wifi size={16} /> };
     }
-    
     return { color: 'text-secondary', label: 'Menyambungkan', icon: <WifiOff size={16} /> };
   };
 
@@ -103,18 +98,12 @@ const App: React.FC = () => {
     if (tasks.length > 0) {
       const usedCategories = new Set(tasks.map(t => t.category || 'General'));
       const allCats = Array.from(new Set([...categories, ...Array.from(usedCategories)]));
+      setCategories(prev => Array.from(new Set([...prev, ...allCats])));
       
-      setCategories(prev => {
-        const unique = Array.from(new Set([...prev, ...allCats]));
-        return unique;
-      });
-
       setCategoryColors(prev => {
         const next = { ...prev };
         allCats.forEach((cat, idx) => {
-          if (!next[cat]) {
-            next[cat] = UI_PALETTE[idx % UI_PALETTE.length];
-          }
+          if (!next[cat]) next[cat] = UI_PALETTE[idx % UI_PALETTE.length];
         });
         return next;
       });
@@ -133,12 +122,13 @@ const App: React.FC = () => {
     if (!currentUser) return;
     setIsFetching(true);
     try {
+      // Fetch Workspaces & Tasks
+      // Karena RLS sudah aktif, query ini hanya akan mengembalikan data yang BOLEH dilihat user
       const [{ data: wsData }, { data: tData }] = await Promise.all([
         supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false })
       ]);
       
-      // Set API Connected to TRUE immediately after successful fetch
       setIsApiConnected(true);
       
       if (wsData) {
@@ -156,15 +146,17 @@ const App: React.FC = () => {
     }
   }, [currentUser?.id, visibleSources.length]);
 
-  // SELF-HEALING USER FETCH
-  // Jika data user tidak ada di tabel 'users', kita buatkan langsung dari session
   const fetchOrCreateUser = useCallback(async (sessionUser: any) => {
     setIsProfileLoading(true);
     try {
       let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
       
-      // Jika error atau data kosong, artinya user belum terdaftar di public.users (tapi sudah di Auth)
-      // Lakukan Self-Healing: Insert data baru
+      // Deteksi jika ini adalah super admin 'arunika'
+      const isLegacyAdmin = 
+        sessionUser.email === 'arunika@taskplay.com' || 
+        sessionUser.user_metadata?.username === 'arunika' ||
+        sessionUser.email?.includes('arunika');
+
       if (error || !data) {
         console.warn("User profile not found in DB, attempting self-healing...", error);
         
@@ -177,7 +169,8 @@ const App: React.FC = () => {
           username: sessionUser.user_metadata?.username || generatedUsername,
           name: generatedName,
           avatar_url: sessionUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${sessionUser.id}`,
-          status: 'Member', // Default role aman
+          // FORCE ADMIN jika username adalah arunika
+          status: isLegacyAdmin ? 'Admin' : 'Member',
           app_settings: { appName: 'TaskPlay' }
         };
 
@@ -189,22 +182,24 @@ const App: React.FC = () => {
         
         if (createError) {
           console.error("Self-healing failed:", createError);
-          // FALLBACK TERAKHIR: Gunakan objek sementara di memori agar user tetap bisa masuk UI
-          // meskipun insert DB gagal (misal karena RLS super ketat)
           data = newUser; 
         } else {
           data = createdData;
         }
+      } else if (data && isLegacyAdmin && data.status !== 'Admin') {
+        // Self-healing level 2: Jika user ada tapi statusnya salah (turun jadi member), naikkan lagi jadi Admin
+        await supabase.from('users').update({ status: 'Admin' }).eq('id', sessionUser.id);
+        data.status = 'Admin';
       }
 
       if (data) {
         setCurrentUser(data as User);
-        const role = data.status?.toLowerCase() === 'member' ? 'Member' : 'Owner';
+        // Pastikan logic role mapping benar
+        const role = (data.status?.toLowerCase() === 'admin' || data.status?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(role);
       }
     } catch (e) {
       console.error("Critical error profile sync:", e);
-      // Fallback emergency agar tidak blank screen
       if (sessionUser) {
          setCurrentUser({
             id: sessionUser.id,
@@ -258,12 +253,12 @@ const App: React.FC = () => {
       taskChannelRef.current = supabase
         .channel('tasks-live-v7')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-          if (payload.eventType === 'INSERT') setTasks(prev => [payload.new as Task, ...prev]);
-          if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
-          if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+          // Hanya update jika event relevan dengan user (RLS handle security, tapi UI update harus cerdas)
+          // Namun dengan RLS aktif, Supabase Realtime kadang memfilter otomatis.
+          // Untuk amannya, kita fetch ulang saja agar konsisten.
+          fetchData(); 
         })
         .subscribe((status) => {
-           // Only update realtime status, don't affect main connection status visual if API is already OK
            setIsRealtimeConnected(status === 'SUBSCRIBED');
         });
     }
@@ -272,7 +267,6 @@ const App: React.FC = () => {
   const handleCreateWorkspace = async (data: { name: string; category: string; description: string; type: WorkspaceType }) => {
     if (!currentUser) return;
     try {
-      // 1. Buat Workspace di Tabel 'workspaces'
       const { data: newWs, error } = await supabase.from('workspaces').insert({
         name: data.name,
         type: data.type,
@@ -281,37 +275,23 @@ const App: React.FC = () => {
         description: data.description
       }).select().single();
 
-      if (error) {
-         console.error("Supabase Error:", error);
-         throw error;
-      }
+      if (error) throw error;
 
       if (newWs) {
-        // 2. PENTING: Masukkan Diri Sendiri sebagai 'Member' (Owner Role)
-        // Ini memastikan workspace muncul jika query Anda memeriksa tabel workspace_members
         const { error: memberError } = await supabase.from('workspace_members').insert({
           workspace_id: newWs.id,
           user_id: currentUser.id,
-          role: 'owner' // Pastikan role ini sesuai enum di DB Anda (owner/admin)
+          role: 'owner'
         });
 
         if (memberError) console.error("Warning: Gagal insert member owner", memberError);
-
-        // 3. Update State Lokal (Sidebar langsung update tanpa refresh)
         setWorkspaces(prev => [...prev, newWs as Workspace]);
-        
-        // 4. Pindah ke Workspace Baru
         setActiveWorkspaceId(newWs.id);
         setActiveTab('workspace_view');
       }
     } catch (err: any) {
       console.error("Gagal membuat workspace:", err);
-      // Penanganan Error Khusus 42P17 (Infinite Recursion)
-      if (err.code === '42P17') {
-         alert("Database Policy Error (42P17): Terdeteksi konflik 'Infinite Recursion' pada Policy Database. \n\nSOLUSI: Harap jalankan script SQL 'Pembersih Total' yang baru saja disediakan di Supabase SQL Editor untuk mereset semua policy.");
-      } else {
-         alert("Gagal membuat workspace: " + (err.message || "Unknown error"));
-      }
+      alert("Gagal membuat workspace: " + (err.message || "Unknown error"));
     }
   };
 
@@ -320,12 +300,29 @@ const App: React.FC = () => {
     setIsFetching(true);
     
     try {
+      // LOGIKA CERDAS: Pemilihan Workspace Default
+      // 1. Jika user sudah memilih workspace (dari dropdown modal), gunakan itu.
+      // 2. Jika tidak, dan user sedang di tab 'workspace_view', gunakan workspace aktif.
+      // 3. Jika tidak (misal dari Dashboard 'My Tasks'), prioritaskan workspace tipe 'PERSONAL'.
+      // 4. Jika tidak ada personal, baru fallback ke workspace pertama.
+      
+      let targetWorkspaceId = taskData.workspace_id;
+
+      if (!targetWorkspaceId) {
+        if (activeTab === 'workspace_view' && activeWorkspaceId) {
+           targetWorkspaceId = activeWorkspaceId;
+        } else {
+           const personalWs = workspaces.find(w => w.type === 'personal');
+           targetWorkspaceId = personalWs ? personalWs.id : (workspaces[0]?.id || null);
+        }
+      }
+
       const payload: any = {
         title: taskData.title,
         description: taskData.description || null,
         status: taskData.status || TaskStatus.TODO,
         priority: taskData.priority || TaskPriority.MEDIUM,
-        workspace_id: taskData.workspace_id || workspaces[0]?.id || null,
+        workspace_id: targetWorkspaceId,
         parent_id: taskData.parent_id || null, 
         due_date: taskData.due_date || null,
         start_date: taskData.start_date || null,
@@ -376,6 +373,22 @@ const App: React.FC = () => {
     setIsNewTaskModalOpen(true);
   };
 
+  // Helper untuk membuka modal new task dengan inisialisasi cerdas
+  const openNewTaskModal = () => {
+    // Jika sedang di dashboard, set initial workspace ke Personal (jika ada)
+    if (activeTab === 'dashboard' || activeTab === 'tasks') {
+       const personalWs = workspaces.find(w => w.type === 'personal');
+       if (personalWs) {
+         setEditingTask({ workspace_id: personalWs.id } as Task);
+       } else {
+         setEditingTask(null);
+       }
+    } else {
+      setEditingTask(null);
+    }
+    setIsNewTaskModalOpen(true);
+  };
+
   const parentTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
   
   const currentWorkspaceTasks = activeWorkspaceId 
@@ -384,7 +397,6 @@ const App: React.FC = () => {
 
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
 
-  // Jika session aktif tapi profile loading, tampilkan loader
   if (isAuthLoading || (isAuthenticated && isProfileLoading)) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
@@ -402,8 +414,6 @@ const App: React.FC = () => {
 
   if (!isAuthenticated) return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
   
-  // FAIL-SAFE: Jika currentUser masih null (sangat jarang terjadi karena logic fetchOrCreateUser), 
-  // jangan return null (layar putih). Tampilkan pesan error atau tombol reload.
   if (!currentUser) {
      return (
         <div className="h-screen w-full flex flex-col items-center justify-center bg-background p-4 text-center">
@@ -527,7 +537,6 @@ const App: React.FC = () => {
             {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
             {activeTab === 'team' && <TeamSpace currentWorkspace={workspaces.find(w => w.type === 'team') || null} currentUser={currentUser} workspaces={workspaces} />}
             
-            {/* WORKSPACE VIEW: Integrasi Layout Baru */}
             {activeTab === 'workspace_view' && activeWorkspace && (
               <WorkspaceView 
                 workspace={activeWorkspace}
@@ -596,7 +605,8 @@ const App: React.FC = () => {
                       <h2 className="text-4xl font-heading tracking-tighter">My Board</h2>
                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola alur kerja personal Anda</p>
                     </div>
-                    <Button variant="primary" onClick={() => { setEditingTask(null); setIsNewTaskModalOpen(true); }} className="px-6 py-3 shadow-pop text-md font-black">+ New Task</Button>
+                    {/* Menggunakan openNewTaskModal agar default workspace = Personal */}
+                    <Button variant="primary" onClick={openNewTaskModal} className="px-6 py-3 shadow-pop text-md font-black">+ New Task</Button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-10">
                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.DONE].map(status => (
