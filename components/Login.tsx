@@ -25,26 +25,38 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setRawError(null);
 
     try {
-      let loginEmail = '';
+      let loginEmail = identifier.trim();
       
-      // LOGIKA CERDAS: Deteksi apakah input adalah Email atau Username
-      if (identifier.includes('@')) {
-        // Jika user memasukkan email lengkap (misal: user@gmail.com atau user@taskplay.com)
-        loginEmail = identifier.trim().toLowerCase();
+      // LOGIKA CERDAS: Cek apakah input adalah Email atau Username
+      const isEmail = identifier.includes('@');
+
+      if (!isEmail) {
+        // Jika input adalah USERNAME, kita harus mencari emailnya dulu di database
+        // karena Supabase Auth hanya menerima login via Email secara default
+        const cleanUsername = identifier.trim().toLowerCase();
+        
+        const { data: userData, error: fetchError } = await supabase
+          .from('users')
+          .select('email')
+          .eq('username', cleanUsername)
+          .single();
+
+        if (fetchError || !userData) {
+          throw new Error("Username tidak ditemukan.");
+        }
+
+        loginEmail = userData.email;
       } else {
-        // Jika user memasukkan username (misal: user123), kita format ke email internal
-        const cleanUsername = identifier.trim().toLowerCase().replace(/\s+/g, '');
-        loginEmail = `${cleanUsername}@taskplay.com`;
+        loginEmail = identifier.trim().toLowerCase();
       }
       
+      // Login menggunakan Email (entah itu input langsung atau hasil lookup username)
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: password,
       });
 
-      if (authError) {
-        throw authError;
-      }
+      if (authError) throw authError;
 
       if (data.session) {
         onLoginSuccess();
@@ -56,16 +68,20 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       setRawError(err);
       
       const msg = err.message?.toLowerCase() || '';
-      const code = err.code || '';
       
       if (msg.includes("email not confirmed")) {
          setErrorState({
-           message: "Email belum dikonfirmasi.",
+           message: "Email belum dikonfirmasi. Cek inbox email Anda.",
            isConfirmationError: true
          });
-      } else if (msg.includes("invalid login credentials") || code === "invalid_credentials") {
+      } else if (msg.includes("invalid login credentials")) {
          setErrorState({
-           message: "Username/Email atau Password salah.",
+           message: "Password salah atau akun tidak ditemukan.",
+           isConfirmationError: false
+         });
+      } else if (msg.includes("username tidak ditemukan")) {
+         setErrorState({
+           message: "Username tidak terdaftar.",
            isConfirmationError: false
          });
       } else {
@@ -105,7 +121,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               <UserIcon size={18} className="absolute left-3 top-11 text-mutedForeground" />
               <Input 
                 label="Username atau Email" 
-                placeholder="Masukkan username..." 
+                placeholder="Masukan username / email..." 
                 className="pl-10"
                 value={identifier}
                 onChange={(e) => { setIdentifier(e.target.value); setErrorState(null); }}
@@ -140,19 +156,8 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 <div className="flex items-start gap-2">
                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
                    <div className="flex-1">
-                     <p className="text-sm font-black mb-1">Akses Ditolak</p>
+                     <p className="text-sm font-black mb-1">Gagal Masuk</p>
                      <p>{errorState.message}</p>
-                     
-                     {errorState.isConfirmationError && (
-                       <div className="mt-3 p-3 bg-white rounded-lg border-2 border-slate-200">
-                         <p className="mb-2 text-[10px] uppercase text-slate-400 font-black tracking-widest">Solusi untuk Developer:</p>
-                         <ol className="list-decimal pl-4 space-y-1 text-slate-600 font-medium">
-                           <li>Buka Dashboard Supabase.</li>
-                           <li>Ke menu <strong>Authentication &gt; Providers &gt; Email</strong>.</li>
-                           <li>Matikan <strong>Confirm Email</strong>.</li>
-                         </ol>
-                       </div>
-                     )}
                    </div>
                 </div>
               </div>
@@ -181,12 +186,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 )}
              </div>
           )}
-
-          <div className="mt-6 text-center">
-             <p className="text-[10px] text-mutedForeground font-medium leading-relaxed">
-              Jika lupa password, hubungi Admin Workspace untuk reset akun.
-            </p>
-          </div>
         </div>
       </div>
     </div>
