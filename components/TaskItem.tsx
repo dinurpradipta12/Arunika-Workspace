@@ -79,7 +79,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const formatDateWithTime = (dateStr?: string) => {
     if (!dateStr) return null;
     const date = new Date(dateStr);
-    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' • ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Format: Sen, 1 Jan • 14:00
+    return date.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' }) + ' • ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   return (

@@ -485,7 +485,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </div>
               <div>
                 <h2 className="text-2xl font-heading leading-none tracking-tight">
-                  {currentDate.toLocaleString('default', { month: 'long' })}
+                  {currentDate.toLocaleString('id-ID', { month: 'long' })}
                 </h2>
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1">{currentDate.getFullYear()}</p>
               </div>

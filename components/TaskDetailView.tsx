@@ -71,9 +71,11 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
   const formatDateTime = (dateStr?: string) => {
     if (!dateStr) return 'Tanpa Batas Waktu';
     const date = new Date(dateStr);
+    // FORMAT: Senin, 1 Januari 2026 • 14:00
     return date.toLocaleString('id-ID', { 
+      weekday: 'long',
       day: 'numeric', 
-      month: 'short', 
+      month: 'long', 
       year: 'numeric',
       hour: '2-digit', 
       minute: '2-digit' 
@@ -100,7 +102,8 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
   }
 
   return (
-    <div className="space-y-8 animate-in slide-in-from-right-4 duration-500 pb-20">
+    // FULL COLOR BACKGROUND: Added gradient and adjusted padding
+    <div className="space-y-8 animate-in slide-in-from-right-4 duration-500 pb-20 bg-gradient-to-br from-white via-purple-50 to-white min-h-full rounded-2xl p-4 md:p-6">
       {/* Header Utama */}
       <div className="flex flex-col gap-6">
         {/* ROW 1: Action Buttons (Top) */}
@@ -153,42 +156,46 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
 
         {/* ROW 2: Title & Meta (Bottom) */}
         <div>
-          <h2 className="text-4xl md:text-5xl font-heading text-slate-900 leading-tight mb-2">{parentTask.title}</h2>
-          <p className="text-xs font-medium text-slate-500 leading-relaxed max-w-3xl">
-             {parentTask.description || <span className="italic text-slate-300">Tidak ada deskripsi tambahan.</span>}
+          <h2 className="text-4xl md:text-5xl font-heading text-slate-900 leading-tight mb-4">{parentTask.title}</h2>
+          {/* DESKRIPSI DIPERBESAR */}
+          <p className="text-base md:text-lg font-medium text-slate-600 leading-relaxed max-w-4xl">
+             {parentTask.description || <span className="italic text-slate-300 text-base">Tidak ada deskripsi tambahan.</span>}
           </p>
         </div>
       </div>
 
       {/* DASHBOARD GRID: Progress & Info */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      {/* REDUCED GAP from gap-6 to gap-3 */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         
-        {/* COL 1: Progress Card (2 spans) */}
-        <Card className="md:col-span-2" variant="white">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-heading">Progress Milestone</h3>
-            <span className="text-[10px] font-black bg-slate-800 text-white px-2 py-1 rounded-lg border border-slate-800">
-              {Math.round(progress)}%
-            </span>
+        {/* COL 1: Progress Card (Takes 3/5 width now for better spacing) */}
+        <Card className="md:col-span-3 border-none shadow-none bg-white/50 border-2 border-slate-200" variant="white">
+          <div className="bg-white p-6 rounded-2xl border-2 border-slate-800 shadow-sm h-full">
+            <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-heading">Progress Milestone</h3>
+                <span className="text-[10px] font-black bg-slate-800 text-white px-2 py-1 rounded-lg border border-slate-800">
+                {Math.round(progress)}%
+                </span>
+            </div>
+            <div className="w-full h-6 bg-slate-100 rounded-xl border-2 border-slate-800 overflow-hidden mb-3 p-0.5">
+                <div 
+                className="h-full bg-quaternary rounded-lg transition-all duration-1000 ease-out border-r-2 border-slate-800/20"
+                style={{ width: `${progress}%` }}
+                />
+            </div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                {completedSubTasks.length} / {subTasks.length} Sub-task Selesai
+            </p>
           </div>
-          <div className="w-full h-6 bg-slate-100 rounded-xl border-2 border-slate-800 overflow-hidden mb-3 p-0.5">
-            <div 
-              className="h-full bg-quaternary rounded-lg transition-all duration-1000 ease-out border-r-2 border-slate-800/20"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-            {completedSubTasks.length} / {subTasks.length} Sub-task Selesai
-          </p>
         </Card>
 
-        {/* COL 2 & 3 Combined: Status & Deadline with Padding */}
-        <div className="md:col-span-2 flex flex-col gap-4 px-0 md:px-12">
+        {/* COL 2: Status & Info (Takes 2/5 width) */}
+        <div className="md:col-span-2 flex flex-col gap-3">
             
-            {/* FIXED STATUS CARD - 1 Row, Non-clickable */}
-            <Card variant="white" className="p-4" isHoverable={false}>
+            {/* FIXED STATUS CARD - 1 Row */}
+            <div className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-sm">
                 <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2">
-                    <Target size={14} /> Status Pengerjaan (Read-Only)
+                    <Target size={14} /> Status Pengerjaan
                 </h4>
                 <div className="flex flex-row gap-2 overflow-x-auto pb-1 scrollbar-hide">
                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DONE].map(status => {
@@ -197,32 +204,32 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
                         return (
                             <div 
                                 key={status}
-                                className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-1.5 p-2 rounded-xl border-2 transition-all cursor-default ${isActive ? `${cfg.color} border-slate-800 shadow-sm opacity-100` : 'bg-slate-50 border-slate-100 text-slate-400 opacity-50 grayscale'}`}
+                                className={`flex-1 min-w-[70px] flex flex-col items-center justify-center gap-1.5 p-2 rounded-xl border-2 transition-all cursor-default ${isActive ? `${cfg.color} border-slate-800 shadow-sm opacity-100` : 'bg-slate-50 border-slate-100 text-slate-400 opacity-50 grayscale'}`}
                             >
                                 <cfg.icon size={16} strokeWidth={3} />
-                                <span className="text-[9px] font-black uppercase text-center leading-none">{cfg.label}</span>
+                                <span className="text-[8px] font-black uppercase text-center leading-none">{cfg.label}</span>
                             </div>
                         )
                     })}
                 </div>
-            </Card>
+            </div>
 
-            {/* DEADLINE CARD (Below Status) */}
+            {/* DEADLINE CARD */}
             <button 
                 onClick={() => onRescheduleTask(parentTask)}
-                className="bg-white border-2 border-slate-800 rounded-xl p-4 flex items-center gap-4 hover:shadow-pop transition-all group text-left"
+                className="bg-white border-2 border-slate-800 rounded-xl p-4 flex items-center gap-4 hover:shadow-pop transition-all group text-left shadow-sm"
             >
                 <div className="w-10 h-10 bg-slate-100 rounded-full border-2 border-slate-200 flex items-center justify-center group-hover:bg-accent group-hover:text-white group-hover:border-slate-800 transition-colors">
                     <Calendar size={20} />
                 </div>
                 <div>
                     <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest group-hover:text-accent transition-colors">Tenggat Waktu</p>
-                    <p className="text-sm font-bold text-slate-800 mt-0.5">{formatDateTime(parentTask.due_date).split(',')[0]}</p>
+                    <p className="text-sm font-bold text-slate-800 mt-0.5">{formatDateTime(parentTask.due_date)}</p>
                 </div>
             </button>
 
-            {/* CATEGORY CARD (Below Deadline) - NEW */}
-            <div className="bg-white border-2 border-slate-800 rounded-xl p-4 flex items-center gap-4">
+            {/* CATEGORY CARD */}
+            <div className="bg-white border-2 border-slate-800 rounded-xl p-4 flex items-center gap-4 shadow-sm">
                 <div className="w-10 h-10 bg-slate-100 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-400">
                     <Tag size={20} />
                 </div>
@@ -236,17 +243,17 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
       </div>
 
       {/* Sub Tasks List */}
-      <div className="space-y-6">
-        <div className="flex items-center gap-3 border-b-2 border-slate-100 pb-4">
+      <div className="space-y-6 pt-4 border-t-2 border-slate-100/50">
+        <div className="flex items-center gap-3 border-b-2 border-slate-200 pb-4">
           <div className="w-8 h-8 bg-accent rounded-lg border-2 border-slate-800 shadow-sm flex items-center justify-center text-white">
             <LayoutGrid size={16} strokeWidth={3} />
           </div>
-          <h3 className="text-xl font-heading">Daftar Sub-task</h3>
+          <h3 className="text-xl font-heading text-slate-800">Daftar Sub-task</h3>
         </div>
         
         <div className="space-y-4">
           {activeSubTasks.length === 0 && !isCompletedExpanded ? (
-            <div className="text-center py-20 bg-white/50 border-4 border-dashed border-slate-200 rounded-3xl">
+            <div className="text-center py-20 bg-white/50 border-4 border-dashed border-slate-300 rounded-3xl">
               <p className="text-slate-400 font-black uppercase tracking-widest text-xs italic">Belum ada sub-task aktif.</p>
               <Button variant="ghost" onClick={onAddTask} className="mt-4 text-accent">+ Tambah Sekarang</Button>
             </div>
@@ -275,7 +282,7 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
                         <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
                           <Clock size={12} strokeWidth={3} />
-                          <span>{formatDateTime(task.due_date).split(',')[0]}</span>
+                          <span>{formatDateTime(task.due_date).split('•')[0]}</span>
                         </div>
                       </div>
                     </div>

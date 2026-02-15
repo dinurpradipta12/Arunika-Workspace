@@ -456,7 +456,10 @@ const App: React.FC = () => {
 
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
-    setIsFetching(true);
+    // Set fetching false here to prevent spinner if we want seamless update, or true if we want indicator.
+    // For this fix, let's rely on local optimistic update first.
+    setIsFetching(true); 
+    
     try {
       let targetWorkspaceId = taskData.workspace_id;
       if (!targetWorkspaceId) {
@@ -468,31 +471,45 @@ const App: React.FC = () => {
         }
       }
       const payload: any = { title: taskData.title, description: taskData.description || null, status: taskData.status || TaskStatus.TODO, priority: taskData.priority || TaskPriority.MEDIUM, workspace_id: targetWorkspaceId, parent_id: taskData.parent_id || null, due_date: taskData.due_date || null, start_date: taskData.start_date || null, is_all_day: taskData.is_all_day ?? true, is_archived: taskData.is_archived ?? false, category: taskData.category || 'General', created_by: currentUser.id, assigned_to: taskData.assigned_to || null };
+      
       if (editingTask && editingTask.id) {
-        const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
-        if (error) throw error;
-        
-        // --- REALTIME UPDATE FIX FOR TASK DETAIL MODAL ---
-        // If the task being edited is the same as the one currently open in the detail modal, update it.
+        // --- OPTIMISTIC UPDATE FOR INSTANT UI FEEDBACK ---
+        setTasks(prevTasks => prevTasks.map(t => 
+            t.id === editingTask.id ? { ...t, ...payload } : t
+        ));
+
+        // Update Modals Immediately
         if (detailTask && detailTask.id === editingTask.id) {
             setDetailTask(prev => prev ? ({ ...prev, ...payload }) : null);
         }
-        // Also update inspected task if open
         if (inspectedTask && inspectedTask.id === editingTask.id) {
             setInspectedTask(prev => prev ? ({ ...prev, ...payload }) : null);
         }
+        // ------------------------------------------------
+
+        const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
+        if (error) throw error;
 
       } else {
         payload.created_at = new Date().toISOString();
-        const { error } = await supabase.from('tasks').insert(payload);
+        const { data: newTaskData, error } = await supabase.from('tasks').insert(payload).select().single();
         if (error) throw error;
+        
+        // Optimistic add
+        if (newTaskData) {
+            setTasks(prev => [newTaskData as Task, ...prev]);
+        }
       }
+      
       setIsNewTaskModalOpen(false);
       setEditingTask(null);
-      fetchData();
+      // fetchData() is triggered by realtime subscription usually, but we can call it to be sure
+      // Reducing frequent full fetches helps with resource errors
+      // fetchData(); 
     } catch (err: any) {
       console.error("Save task failure:", err);
       alert("Gagal menyimpan agenda.");
+      fetchData(); // Revert on error
     } finally {
       setIsFetching(false);
     }

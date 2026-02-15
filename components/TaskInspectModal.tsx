@@ -92,6 +92,12 @@ export const TaskInspectModal: React.FC<TaskInspectModalProps> = ({
     }
   };
 
+  // Helper date format
+  const formatDeadline = (dateStr?: string) => {
+    if(!dateStr) return 'Set Date';
+    return new Date(dateStr).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  };
+
   return (
     <div 
         className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-500 ease-out"
@@ -157,7 +163,7 @@ export const TaskInspectModal: React.FC<TaskInspectModalProps> = ({
                    <Calendar size={12} /> Deadline
                 </p>
                 <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
-                   {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'Set Date'}
+                   {formatDeadline(task.due_date)}
                 </div>
              </button>
           </div>

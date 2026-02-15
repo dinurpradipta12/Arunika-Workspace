@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Task, TaskStatus, TaskPriority, WorkspaceAsset } from '../types';
 import { TaskDetailView } from './TaskDetailView';
-import { X, Calendar, Flag, FileText, Link2, Plus, Save, ExternalLink, Trash2 } from 'lucide-react';
+import { X, Calendar, Flag, FileText, Link2, Plus, Save, ExternalLink, Trash2, File, Globe } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface TaskDetailModalProps {
@@ -36,15 +36,33 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   
   const [assets, setAssets] = useState<WorkspaceAsset[]>([]);
   const [isAddingAsset, setIsAddingAsset] = useState(false);
+  const [assetType, setAssetType] = useState<'link' | 'file'>('link');
   const [newAssetName, setNewAssetName] = useState('');
   const [newAssetUrl, setNewAssetUrl] = useState('');
   const [isSavingAsset, setIsSavingAsset] = useState(false);
+  
+  // Fake file input ref
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isOpen) {
         setInternalActiveSubtask(null);
     }
   }, [isOpen]);
+
+  // --- SYNC FIX: Auto-update internal active subtask when parent data (subTasks prop) changes ---
+  useEffect(() => {
+    if (internalActiveSubtask) {
+      const updatedVersion = subTasks.find(t => t.id === internalActiveSubtask.id);
+      if (updatedVersion) {
+        // Hanya update jika ada perbedaan data untuk mencegah infinite loop render
+        if (JSON.stringify(updatedVersion) !== JSON.stringify(internalActiveSubtask)) {
+           setInternalActiveSubtask(updatedVersion);
+        }
+      }
+    }
+  }, [subTasks, internalActiveSubtask]); 
+  // -------------------------------------------------------------------------------------------
 
   useEffect(() => {
     if (internalActiveSubtask) {
@@ -92,6 +110,15 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     } finally {
       setIsSavingAsset(false);
     }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          setNewAssetName(file.name);
+          // Simulate upload by creating a fake object URL or placeholder
+          setNewAssetUrl(URL.createObjectURL(file)); 
+      }
   };
 
   const handleDeleteAsset = async (assetId: number) => {
@@ -182,7 +209,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-5 space-y-6">
-                    {/* Actions */}
+                    {/* 1. Status & Priority */}
                     <div className="flex items-center gap-2">
                         <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-white border border-slate-800 ${internalActiveSubtask.status === TaskStatus.DONE ? 'bg-quaternary' : 'bg-slate-800'}`}>
                             {internalActiveSubtask.status.replace('_', ' ')}
@@ -192,21 +219,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                         </span>
                     </div>
 
-                    {/* Deadline */}
-                    <button 
-                        onClick={() => onRescheduleTask(internalActiveSubtask)}
-                        className="w-full p-4 bg-white border-2 border-slate-200 rounded-2xl flex items-center justify-between hover:border-slate-800 hover:shadow-pop transition-all group"
-                    >
-                        <div className="flex items-center gap-3 text-xs font-bold text-slate-600">
-                            <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-accent group-hover:text-white transition-colors">
-                                <Calendar size={16} strokeWidth={3} /> 
-                            </div>
-                            {internalActiveSubtask.due_date ? new Date(internalActiveSubtask.due_date).toLocaleDateString() : 'Set Deadline'}
-                        </div>
-                        <div className="text-[10px] font-black uppercase text-accent opacity-0 group-hover:opacity-100 transition-opacity">Change</div>
-                    </button>
-
-                    {/* Description */}
+                    {/* 2. Description (Moved Here) */}
                     <div className="space-y-2">
                         <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
                             <FileText size={12} /> Description
@@ -216,7 +229,23 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                         </div>
                     </div>
 
-                    {/* Assets */}
+                    {/* 3. Deadline (Moved Here) */}
+                    <button 
+                        onClick={() => onRescheduleTask(internalActiveSubtask)}
+                        className="w-full p-4 bg-white border-2 border-slate-200 rounded-2xl flex items-center justify-between hover:border-slate-800 hover:shadow-pop transition-all group"
+                    >
+                        <div className="flex items-center gap-3 text-xs font-bold text-slate-600">
+                            <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-accent group-hover:text-white transition-colors">
+                                <Calendar size={16} strokeWidth={3} /> 
+                            </div>
+                            {internalActiveSubtask.due_date 
+                                ? new Date(internalActiveSubtask.due_date).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) 
+                                : 'Set Deadline'}
+                        </div>
+                        <div className="text-[10px] font-black uppercase text-accent opacity-0 group-hover:opacity-100 transition-opacity">Change</div>
+                    </button>
+
+                    {/* 4. Assets */}
                     <div className="space-y-3 pt-4 border-t-2 border-slate-200">
                         <div className="flex items-center justify-between">
                             <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
@@ -228,23 +257,62 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                         </div>
 
                         {isAddingAsset && (
-                            <div className="p-3 bg-white border-2 border-dashed border-slate-300 rounded-xl space-y-2 animate-in fade-in">
+                            <div className="p-3 bg-white border-2 border-dashed border-slate-300 rounded-xl space-y-3 animate-in fade-in">
+                                {/* Type Toggle */}
+                                <div className="flex p-1 bg-slate-100 rounded-lg">
+                                    <button 
+                                        onClick={() => setAssetType('link')}
+                                        className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all flex items-center justify-center gap-1 ${assetType === 'link' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        <Globe size={12} /> Link URL
+                                    </button>
+                                    <button 
+                                        onClick={() => setAssetType('file')}
+                                        className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all flex items-center justify-center gap-1 ${assetType === 'file' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        <File size={12} /> Upload File
+                                    </button>
+                                </div>
+
                                 <input 
-                                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded outline-none focus:border-accent"
-                                    placeholder="Name..."
+                                    className="w-full px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg outline-none focus:border-accent text-slate-700 bg-slate-50 focus:bg-white transition-colors"
+                                    placeholder="Nama Asset / File..."
                                     value={newAssetName}
                                     onChange={e => setNewAssetName(e.target.value)}
                                     autoFocus
                                 />
-                                <input 
-                                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded outline-none focus:border-accent"
-                                    placeholder="URL..."
-                                    value={newAssetUrl}
-                                    onChange={e => setNewAssetUrl(e.target.value)}
-                                />
-                                <div className="flex justify-end gap-2">
-                                    <button onClick={() => setIsAddingAsset(false)} className="text-[10px] text-slate-400">Cancel</button>
-                                    <button onClick={handleSaveAsset} disabled={isSavingAsset} className="text-[10px] font-bold text-accent">{isSavingAsset ? 'Saving...' : 'Save'}</button>
+                                
+                                {assetType === 'link' ? (
+                                    <input 
+                                        className="w-full px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg outline-none focus:border-accent text-slate-700 bg-slate-50 focus:bg-white transition-colors"
+                                        placeholder="https://example.com..."
+                                        value={newAssetUrl}
+                                        onChange={e => setNewAssetUrl(e.target.value)}
+                                    />
+                                ) : (
+                                    <div className="relative group">
+                                        <button 
+                                            onClick={() => fileInputRef.current?.click()}
+                                            className="w-full px-3 py-8 border-2 border-dashed border-slate-200 rounded-lg flex flex-col items-center justify-center gap-1 text-slate-400 hover:text-slate-600 hover:border-slate-400 transition-all bg-slate-50"
+                                        >
+                                            <File size={20} />
+                                            <span className="text-[10px] font-bold">Klik untuk pilih file</span>
+                                        </button>
+                                        <input 
+                                            type="file" 
+                                            ref={fileInputRef} 
+                                            className="hidden" 
+                                            onChange={handleFileSelect}
+                                        />
+                                        {newAssetUrl && (
+                                            <div className="mt-2 text-[10px] text-accent text-center font-bold">File siap diupload.</div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <div className="flex justify-end gap-2 pt-1">
+                                    <button onClick={() => setIsAddingAsset(false)} className="px-3 py-1.5 rounded-lg text-[10px] font-bold text-slate-500 hover:bg-slate-100">Cancel</button>
+                                    <button onClick={handleSaveAsset} disabled={isSavingAsset} className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-[10px] font-bold shadow-sm hover:bg-slate-700">{isSavingAsset ? 'Saving...' : 'Save Asset'}</button>
                                 </div>
                             </div>
                         )}
