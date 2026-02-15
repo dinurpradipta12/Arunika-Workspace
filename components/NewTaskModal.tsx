@@ -359,6 +359,18 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
                 ))}
               </div>
             </div>
+
+            {/* moved description here */}
+            <Input 
+              label="Keterangan Task / Deskripsi" 
+              isTextArea
+              placeholder="Tambahkan detail atau catatan..." 
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="min-h-[100px]"
+              icon={<AlignLeft size={18} />}
+            />
+
           </div>
 
           <div className="pt-2">

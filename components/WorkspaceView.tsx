@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Plus, 
@@ -392,9 +391,26 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                  <Button variant="ghost" onClick={() => onAddTask()} className="mt-4 text-accent border-accent hover:bg-accent/5">+ Tambah Task</Button>
                </div>
             ) : (
-               activeTasks.map(task => (
-                <TaskItem key={task.id} task={task} onStatusChange={onStatusChange} onClick={() => onTaskClick?.(task)} onEdit={onEditTask} onDelete={onDeleteTask} onArchive={(id) => onArchiveTask ? onArchiveTask(id) : onDeleteTask(id)} parentTitle={task.parent_id ? getParentTitle(task.parent_id) : undefined} assigneeName={members.find(m => m.user_id === task.assigned_to)?.users?.name} />
-              ))
+               activeTasks.map(task => {
+                 const assignedMember = members.find(m => m.user_id === task.assigned_to);
+                 const assigneeUser = assignedMember?.users ? {
+                   name: assignedMember.users.name,
+                   avatar_url: assignedMember.users.avatar_url
+                 } : undefined;
+
+                 return (
+                   <TaskItem 
+                     key={task.id} 
+                     task={task} 
+                     onStatusChange={onStatusChange} 
+                     onClick={() => onTaskClick?.(task)} 
+                     onEdit={onEditTask} 
+                     onDelete={onDeleteTask} 
+                     onArchive={(id) => onArchiveTask ? onArchiveTask(id) : onDeleteTask(id)} 
+                     assigneeUser={assigneeUser}
+                   />
+                 );
+               })
             )}
           </div>
         </div>

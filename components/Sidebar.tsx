@@ -9,7 +9,6 @@ import {
   LogOut, 
   X, 
   FolderArchive, 
-  ChevronDown,
   Briefcase,
   QrCode
 } from 'lucide-react';
@@ -48,8 +47,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   selectedTaskId,
   setSelectedTaskId,
-  isTasksExpanded,
-  setIsTasksExpanded,
   topLevelTasks,
   workspaces,
   onLogout,
@@ -155,27 +152,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <nav className="space-y-1">
             <NavItem icon={<LayoutGrid size={18} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
             
-            <div className="space-y-0.5">
-              <button 
-                onClick={() => setIsTasksExpanded(!isTasksExpanded)} 
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'tasks' ? 'bg-accent/5 text-accent' : 'text-mutedForeground hover:bg-muted'}`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <CheckSquare size={18} className={activeTab === 'tasks' ? 'text-accent' : 'text-slate-400'} />
-                  <span className="text-sm">My Tasks</span>
-                </div>
-                <ChevronDown size={14} className={`transition-transform ${isTasksExpanded ? 'rotate-180' : ''}`} />
-              </button>
-              
-              {isTasksExpanded && (
-                <div className="ml-5 space-y-0.5 pl-2 border-l-2 border-slate-100 animate-in slide-in-from-top-2 duration-200">
-                  <button onClick={() => { setActiveTab('tasks'); setSelectedTaskId(null); }} className="w-full text-left px-2 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600">All Tasks</button>
-                  {topLevelTasks.map((task) => (
-                    <SubNavItem key={task.id} label={task.title} active={selectedTaskId === task.id} onClick={() => { setSelectedTaskId(task.id); setActiveTab('tasks'); }} priority={task.priority} />
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* Modified My Tasks NavItem (No Dropdown) */}
+            <NavItem icon={<CheckSquare size={18} />} label="My Tasks" active={activeTab === 'tasks'} onClick={() => { setActiveTab('tasks'); setSelectedTaskId(null); }} />
 
             <NavItem icon={<CalendarIcon size={18} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
             
@@ -249,12 +227,5 @@ export const Sidebar: React.FC<SidebarProps> = ({
 const NavItem: React.FC<any> = ({ icon, label, active, onClick }) => (
   <button onClick={onClick} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-bold transition-all text-sm ${active ? 'bg-accent text-white shadow-pop border-2 border-slate-800' : 'text-mutedForeground hover:bg-muted'}`}>
     {icon} {label}
-  </button>
-);
-
-const SubNavItem: React.FC<any> = ({ label, active, onClick, priority }) => (
-  <button onClick={onClick} className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all text-left ${active ? 'text-accent' : 'text-mutedForeground hover:text-foreground'}`}>
-    <div className={`w-1 h-1 rounded-full ${priority === 'high' ? 'bg-secondary' : 'bg-tertiary'}`} />
-    <span className="truncate">{label}</span>
   </button>
 );

@@ -18,7 +18,10 @@ import {
   RotateCcw,
   Check,
   Trash2,
-  MessageSquare
+  MessageSquare,
+  Layout,
+  Table as TableIcon,
+  ChevronDown
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -71,6 +74,10 @@ const App: React.FC = () => {
   });
 
   const [activeWorkspaceMembers, setActiveWorkspaceMembers] = useState<any[]>([]); 
+
+  // VIEW MODE STATE (Board vs Table)
+  const [viewMode, setViewMode] = useState<'board' | 'table'>('board');
+  const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('taskplay_activeTab', activeTab);
@@ -219,12 +226,9 @@ const App: React.FC = () => {
         setInspectedTask(task);
         setDetailTask(null);
     } else {
-        if (activeTab === 'tasks') {
-            setSelectedTaskId(task.id);
-        } else {
-            setDetailTask(task);
-            setInspectedTask(null);
-        }
+        // Always open Large Modal for parent tasks, never inline view
+        setDetailTask(task);
+        setInspectedTask(null);
     }
   };
   
@@ -517,9 +521,20 @@ const App: React.FC = () => {
   const getDragOverStyle = (status: TaskStatus) => {
     switch (status) {
       case TaskStatus.TODO: return 'bg-slate-100 border-slate-400 border-dashed scale-[1.01]';
-      case TaskStatus.IN_PROGRESS: return 'bg-yellow-50 border-yellow-400 border-dashed scale-[1.01]';
+      case TaskStatus.IN_PROGRESS: return 'bg-blue-50 border-blue-400 border-dashed scale-[1.01]';
+      case TaskStatus.IN_REVIEW: return 'bg-pink-50 border-pink-400 border-dashed scale-[1.01]';
       case TaskStatus.DONE: return 'bg-emerald-50 border-emerald-400 border-dashed scale-[1.01]';
       default: return 'border-transparent';
+    }
+  };
+
+  const getStatusColor = (status: TaskStatus) => {
+    switch(status) {
+      case TaskStatus.TODO: return 'text-slate-900';
+      case TaskStatus.IN_PROGRESS: return 'text-blue-500';
+      case TaskStatus.IN_REVIEW: return 'text-secondary'; // Pink
+      case TaskStatus.DONE: return 'text-quaternary'; // Green
+      default: return 'text-slate-900';
     }
   };
 
@@ -577,6 +592,17 @@ const App: React.FC = () => {
      } else if (notif.type === 'join_workspace') {
         setActiveTab('team');
      }
+  };
+
+  // Helper to find Assignee User for a task
+  const getAssigneeUser = (userId?: string) => {
+    if (!userId) return undefined;
+    if (userId === currentUser?.id) return { name: currentUser.name, avatar_url: currentUser.avatar_url };
+    // Try to find in active workspace members if available (imperfect fallback for My Tasks view)
+    const member = activeWorkspaceMembers.find(m => m.user_id === userId);
+    if (member?.users) return { name: member.users.name, avatar_url: member.users.avatar_url };
+    // Fallback placeholder
+    return { name: 'User', avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}` };
   };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -905,37 +931,41 @@ const App: React.FC = () => {
                 setCategoryColors={setCategoryColors}
               />
             )}
+            
             {activeTab === 'tasks' && (
-              selectedTaskId && selectedTask ? (
-                <TaskDetailView 
-                  parentTask={selectedTask} 
-                  subTasks={tasks.filter(t => t.parent_id === selectedTaskId && !t.is_archived)} 
-                  onBack={() => setSelectedTaskId(null)}
-                  onStatusChange={handleStatusChange} 
-                  onAddTask={() => {
-                    setEditingTask({ parent_id: selectedTask.id, workspace_id: selectedTask.workspace_id } as Task);
-                    setIsNewTaskModalOpen(true);
-                  }} 
-                  onEditTask={openEditModal}
-                  onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }} 
-                  onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }} 
-                  priorityFilter={priorityFilter} onPriorityFilterChange={setPriorityFilter}
-                  onInspectTask={(t) => setInspectedTask(t)} // Subtasks in Inline View use Simple Modal
-                  onRescheduleTask={setReschedulingTask}
-                />
-              ) : (
-                <div className="space-y-8 pb-20">
-                  <div className="flex justify-between items-end">
-                    <div>
-                      <h2 className="text-4xl font-heading tracking-tighter">My Board</h2>
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola alur kerja personal Anda</p>
+              <div className="space-y-8 pb-20">
+                <div className="flex justify-between items-end">
+                  <div>
+                    <h2 className="text-4xl font-heading tracking-tighter">My Board</h2>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola alur kerja personal Anda</p>
+                  </div>
+                  <div className="flex gap-3">
+                    {/* View Mode Toggles */}
+                    <div className="flex bg-white rounded-full border-2 border-slate-800 p-1 shadow-sm gap-1">
+                        <Button 
+                          variant={viewMode === 'board' ? 'primary' : 'ghost'}
+                          onClick={() => setViewMode('board')}
+                          className={`text-xs px-4 py-2 ${viewMode === 'board' ? 'shadow-none' : 'border-transparent hover:border-transparent'}`}
+                        >
+                          Board View
+                        </Button>
+                        <Button 
+                          variant={viewMode === 'table' ? 'primary' : 'ghost'}
+                          onClick={() => setViewMode('table')}
+                          className={`text-xs px-4 py-2 ${viewMode === 'table' ? 'shadow-none' : 'border-transparent hover:border-transparent'}`}
+                        >
+                          Table View
+                        </Button>
                     </div>
                     <Button variant="primary" onClick={openNewTaskModal} className="px-6 py-3 shadow-pop text-md font-black">+ New Task</Button>
                   </div>
-                  
-                  {/* DRAGGABLE COLUMNS */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.DONE].map(status => (
+                </div>
+                
+                {/* CONTENT AREA: Board vs Table */}
+                {viewMode === 'board' ? (
+                  /* DRAGGABLE COLUMNS (KANBAN) */
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DONE].map(status => (
                       <div 
                         key={status} 
                         className={`space-y-4 rounded-3xl p-4 transition-all duration-300 border-2 ${dragOverColumn === status ? getDragOverStyle(status) : 'border-transparent'}`}
@@ -944,10 +974,10 @@ const App: React.FC = () => {
                         onDrop={(e) => handleBoardDrop(e, status)}
                       >
                         <div className="flex items-center justify-between border-b-2 border-slate-800 pb-2">
-                           <h3 className="font-heading text-lg uppercase tracking-widest">{status.replace('_', ' ')}</h3>
-                           <span className="text-[9px] font-black bg-slate-800 text-white px-2 py-0.5 rounded-lg">
-                             {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length}
-                           </span>
+                            <h3 className={`font-heading text-lg uppercase tracking-widest ${getStatusColor(status)}`}>{status.replace('_', ' ')}</h3>
+                            <span className="text-[9px] font-black bg-slate-800 text-white px-2 py-0.5 rounded-lg">
+                              {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length}
+                            </span>
                         </div>
                         <div className="space-y-3 min-h-[200px]">
                           {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).map(task => (
@@ -959,31 +989,89 @@ const App: React.FC = () => {
                               onEdit={openEditModal}
                               onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
                               onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }}
+                              onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)} // Enable Drag
+                              workspaceName={workspaces.find(ws => ws.id === task.workspace_id)?.name}
+                              assigneeUser={getAssigneeUser(task.assigned_to)}
                             />
                           ))}
                           {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length === 0 && (
                             <div className="py-10 text-center border-2 border-dashed border-slate-100 rounded-2xl opacity-50">
-                               <p className="text-[9px] font-black uppercase text-slate-300 tracking-widest italic">Belum ada task</p>
+                                <p className="text-[9px] font-black uppercase text-slate-300 tracking-widest italic">Belum ada task</p>
                             </div>
                           )}
                         </div>
                       </div>
                     ))}
                   </div>
+                ) : (
+                  /* TABLE VIEW */
+                  <div className="bg-white border-2 border-slate-800 rounded-3xl overflow-hidden shadow-pop">
+                      <table className="w-full text-left">
+                        <thead className="bg-slate-50 border-b-2 border-slate-100">
+                            <tr>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Task Name</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Status</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Priority</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Due Date</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Workspace</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {tasks.filter(t => !t.parent_id && !t.is_archived).map(task => (
+                              <tr key={task.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors group cursor-pointer" onClick={() => handleGlobalTaskClick(task)}>
+                                  <td className="p-4">
+                                    <p className="font-bold text-slate-800">{task.title}</p>
+                                    {task.description && <p className="text-xs text-slate-400 truncate max-w-[200px]">{task.description}</p>}
+                                  </td>
+                                  <td className="p-4">
+                                    <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${task.status === TaskStatus.DONE ? 'bg-quaternary/10 text-quaternary' : task.status === TaskStatus.IN_PROGRESS ? 'bg-blue-100 text-blue-500' : task.status === TaskStatus.IN_REVIEW ? 'bg-pink-100 text-secondary' : 'bg-slate-100 text-slate-500'}`}>
+                                        {task.status.replace('_', ' ')}
+                                    </span>
+                                  </td>
+                                  <td className="p-4">
+                                    <div className="flex items-center gap-1">
+                                        <div className={`w-2 h-2 rounded-full ${task.priority === TaskPriority.HIGH ? 'bg-secondary' : task.priority === TaskPriority.MEDIUM ? 'bg-tertiary' : 'bg-quaternary'}`} />
+                                        <span className="text-xs font-bold capitalize">{task.priority}</span>
+                                    </div>
+                                  </td>
+                                  <td className="p-4 text-sm font-bold text-slate-600">
+                                    {task.due_date ? new Date(task.due_date).toLocaleDateString() : '-'}
+                                  </td>
+                                  <td className="p-4 text-xs font-bold text-slate-500">
+                                    {workspaces.find(ws => ws.id === task.workspace_id)?.name || '-'}
+                                  </td>
+                                  <td className="p-4 text-right">
+                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={(e) => { e.stopPropagation(); openEditModal(task); }} className="p-1.5 hover:bg-white rounded border hover:border-slate-300 text-slate-400 hover:text-slate-800"><MessageSquare size={14} /></button>
+                                        <button onClick={async (e) => { e.stopPropagation(); await supabase.from('tasks').delete().eq('id', task.id); fetchData(); }} className="p-1.5 hover:bg-white rounded border hover:border-secondary text-slate-400 hover:text-secondary"><Trash2 size={14} /></button>
+                                    </div>
+                                  </td>
+                              </tr>
+                            ))}
+                            {tasks.filter(t => !t.parent_id && !t.is_archived).length === 0 && (
+                              <tr><td colSpan={6} className="p-8 text-center text-slate-400 font-bold italic">No tasks found.</td></tr>
+                            )}
+                        </tbody>
+                      </table>
+                  </div>
+                )}
 
-                  {/* ARCHIVE SECTION */}
-                  <div className="mt-12 pt-8 border-t-4 border-slate-800">
-                    <div className="flex items-center gap-3 mb-6">
-                      <div className="w-10 h-10 bg-slate-200 border-2 border-slate-800 rounded-xl flex items-center justify-center text-slate-500 shadow-sm">
-                        <Archive size={20} />
-                      </div>
-                      <h3 className="text-2xl font-heading text-slate-400">Archived Tasks</h3>
-                      <span className="text-xs font-black bg-slate-200 text-slate-500 px-3 py-1 rounded-full">{tasks.filter(t => t.is_archived && !t.parent_id).length} items</span>
-                    </div>
+                {/* ARCHIVE SECTION - COLLAPSIBLE */}
+                <div className="mt-8 pt-4 border-t border-slate-200">
+                  <button 
+                    onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
+                    className="flex items-center gap-2 text-slate-400 hover:text-slate-600 transition-colors w-full"
+                  >
+                    <Archive size={16} />
+                    <span className="text-xs font-bold uppercase tracking-widest">Archived Tasks ({tasks.filter(t => t.is_archived && !t.parent_id).length})</span>
+                    <ChevronDown size={14} className={`transition-transform ${isArchiveExpanded ? 'rotate-180' : ''}`} />
+                  </button>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70 hover:opacity-100 transition-opacity">
+                  {isArchiveExpanded && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4 animate-in slide-in-from-top-2">
                       {tasks.filter(t => t.is_archived && !t.parent_id).map(task => (
-                        <div key={task.id} className="relative group">
+                        <div key={task.id} className="relative group opacity-70 hover:opacity-100 transition-opacity">
                           <TaskItem 
                             task={task} 
                             onStatusChange={() => {}} // Disabled for archived
@@ -995,14 +1083,14 @@ const App: React.FC = () => {
                         </div>
                       ))}
                       {tasks.filter(t => t.is_archived && !t.parent_id).length === 0 && (
-                        <div className="col-span-full py-8 text-center border-2 border-dashed border-slate-200 rounded-2xl">
-                          <p className="text-xs font-bold text-slate-300 uppercase tracking-widest">No archived tasks</p>
+                        <div className="col-span-full py-4 text-center border border-dashed border-slate-200 rounded-xl">
+                          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">No archived tasks</p>
                         </div>
                       )}
                     </div>
-                  </div>
+                  )}
                 </div>
-              )
+              </div>
             )}
           </div>
         </main>

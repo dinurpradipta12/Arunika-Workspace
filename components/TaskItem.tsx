@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { CheckCircle2, Clock, Circle, ChevronRight, MoreHorizontal, Edit2, Trash2, Archive, GripVertical, RotateCcw, CornerDownRight, User } from 'lucide-react';
+import { CheckCircle2, Clock, Circle, MoreHorizontal, Edit2, Trash2, Archive, RotateCcw, ArrowRight, Briefcase, Tag, Flag, User } from 'lucide-react';
 import { Task, TaskPriority, TaskStatus } from '../types';
 
 interface TaskItemProps {
@@ -12,9 +12,9 @@ interface TaskItemProps {
   onArchive?: (id: string) => void;
   onReschedule?: (task: Task) => void;
   onRestore?: (id: string) => void;
-  parentTitle?: string;
-  isSubtask?: boolean; // New prop for visual differentiation
-  assigneeName?: string; // New prop to show assignee
+  onDragStart?: (e: React.DragEvent) => void; // Added for Drag & Drop
+  workspaceName?: string; // New: For Workspace Info
+  assigneeUser?: { name: string; avatar_url: string }; // New: For Assignee Avatar
 }
 
 export const TaskItem: React.FC<TaskItemProps> = ({ 
@@ -25,22 +25,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   onDelete, 
   onArchive, 
   onReschedule, 
-  onRestore, 
-  parentTitle,
-  isSubtask = false,
-  assigneeName
+  onRestore,
+  onDragStart,
+  workspaceName,
+  assigneeUser
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  const getPriorityColor = (priority: TaskPriority) => {
-    if (task.is_archived) return 'bg-slate-300';
-    switch (priority) {
-      case TaskPriority.HIGH: return 'bg-secondary';
-      case TaskPriority.MEDIUM: return 'bg-tertiary';
-      case TaskPriority.LOW: return 'bg-quaternary';
-    }
-  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -54,147 +45,130 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isMenuOpen]);
 
-  const handleContainerClick = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button')) return;
-    if (onClick) onClick(task);
-  };
-
   const handleCheckboxClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (task.is_archived) return;
     onStatusChange(task.id, task.status === TaskStatus.DONE ? TaskStatus.TODO : TaskStatus.DONE);
   };
 
-  const handleMenuClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsMenuOpen(!isMenuOpen);
+  const getPriorityColor = (priority: TaskPriority) => {
+    switch (priority) {
+      case TaskPriority.HIGH: return 'text-secondary bg-secondary/10 border-secondary';
+      case TaskPriority.MEDIUM: return 'text-tertiary bg-tertiary/10 border-tertiary';
+      case TaskPriority.LOW: return 'text-quaternary bg-quaternary/10 border-quaternary';
+      default: return 'text-slate-500 bg-slate-100 border-slate-200';
+    }
   };
 
-  // Visual differentiation styles
-  const containerStyles = isSubtask
-    ? "bg-slate-50 border-slate-300 shadow-none hover:border-slate-400 opacity-90 scale-[0.98] ml-4"
-    : "bg-white border-slate-800 shadow-sm hover:shadow-pop";
+  const formatDateWithTime = (dateStr?: string) => {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' • ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
 
   return (
     <div 
       draggable={!task.is_archived}
-      onClick={handleContainerClick}
-      className={`group relative flex items-start justify-between p-4 border-2 rounded-xl transition-all mb-3 cursor-pointer ${containerStyles} ${task.is_archived ? 'grayscale opacity-75 shadow-none' : ''}`}
+      onDragStart={onDragStart}
+      onClick={() => onClick?.(task)}
+      className={`group relative bg-white border-2 border-slate-800 rounded-2xl p-4 shadow-sm hover:shadow-pop hover:-translate-y-1 transition-all duration-300 cursor-pointer ${task.is_archived ? 'grayscale opacity-75 shadow-none hover:translate-y-0 hover:shadow-none' : ''}`}
     >
-      <div className="flex items-start gap-3 flex-1 min-w-0">
-        {!task.is_archived && (
-          <div className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity pt-1 shrink-0 cursor-grab active:cursor-grabbing">
-            <GripVertical size={18} />
-          </div>
-        )}
+      {/* ROW 1: Icon, Title, Date/Time */}
+      <div className="flex items-start gap-3">
         <button 
           onClick={handleCheckboxClick}
           disabled={task.is_archived}
-          className={`transition-colors shrink-0 pt-0.5 ${task.is_archived ? 'text-slate-200' : 'text-slate-400 hover:text-accent'}`}
+          className={`mt-0.5 shrink-0 transition-transform active:scale-90 ${task.is_archived ? 'text-slate-200' : 'text-slate-400 hover:text-accent'}`}
         >
           {task.status === TaskStatus.DONE ? (
-            <CheckCircle2 className={task.is_archived ? 'text-slate-300' : 'text-quaternary'} size={22} strokeWidth={3} />
+            <CheckCircle2 className="text-quaternary fill-quaternary/10" size={24} strokeWidth={2.5} />
           ) : (
-            <Circle size={22} strokeWidth={3} />
+            <Circle size={24} strokeWidth={2.5} />
           )}
         </button>
-        <div className="min-w-0 flex-1">
-          <h4 className={`font-bold text-base leading-tight break-words ${task.status === TaskStatus.DONE || task.is_archived ? 'line-through text-mutedForeground' : 'text-foreground'}`}>
+        
+        <div className="flex-1 min-w-0">
+          <h4 className={`font-bold text-base leading-tight text-slate-900 ${task.status === TaskStatus.DONE ? 'line-through text-slate-400' : ''}`}>
             {task.title}
           </h4>
-          <div className="flex flex-wrap items-center gap-2 mt-2">
-            <div className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-black text-white ${getPriorityColor(task.priority)} shadow-[1px_1px_0px_#1E293B]`}>
-              {task.priority}
+          {task.due_date && (
+            <div className={`flex items-center gap-1.5 mt-1 text-[10px] font-bold uppercase tracking-wider ${new Date(task.due_date) < new Date() && task.status !== TaskStatus.DONE ? 'text-secondary' : 'text-slate-400'}`}>
+              <Clock size={10} strokeWidth={3} />
+              {formatDateWithTime(task.due_date)}
             </div>
-            
-            {/* Parent Task Indicator */}
-            {parentTitle && (
-              <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-200 text-slate-500 rounded text-[9px] font-black uppercase tracking-widest border border-slate-300">
-                <CornerDownRight size={10} strokeWidth={3} />
-                <span className="truncate max-w-[100px]">{parentTitle}</span>
-              </div>
-            )}
+          )}
+        </div>
 
-            {/* Assignee Indicator */}
-            {assigneeName && (
-               <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-black uppercase tracking-widest border border-blue-100">
-                 <User size={10} strokeWidth={3} />
-                 <span className="truncate max-w-[100px]">{assigneeName}</span>
-               </div>
-            )}
+        {/* Menu Button (Top Right) */}
+        <div className="relative" ref={menuRef}>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setIsMenuOpen(!isMenuOpen); }}
+            className={`p-1 rounded-lg hover:bg-slate-100 text-slate-300 hover:text-slate-600 transition-colors ${isMenuOpen ? 'bg-slate-100 text-slate-600' : ''}`}
+          >
+            <MoreHorizontal size={20} />
+          </button>
+          
+          {isMenuOpen && (
+            <div className="absolute top-full right-0 mt-2 w-44 bg-white border-2 border-slate-800 rounded-xl shadow-pop py-2 z-[60] animate-in fade-in zoom-in-95 origin-top-right" onClick={(e) => e.stopPropagation()}>
+              {!task.is_archived ? (
+                <>
+                  <button onClick={() => { onEdit?.(task); setIsMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-xs font-bold text-slate-700"><Edit2 size={14} /> Edit Task</button>
+                  <button onClick={() => { onArchive?.(task.id); setIsMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-xs font-bold text-slate-700"><Archive size={14} /> Archive</button>
+                  <button onClick={() => { onReschedule?.(task); setIsMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-xs font-bold text-slate-700"><Clock size={14} /> Reschedule</button>
+                </>
+              ) : (
+                <button onClick={() => { onRestore?.(task.id); setIsMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2 hover:bg-quaternary/10 text-xs font-bold text-quaternary"><RotateCcw size={14} /> Restore</button>
+              )}
+              <div className="my-1 border-t-2 border-slate-100" />
+              <button onClick={() => { onDelete?.(task.id); setIsMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2 hover:bg-secondary/10 text-xs font-bold text-secondary"><Trash2 size={14} /> Delete</button>
+            </div>
+          )}
+        </div>
+      </div>
 
-            {task.due_date && (
-              <div className="flex items-center gap-1 text-[11px] text-mutedForeground font-bold uppercase tracking-tighter">
-                <Clock size={12} strokeWidth={3} />
-                {new Date(task.due_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-              </div>
-            )}
-            
-            {task.is_archived && (
-              <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-200 text-slate-500 rounded text-[9px] font-black uppercase tracking-widest border border-slate-300">
-                <Archive size={10} /> Archived
-              </div>
-            )}
+      {/* ROW 2: Description, Badges */}
+      <div className="mt-3 pl-9">
+        {task.description && (
+          <p className="text-xs text-slate-500 font-medium leading-relaxed line-clamp-2 mb-3">
+            {task.description}
+          </p>
+        )}
+        
+        <div className="flex flex-wrap gap-2">
+          {workspaceName && (
+            <div className="flex items-center gap-1 px-2 py-1 bg-slate-100 border border-slate-200 rounded-md text-[9px] font-black uppercase tracking-wider text-slate-500">
+              <Briefcase size={10} /> {workspaceName}
+            </div>
+          )}
+          {task.category && (
+            <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-100 rounded-md text-[9px] font-black uppercase tracking-wider text-blue-500">
+              <Tag size={10} /> {task.category}
+            </div>
+          )}
+          <div className={`flex items-center gap-1 px-2 py-1 border rounded-md text-[9px] font-black uppercase tracking-wider ${getPriorityColor(task.priority)}`}>
+            <Flag size={10} /> {task.priority}
           </div>
         </div>
       </div>
-      
-      <div className="flex items-start gap-1 relative shrink-0 ml-2" ref={menuRef}>
-        <div className={`flex items-center gap-1 ${isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
-          <button 
-            className={`p-1 rounded-lg bg-muted text-foreground hover:bg-slate-200 border-2 transition-all ${isMenuOpen ? 'border-slate-800 bg-slate-100 shadow-sm' : 'border-transparent hover:border-slate-800'}`}
-            onClick={handleMenuClick}
-          >
-             <MoreHorizontal size={18} />
-          </button>
-          {onClick && (
-            <ChevronRight size={18} className="text-slate-400" />
+
+      {/* ROW 3: Bottom (Avatar & Arrow) */}
+      <div className="mt-4 pt-3 border-t-2 border-slate-50 flex items-center justify-between pl-9">
+        {/* Assignee Avatar */}
+        <div className="flex items-center gap-2">
+          {assigneeUser ? (
+            <img src={assigneeUser.avatar_url} alt={assigneeUser.name} className="w-6 h-6 rounded-full border border-slate-200 object-cover" title={`Assigned to: ${assigneeUser.name}`} />
+          ) : (
+            <div className="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400" title="Unassigned">
+              <User size={12} />
+            </div>
           )}
+          {assigneeUser && <span className="text-[10px] font-bold text-slate-400 truncate max-w-[100px]">{assigneeUser.name}</span>}
         </div>
 
-        {isMenuOpen && (
-          <div 
-            className="absolute top-full right-0 mt-3 w-44 bg-white border-2 border-slate-800 rounded-xl shadow-pop py-2 z-[60] animate-in fade-in zoom-in-95 duration-200 origin-top-right"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {!task.is_archived ? (
-              <>
-                <button 
-                  onClick={() => { onEdit?.(task); setIsMenuOpen(false); }}
-                  className="w-full flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm font-bold text-slate-700 transition-colors"
-                >
-                  <Edit2 size={14} /> Edit Task
-                </button>
-                <button 
-                  onClick={() => { onArchive?.(task.id); setIsMenuOpen(false); }}
-                  className="w-full flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm font-bold text-slate-700 transition-colors"
-                >
-                  <Archive size={14} /> Archive Task
-                </button>
-                <button 
-                  onClick={() => { onReschedule?.(task); setIsMenuOpen(false); }}
-                  className="w-full flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm font-bold text-slate-700 transition-colors"
-                >
-                  <Clock size={14} /> Reschedule
-                </button>
-              </>
-            ) : (
-              <button 
-                onClick={() => { onRestore?.(task.id); setIsMenuOpen(false); }}
-                className="w-full flex items-center gap-2 px-4 py-2 hover:bg-quaternary/10 text-sm font-bold text-quaternary transition-colors"
-              >
-                <RotateCcw size={14} /> Restore to Board
-              </button>
-            )}
-            <div className="my-1 border-t-2 border-slate-100" />
-            <button 
-              onClick={() => { onDelete?.(task.id); setIsMenuOpen(false); }}
-              className="w-full flex items-center gap-2 px-4 py-2 hover:bg-secondary/10 text-sm font-bold text-secondary transition-colors"
-            >
-              <Trash2 size={14} /> Delete Forever
-            </button>
-          </div>
-        )}
+        {/* Action Arrow */}
+        <div className="text-slate-300 group-hover:text-accent transition-colors">
+          <ArrowRight size={18} strokeWidth={3} />
+        </div>
       </div>
     </div>
   );
