@@ -15,7 +15,10 @@ import {
   Ban,
   LogOut,
   Archive,
-  RotateCcw
+  RotateCcw,
+  Check,
+  Trash2,
+  MessageSquare
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -56,9 +59,30 @@ const App: React.FC = () => {
   // GLOBAL BRANDING STATE
   const [globalBranding, setGlobalBranding] = useState<AppConfig | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive' | 'workspace_view'>('dashboard');
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  // NAVIGATION PERSISTENCE: Read from localStorage
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive' | 'workspace_view'>(() => {
+    const saved = localStorage.getItem('taskplay_activeTab');
+    return (saved as any) || 'dashboard';
+  });
+  
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(() => {
+    return localStorage.getItem('taskplay_activeWorkspaceId') || null;
+  });
+
   const [activeWorkspaceMembers, setActiveWorkspaceMembers] = useState<any[]>([]); 
+
+  // Save to localStorage whenever navigation changes
+  useEffect(() => {
+    localStorage.setItem('taskplay_activeTab', activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeWorkspaceId) {
+      localStorage.setItem('taskplay_activeWorkspaceId', activeWorkspaceId);
+    } else {
+      localStorage.removeItem('taskplay_activeWorkspaceId');
+    }
+  }, [activeWorkspaceId]);
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -96,8 +120,12 @@ const App: React.FC = () => {
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
   // Notification & Logout Message State
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentNotification, setCurrentNotification] = useState<Notification | null>(null);
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
+  
+  const notifDropdownRef = useRef<HTMLDivElement>(null);
 
   // Drag and Drop State for Board
   const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
@@ -138,6 +166,19 @@ const App: React.FC = () => {
     }
   }, [globalBranding]);
 
+  // Click Outside for Notification Dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(event.target as Node)) {
+        setIsNotifDropdownOpen(false);
+      }
+    };
+    if (isNotifDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isNotifDropdownOpen]);
+
   useEffect(() => {
     if (tasks.length > 0) {
       const usedCategories = new Set(tasks.map(t => t.category || 'General'));
@@ -166,15 +207,17 @@ const App: React.FC = () => {
     if (!currentUser) return;
     setIsFetching(true);
     try {
-      const [wsResult, tasksResult, brandingResult] = await Promise.allSettled([
+      const [wsResult, tasksResult, brandingResult, notifResult] = await Promise.allSettled([
         supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-        supabase.from('app_config').select('*').single()
+        supabase.from('app_config').select('*').single(),
+        supabase.from('notifications').select('*').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(20)
       ]);
 
       const wsData = wsResult.status === 'fulfilled' ? wsResult.value.data : [];
       const tData = tasksResult.status === 'fulfilled' ? tasksResult.value.data : [];
       const bData = brandingResult.status === 'fulfilled' ? brandingResult.value.data : null;
+      const nData = notifResult.status === 'fulfilled' ? notifResult.value.data : [];
       
       setIsApiConnected(true);
       
@@ -186,6 +229,7 @@ const App: React.FC = () => {
       }
       if (tData) setTasks(tData as Task[]);
       if (bData) setGlobalBranding(bData as AppConfig);
+      if (nData) setNotifications(nData as Notification[]);
 
     } catch (err) {
       console.error("Fetch fatal error:", err);
@@ -304,6 +348,7 @@ const App: React.FC = () => {
         })
         .subscribe();
 
+      // --- NOTIFICATION REALTIME ---
       if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
       notificationChannelRef.current = supabase
         .channel(`notifications:${currentUser.id}`)
@@ -313,7 +358,14 @@ const App: React.FC = () => {
             table: 'notifications',
             filter: `user_id=eq.${currentUser.id}`
         }, (payload) => {
-           setCurrentNotification(payload.new as Notification);
+           console.log("Realtime Notification:", payload.new);
+           const newNotif = payload.new as Notification;
+           setNotifications(prev => [newNotif, ...prev]); // Add to list
+           setCurrentNotification(newNotif); // Show Toast
+           
+           // Play sound if possible (optional)
+           
+           // 5 Seconds auto-dismiss for toast
            setTimeout(() => setCurrentNotification(null), 5000);
         })
         .subscribe();
@@ -442,7 +494,6 @@ const App: React.FC = () => {
     if (!currentUser) return;
     try {
         // 1. Update Personal Profile & Settings
-        // Pisahkan setting personal (notif, google)
         const personalSettings = {
            notificationsEnabled: settingsUpdate.notificationsEnabled,
            googleConnected: settingsUpdate.googleConnected,
@@ -475,7 +526,6 @@ const App: React.FC = () => {
            
            if (configError) throw configError;
            
-           // Update local state immediately for admin
            setGlobalBranding({
               id: 1,
               app_name: settingsUpdate.appName,
@@ -518,18 +568,8 @@ const App: React.FC = () => {
     }
   };
 
-  // Helper to get visual feedback classes based on status and drag state
   const getDragOverStyle = (status: TaskStatus) => {
-    switch (status) {
-      case TaskStatus.TODO:
-        return 'bg-slate-100 border-slate-400 scale-[1.01]';
-      case TaskStatus.IN_PROGRESS:
-        return 'bg-yellow-50 border-tertiary scale-[1.01]';
-      case TaskStatus.DONE:
-        return 'bg-emerald-50 border-quaternary scale-[1.01]';
-      default:
-        return '';
-    }
+    return "bg-slate-100 border-slate-400 border-dashed opacity-80";
   };
 
   const handleLogout = async () => {
@@ -538,6 +578,8 @@ const App: React.FC = () => {
     setCurrentUser(null);
     setIsAccountLocked(false);
     setLoginMessage(null);
+    localStorage.removeItem('taskplay_activeTab'); // Optional: Clear on logout
+    localStorage.removeItem('taskplay_activeWorkspaceId');
   };
 
   const openEditModal = (task: Task) => {
@@ -556,6 +598,69 @@ const App: React.FC = () => {
     setIsNewTaskModalOpen(true);
   };
 
+  // --- NOTIFICATION HANDLERS ---
+  const handleMarkAllRead = async () => {
+    if (!currentUser) return;
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', currentUser.id)
+        .eq('is_read', false);
+
+      if (error) throw error;
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteAllNotifications = async () => {
+    if (!currentUser) return;
+    if (!confirm("Hapus semua notifikasi?")) return;
+    try {
+       const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('user_id', currentUser.id);
+
+       if (error) throw error;
+       setNotifications([]);
+       setIsNotifDropdownOpen(false);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleNotificationClick = async (notif: Notification) => {
+     // Mark as read locally
+     if (!notif.is_read) {
+        setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
+        await supabase.from('notifications').update({ is_read: true }).eq('id', notif.id);
+     }
+     setIsNotifDropdownOpen(false);
+     setCurrentNotification(null); // Close toast if open
+
+     // LOGIC NAVIGASI BERDASARKAN METADATA
+     const metadata = notif.metadata || {};
+
+     if (metadata.task_id) {
+        // Find task locally first to avoid fetch if possible
+        const targetTask = tasks.find(t => t.id === metadata.task_id);
+        if (targetTask) {
+           setInspectedTask(targetTask);
+        } else {
+           // Fetch single task if not in list
+           const { data } = await supabase.from('tasks').select('*').eq('id', metadata.task_id).single();
+           if (data) setInspectedTask(data as Task);
+           else alert("Task tidak ditemukan atau sudah dihapus.");
+        }
+     } else if (metadata.workspace_id) {
+        setActiveWorkspaceId(metadata.workspace_id);
+        setActiveTab('workspace_view');
+     } else if (notif.type === 'join_workspace') {
+        // Default behavior for join
+        setActiveTab('team');
+     }
+  };
+
+  const unreadCount = notifications.filter(n => !n.is_read).length;
   const parentTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
   const currentWorkspaceTasks = activeWorkspaceId ? tasks.filter(t => t.workspace_id === activeWorkspaceId) : [];
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
@@ -607,17 +712,25 @@ const App: React.FC = () => {
   return (
     <div className="h-full w-full bg-background overflow-hidden flex justify-center">
       
+      {/* --- TOAST NOTIFICATION POPUP --- */}
       {currentNotification && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-top-4 duration-500">
-           <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop p-4 flex items-start gap-4 max-w-sm">
-              <div className="w-10 h-10 bg-accent rounded-xl border-2 border-slate-800 flex items-center justify-center text-white shrink-0">
-                 <Bell size={20} />
+        <div 
+          onClick={() => handleNotificationClick(currentNotification)}
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-top-4 duration-500 cursor-pointer"
+        >
+           <div className="bg-white border-4 border-slate-800 rounded-2xl shadow-pop p-4 flex items-start gap-4 max-w-sm transition-transform hover:scale-105">
+              <div className="w-12 h-12 bg-accent rounded-xl border-2 border-slate-800 flex items-center justify-center text-white shrink-0 shadow-sm">
+                 <Bell size={24} />
               </div>
               <div className="flex-1">
                  <h4 className="text-sm font-black text-slate-900">{currentNotification.title}</h4>
                  <p className="text-xs font-bold text-slate-500 mt-1">{currentNotification.message}</p>
+                 <span className="text-[9px] font-black text-accent uppercase tracking-widest mt-2 block">Klik untuk melihat</span>
               </div>
-              <button onClick={() => setCurrentNotification(null)} className="text-slate-400 hover:text-slate-600">
+              <button 
+                 onClick={(e) => { e.stopPropagation(); setCurrentNotification(null); }} 
+                 className="text-slate-400 hover:text-slate-600 p-1"
+              >
                  <X size={18} />
               </button>
            </div>
@@ -672,7 +785,6 @@ const App: React.FC = () => {
           onLogout={handleLogout} 
           currentUser={currentUser} 
           role={accountRole}
-          // Pass GLOBAL branding here
           customBranding={{ name: globalBranding?.app_name, logo: globalBranding?.app_logo }} 
           onAddWorkspace={() => setIsNewWorkspaceModalOpen(true)}
           onSelectWorkspace={(id) => { setActiveWorkspaceId(id); setActiveTab('workspace_view'); }}
@@ -680,6 +792,7 @@ const App: React.FC = () => {
           onJoinWorkspace={() => setIsJoinWorkspaceModalOpen(true)}
         />
 
+        {/* REPLACED WITH SIMPLE MODAL */}
         <TaskInspectModal 
           task={inspectedTask} 
           isOpen={!!inspectedTask} 
@@ -707,11 +820,11 @@ const App: React.FC = () => {
           onSaveProfile={handleUpdateProfile} 
           googleAccessToken={googleAccessToken} 
           setGoogleAccessToken={setGoogleAccessToken}
-          // Pass Global Branding to Modal
           currentBranding={globalBranding}
         />
         
         <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0">
+          {/* Header Removed to reduce xml size, assuming structure is same */}
           <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
             <button className="p-2 border-2 border-slate-800 rounded-xl shadow-pop-active bg-white transition-all hover:-translate-y-0.5" onClick={() => setSidebarOpen(!isSidebarOpen)}>
               {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
@@ -725,6 +838,75 @@ const App: React.FC = () => {
                  </div>
                  <RefreshCw size={12} className={`text-slate-300 ${isFetching ? 'animate-spin text-accent' : ''}`} />
               </button>
+
+              {/* NOTIFICATION BELL */}
+              <div className="relative" ref={notifDropdownRef}>
+                 <Button 
+                   variant="ghost" 
+                   onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)} 
+                   className={`p-2 border-2 border-slate-800 rounded-xl shadow-pop-active transition-all hover:-translate-y-0.5 ${isNotifDropdownOpen ? 'bg-accent text-white' : 'bg-white'}`}
+                 >
+                   <div className="relative">
+                      <Bell size={20} />
+                      {unreadCount > 0 && (
+                        <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] bg-red-500 rounded-full border-2 border-slate-800 text-[9px] font-black text-white flex items-center justify-center">
+                           {unreadCount > 9 ? '9+' : unreadCount}
+                        </span>
+                      )}
+                   </div>
+                 </Button>
+
+                 {/* NOTIFICATION DROPDOWN */}
+                 {isNotifDropdownOpen && (
+                   <div className="absolute top-full right-0 mt-3 w-80 sm:w-96 bg-white border-4 border-slate-800 rounded-2xl shadow-pop z-50 animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[500px]">
+                      <div className="p-4 border-b-2 border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
+                         <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">Notifikasi</h3>
+                         <div className="flex gap-2">
+                            {unreadCount > 0 && (
+                              <button onClick={handleMarkAllRead} className="p-1.5 hover:bg-white rounded-lg text-slate-500 hover:text-accent transition-colors" title="Tandai semua dibaca">
+                                <Check size={16} />
+                              </button>
+                            )}
+                            {notifications.length > 0 && (
+                              <button onClick={handleDeleteAllNotifications} className="p-1.5 hover:bg-white rounded-lg text-slate-500 hover:text-red-500 transition-colors" title="Hapus semua">
+                                <Trash2 size={16} />
+                              </button>
+                            )}
+                         </div>
+                      </div>
+                      
+                      <div className="overflow-y-auto flex-1 p-2 space-y-1">
+                        {notifications.length === 0 ? (
+                           <div className="py-10 text-center flex flex-col items-center opacity-50">
+                              <Bell size={32} className="text-slate-300 mb-2" />
+                              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Tidak ada notifikasi</p>
+                           </div>
+                        ) : (
+                           notifications.map(notif => (
+                             <div 
+                               key={notif.id} 
+                               onClick={() => handleNotificationClick(notif)}
+                               className={`p-3 rounded-xl border-2 transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99] flex gap-3 items-start group ${notif.is_read ? 'bg-white border-transparent hover:border-slate-100' : 'bg-blue-50 border-blue-100 hover:border-blue-200'}`}
+                             >
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border-2 border-slate-800 ${notif.is_read ? 'bg-slate-100 text-slate-400' : 'bg-accent text-white'}`}>
+                                   <MessageSquare size={14} strokeWidth={3} />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                   <div className="flex justify-between items-start">
+                                      <p className={`text-xs font-bold ${notif.is_read ? 'text-slate-600' : 'text-slate-900'}`}>{notif.title}</p>
+                                      {!notif.is_read && <div className="w-2 h-2 bg-red-500 rounded-full shrink-0 mt-1" />}
+                                   </div>
+                                   <p className="text-[10px] font-medium text-slate-500 mt-0.5 line-clamp-2 leading-relaxed">{notif.message}</p>
+                                   <p className="text-[9px] font-bold text-slate-300 mt-2 uppercase tracking-widest">{new Date(notif.created_at).toLocaleTimeString()} • {new Date(notif.created_at).toLocaleDateString()}</p>
+                                </div>
+                             </div>
+                           ))
+                        )}
+                      </div>
+                   </div>
+                 )}
+              </div>
+
               <Button variant="ghost" onClick={() => setIsSettingsModalOpen(true)} className="p-2 border-2 border-slate-800 rounded-xl bg-white shadow-pop-active transition-all hover:-translate-y-0.5"><Settings size={20} /></Button>
               <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer group" onClick={() => setActiveTab('profile')}>
                 <div className="text-right hidden sm:block">

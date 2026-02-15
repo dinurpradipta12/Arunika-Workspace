@@ -89,7 +89,8 @@ export interface Task {
   created_at: string;
   completed_at?: string;
   is_archived?: boolean;
-  category?: string; 
+  category?: string;
+  assets?: WorkspaceAsset[]; // NEW FIELD: Task specific assets
 }
 
 export interface Notification {

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   UserPlus, 
@@ -194,20 +193,23 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
 
     try {
       // PENTING: Gunakan Temporary Client untuk SignUp agar sesi Admin tidak tertimpa/logout
-      const tempSupabase = createClient(supabaseUrl, supabaseAnonKey);
+      const tempSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: false
+        }
+      });
 
       // 1. SignUp User (di Auth Supabase) menggunakan Client Sementara
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password: newPassword,
-      options: {
-      emailRedirectTo: `${window.location.origin}/auth/callback`,
-      data: {
-      name: newName,
-      username: cleanUsername,
-      avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
-      }
-      }
+      const { data: authData, error: authError } = await tempSupabase.auth.signUp({
+        email: cleanEmail,
+        password: newPassword,
+        options: {
+          data: {
+            name: newName,
+            username: cleanUsername,
+            avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
+          },
+        }
       });
       if (authError) throw authError;
 

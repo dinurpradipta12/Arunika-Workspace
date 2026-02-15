@@ -4,7 +4,7 @@
 -- ==========================================
 
 -- 1. DROP EXISTING TABLES (CLEANUP)
-DROP TABLE IF EXISTS public.app_config CASCADE; -- Added
+DROP TABLE IF EXISTS public.app_config CASCADE;
 DROP TABLE IF EXISTS public.notifications CASCADE;
 DROP TABLE IF EXISTS public.tasks CASCADE;
 DROP TABLE IF EXISTS public.workspace_members CASCADE;
@@ -14,11 +14,14 @@ DROP TABLE IF EXISTS public.users CASCADE;
 -- Cleanup Triggers & Functions
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 DROP TRIGGER IF EXISTS on_auth_user_signup_confirm ON auth.users;
+DROP TRIGGER IF EXISTS on_task_assigned ON public.tasks; -- New Trigger Cleanup
 DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
 DROP FUNCTION IF EXISTS public.auto_confirm_email() CASCADE;
 DROP FUNCTION IF EXISTS public.get_my_workspace_ids() CASCADE;
 DROP FUNCTION IF EXISTS public.get_my_owned_workspace_ids() CASCADE;
 DROP FUNCTION IF EXISTS public.join_workspace_by_code(text) CASCADE;
+DROP FUNCTION IF EXISTS public.is_admin_or_owner() CASCADE;
+DROP FUNCTION IF EXISTS public.handle_task_assignment() CASCADE; -- New Function Cleanup
 
 -- 2. CREATE TABLES
 CREATE TABLE public.users (
@@ -82,13 +85,14 @@ CREATE TABLE public.tasks (
   start_date TIMESTAMP WITH TIME ZONE,
   is_all_day BOOLEAN DEFAULT true,
   created_by TEXT,
-  assigned_to TEXT REFERENCES public.users(id), -- Added assigned_to column
+  assigned_to TEXT REFERENCES public.users(id),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   completed_at TIMESTAMP WITH TIME ZONE,
   is_archived BOOLEAN DEFAULT false,
   category TEXT DEFAULT 'General',
   google_event_id TEXT,
-  google_calendar_id TEXT
+  google_calendar_id TEXT,
+  assets JSONB DEFAULT '[]'::jsonb -- NEW: Task specific assets
 );
 
 CREATE TABLE public.notifications (
@@ -142,6 +146,40 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- Trigger: Handle Task Assignment Notification
+CREATE OR REPLACE FUNCTION public.handle_task_assignment()
+RETURNS TRIGGER AS $$
+DECLARE
+  assigner_name TEXT;
+BEGIN
+  -- Cek jika assigned_to diisi atau berubah
+  IF (TG_OP = 'INSERT' AND NEW.assigned_to IS NOT NULL) OR
+     (TG_OP = 'UPDATE' AND NEW.assigned_to IS NOT NULL AND (OLD.assigned_to IS NULL OR OLD.assigned_to <> NEW.assigned_to)) THEN
+     
+     -- Jangan kirim notifikasi jika assign ke diri sendiri
+     IF NEW.assigned_to <> NEW.created_by THEN
+        -- Ambil nama pembuat task
+        SELECT name INTO assigner_name FROM public.users WHERE id = NEW.created_by;
+        
+        INSERT INTO public.notifications (user_id, type, title, message, metadata)
+        VALUES (
+          NEW.assigned_to,
+          'assignment',
+          'Tugas Baru Diberikan',
+          COALESCE(assigner_name, 'Seseorang') || ' menugaskan Anda: ' || NEW.title,
+          jsonb_build_object('task_id', NEW.id, 'workspace_id', NEW.workspace_id)
+        );
+     END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_task_assigned
+  AFTER INSERT OR UPDATE ON public.tasks
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_task_assignment();
+
 
 -- FUNCTION: Join Workspace By Code
 CREATE OR REPLACE FUNCTION public.join_workspace_by_code(code_input TEXT)
@@ -223,7 +261,13 @@ AS $$ SELECT workspace_id FROM public.workspace_members WHERE user_id = auth.uid
 CREATE OR REPLACE FUNCTION public.is_admin_or_owner()
 RETURNS BOOLEAN
 LANGUAGE sql SECURITY DEFINER SET search_path = public STABLE
-AS $$ SELECT EXISTS(SELECT 1 FROM public.users WHERE id = auth.uid()::text AND status IN ('Admin', 'Owner')) $$;
+AS $$ 
+  SELECT EXISTS(
+    SELECT 1 FROM public.users 
+    WHERE id = auth.uid()::text 
+    AND (status ILIKE 'Admin' OR status ILIKE 'Owner')
+  ) 
+$$;
 
 -- 6. RLS POLICIES
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -240,7 +284,7 @@ CREATE POLICY "System insert users" ON public.users FOR INSERT WITH CHECK (true)
 
 -- App Config
 CREATE POLICY "Everyone view config" ON public.app_config FOR SELECT USING (true);
-CREATE POLICY "Admins update config" ON public.app_config FOR UPDATE USING (public.is_admin_or_owner());
+CREATE POLICY "Admins manage config" ON public.app_config FOR ALL USING (public.is_admin_or_owner());
 
 -- Workspaces
 CREATE POLICY "View workspaces" ON public.workspaces FOR SELECT USING (
