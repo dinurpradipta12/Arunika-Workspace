@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckSquare, Lock, User as UserIcon, AlertCircle, Loader2, HelpCircle, Eye, EyeOff, Mail } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -7,9 +7,10 @@ import { supabase } from '../lib/supabase';
 
 interface LoginProps {
   onLoginSuccess: () => void;
+  initialMessage?: string | null;
 }
 
-export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
+export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) => {
   const [identifier, setIdentifier] = useState(''); // Bisa Username atau Email
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -17,6 +18,15 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [rawError, setRawError] = useState<any>(null);
+
+  useEffect(() => {
+    if (initialMessage) {
+      setErrorState({
+        message: initialMessage,
+        isConfirmationError: false
+      });
+    }
+  }, [initialMessage]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

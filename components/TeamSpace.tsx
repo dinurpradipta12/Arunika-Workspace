@@ -23,7 +23,9 @@ import {
   Eye,
   EyeOff,
   UserCheck,
-  RefreshCw
+  RefreshCw,
+  LogOut,
+  Layers
 } from 'lucide-react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
@@ -49,6 +51,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   
   // Member Detail Modal State
   const [selectedMember, setSelectedMember] = useState<any | null>(null);
+  const [memberWorkspaces, setMemberWorkspaces] = useState<any[]>([]); // New state for user's workspaces
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [memberActionMenuId, setMemberActionMenuId] = useState<string | null>(null);
   const [isAddingToWorkspace, setIsAddingToWorkspace] = useState(false);
@@ -65,17 +68,20 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   // Add Member to Another Workspace State
   const [targetAddWsId, setTargetAddWsId] = useState('');
 
-  // Derived state for Join Code (only show if current user is owner)
-  const isOwner = currentWorkspace?.owner_id === currentUser?.id;
-  const joinCode = currentWorkspace?.join_code;
+  // Derived state for Join Code
+  const activeWorkspaceObj = workspaces.find(w => w.id === targetWorkspaceId);
+  const isOwner = activeWorkspaceObj?.owner_id === currentUser?.id;
+  const joinCode = activeWorkspaceObj?.join_code;
   const [isCodeCopied, setIsCodeCopied] = useState(false);
   const [isRegeneratingCode, setIsRegeneratingCode] = useState(false);
 
   useEffect(() => {
-    if (currentWorkspace) {
+    if (currentWorkspace && !targetWorkspaceId) {
       setTargetWorkspaceId(currentWorkspace.id);
+    } else if (workspaces.length > 0 && !targetWorkspaceId) {
+      setTargetWorkspaceId(workspaces[0].id);
     }
-  }, [currentWorkspace]);
+  }, [currentWorkspace, workspaces, targetWorkspaceId]);
 
   useEffect(() => {
     const handleClickOutside = () => setMemberActionMenuId(null);
@@ -93,8 +99,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   }, [retryCountdown, regError]);
 
   const fetchMembers = useCallback(async (showLoading = true) => {
-    const activeWsId = targetWorkspaceId || currentWorkspace?.id;
-    if (!activeWsId) {
+    if (!targetWorkspaceId) {
       setIsLoading(false);
       return;
     }
@@ -111,7 +116,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
           created_at,
           users:user_id (id, name, email, username, avatar_url, status, is_active, temp_password)
         `)
-        .eq('workspace_id', activeWsId)
+        .eq('workspace_id', targetWorkspaceId)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -124,28 +129,45 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     } finally {
       if (showLoading) setIsLoading(false);
     }
-  }, [currentWorkspace, targetWorkspaceId]);
+  }, [targetWorkspaceId]);
+
+  // Fetch workspaces list for a specific user (User Detail Modal)
+  const fetchMemberWorkspaces = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('workspace_members')
+        .select(`
+          id,
+          role,
+          workspace_id,
+          workspaces:workspace_id (id, name, type, join_code)
+        `)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      setMemberWorkspaces(data || []);
+    } catch (err) {
+      console.error("Error fetching user workspaces:", err);
+    }
+  };
 
   useEffect(() => {
     fetchMembers();
-    const activeWsId = targetWorkspaceId || currentWorkspace?.id;
-
-    if (activeWsId) {
+    if (targetWorkspaceId) {
       const channel = supabase
         .channel(`workspace-members-realtime`)
         .on('postgres_changes', { 
-          event: '*', schema: 'public', table: 'workspace_members', filter: `workspace_id=eq.${activeWsId}`
+          event: '*', schema: 'public', table: 'workspace_members', filter: `workspace_id=eq.${targetWorkspaceId}`
         }, () => fetchMembers(false))
         .subscribe();
       return () => { supabase.removeChannel(channel); };
     }
-  }, [fetchMembers, targetWorkspaceId, currentWorkspace?.id]);
+  }, [fetchMembers, targetWorkspaceId]);
 
-  // --- REALTIME USER PROFILE SYNC (Requested by Admin Arunika) ---
+  // --- REALTIME USER PROFILE SYNC ---
   useEffect(() => {
     const userChannel = supabase.channel('public-users-sync')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users' }, (payload) => {
-         // Re-fetch members list to reflect profile changes (photo, name, email) immediately
          fetchMembers(false);
       })
       .subscribe();
@@ -195,7 +217,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
           avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
           status: 'Member',
           is_active: true,
-          temp_password: newPassword, // Simpan password (Sesuai request Admin)
+          temp_password: newPassword, // Simpan password
           app_settings: { appName: 'TaskPlay' }
         });
 
@@ -232,20 +254,20 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   };
   
   const handleRegenerateCode = async () => {
-    if (!currentWorkspace || !isOwner) return;
+    if (!activeWorkspaceObj || !isOwner) return;
     if(!confirm("Anda yakin ingin mengganti kode akses workspace ini? Kode lama tidak akan berlaku lagi.")) return;
     
     setIsRegeneratingCode(true);
-    const newCode = Math.random().toString(36).substring(2, 9).toUpperCase(); // Simple unique code generation
+    const newCode = Math.random().toString(36).substring(2, 9).toUpperCase(); 
     
     try {
        const { error } = await supabase
          .from('workspaces')
          .update({ join_code: newCode })
-         .eq('id', currentWorkspace.id);
+         .eq('id', activeWorkspaceObj.id);
          
        if(error) throw error;
-       alert("Kode akses berhasil diperbarui!");
+       // Trigger refresh handled by App.tsx realtime subscription usually, but we can force UI update if needed locally
     } catch(err:any) {
        alert("Gagal update kode: " + err.message);
     } finally {
@@ -269,11 +291,26 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
       } else {
         alert("Berhasil menambahkan user ke workspace!");
         setTargetAddWsId('');
+        // Refresh workspace list for this user
+        fetchMemberWorkspaces(selectedMember.user_id);
       }
     } catch (err: any) {
       alert("Gagal menambahkan: " + err.message);
     } finally {
       setIsAddingToWorkspace(false);
+    }
+  };
+
+  const handleRemoveFromWorkspace = async (membershipId: string, wsName: string) => {
+    if(!confirm(`Yakin ingin menghapus user ini dari workspace "${wsName}"?`)) return;
+    
+    try {
+       await supabase.from('workspace_members').delete().eq('id', membershipId);
+       // Refresh lists
+       if (selectedMember) fetchMemberWorkspaces(selectedMember.user_id);
+       fetchMembers(false);
+    } catch(err: any) {
+       alert("Gagal menghapus: " + err.message);
     }
   };
 
@@ -323,10 +360,11 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     setIsDetailOpen(true);
     setTargetAddWsId('');
     setShowMemberPassword(false);
+    fetchMemberWorkspaces(member.user_id); // Fetch workspace list for this user
   };
 
   const handleDeleteUser = async (targetUserId: string, targetMemberId: string) => {
-     if(confirm("Yakin hapus user ini dari workspace?")) {
+     if(confirm("Yakin hapus user ini dari workspace saat ini?")) {
         try {
            await supabase.from('workspace_members').delete().eq('id', targetMemberId);
            fetchMembers(false);
@@ -381,14 +419,11 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                 <Input label="Username Unik" placeholder="contoh: andi_dev" icon={<Hash size={16} />} value={newUsername} onChange={e => setNewUsername(e.target.value)} required autoCapitalize="none" />
                 <Input label="Password Sementara" type="password" placeholder="Min. 6 Karakter" icon={<Key size={16} />} value={newPassword} onChange={e => setNewPassword(e.target.value)} required />
                 
+                {/* Note: Workspace selection for registration is now just informative if we are forcing focus on one workspace, but keeping it selectable is good */}
                 <div className="space-y-2">
                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Target Workspace</label>
-                   <div className="relative">
-                      <Globe size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <select value={targetWorkspaceId} onChange={(e) => setTargetWorkspaceId(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl font-bold text-xs outline-none focus:border-accent appearance-none">
-                         <option value="" disabled>Pilih Workspace</option>
-                         {workspaces.map(ws => <option key={ws.id} value={ws.id}>{ws.name} ({ws.type})</option>)}
-                      </select>
+                   <div className="p-3 bg-slate-100 border-2 border-slate-200 rounded-xl font-bold text-xs flex items-center gap-2 text-slate-600">
+                      <Globe size={16} /> {activeWorkspaceObj?.name || 'Pilih di Directory'}
                    </div>
                 </div>
 
@@ -405,38 +440,60 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
               </form>
             )}
           </Card>
-          
-          {/* Join Code Card (Owner Only) */}
-          {isOwner && joinCode && (
-            <Card title="Kode Akses Instan" icon={<Key size={20} />} variant="secondary" className="text-white">
-               <div className="bg-white/20 p-4 rounded-xl border-2 border-white/30 backdrop-blur-sm text-center mb-3">
-                  <span className="font-heading text-3xl tracking-widest">{joinCode}</span>
-               </div>
-               <div className="flex gap-2">
-                 <Button variant="ghost" className="bg-white text-secondary flex-1 hover:bg-white/90" onClick={copyJoinCode}>
-                    {isCodeCopied ? <Check size={16} /> : <Copy size={16} />} {isCodeCopied ? 'Tersalin' : 'Salin Kode'}
-                 </Button>
-                 <Button 
-                    variant="ghost" 
-                    className="bg-white/20 text-white hover:bg-white/40" 
-                    onClick={handleRegenerateCode} 
-                    disabled={isRegeneratingCode}
-                    title="Buat kode baru yang unik untuk workspace ini"
-                 >
-                    {isRegeneratingCode ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                 </Button>
-               </div>
-               <p className="text-[10px] font-bold mt-3 opacity-80 text-center">
-                 Bagikan kode ini ke member untuk join otomatis ke workspace ini. <br/> 
-                 Klik icon Refresh untuk membuat kode unik baru.
-               </p>
-            </Card>
-          )}
         </div>
 
-        {/* Directory */}
+        {/* Directory & Workspace Controls */}
         <div className="lg:col-span-2">
-          <Card title="Workspace Directory" variant="white" isHoverable={false}>
+          <Card variant="white" isHoverable={false}>
+            {/* Header Card: Workspace Selection & Code */}
+            <div className="mb-6 pb-6 border-b-2 border-slate-100 flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
+              <div className="flex-1 w-full md:w-auto space-y-2">
+                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                   <Briefcase size={12} /> Pilih Workspace
+                 </label>
+                 <div className="relative">
+                    <select 
+                      value={targetWorkspaceId} 
+                      onChange={(e) => setTargetWorkspaceId(e.target.value)} 
+                      className="w-full pl-4 pr-10 py-3 bg-white border-2 border-slate-800 rounded-xl font-heading text-lg outline-none focus:shadow-pop transition-all appearance-none cursor-pointer hover:bg-slate-50"
+                    >
+                       <option value="" disabled>Pilih Workspace...</option>
+                       {workspaces.map(ws => <option key={ws.id} value={ws.id}>{ws.name} ({ws.type})</option>)}
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-800">
+                       <Briefcase size={18} />
+                    </div>
+                 </div>
+              </div>
+
+              {/* Code Display (Moved Here) */}
+              {isOwner && joinCode && (
+                <div className="flex-1 w-full md:w-auto space-y-2">
+                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                     <Key size={12} /> Kode Join
+                   </label>
+                   <div className="flex gap-2">
+                      <button 
+                        onClick={copyJoinCode}
+                        className="flex-1 bg-slate-800 text-white border-2 border-slate-800 rounded-xl px-4 py-3 font-heading text-lg tracking-widest shadow-pop-active hover:translate-y-0.5 hover:shadow-none transition-all flex items-center justify-center gap-3 group"
+                        title="Klik untuk menyalin"
+                      >
+                         <span>{joinCode}</span>
+                         {isCodeCopied ? <Check size={16} className="text-quaternary" /> : <Copy size={16} className="opacity-50 group-hover:opacity-100" />}
+                      </button>
+                      <button 
+                         onClick={handleRegenerateCode}
+                         disabled={isRegeneratingCode}
+                         className="px-3 bg-white border-2 border-slate-800 rounded-xl text-slate-800 hover:bg-slate-50 transition-colors"
+                         title="Generate Kode Baru"
+                      >
+                         {isRegeneratingCode ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+                      </button>
+                   </div>
+                </div>
+              )}
+            </div>
+
             <div className="overflow-x-auto min-h-[400px]">
               <table className="w-full text-left border-separate border-spacing-y-3">
                 <thead>
@@ -495,6 +552,11 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                       </td>
                     </tr>
                   ))}
+                  {members.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="py-10 text-center text-slate-400 font-bold italic">Tidak ada anggota di workspace ini.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -537,6 +599,37 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                            <UserCheck size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
                         </div>
                       </div>
+                   </div>
+                </div>
+
+                <div className="h-[1px] bg-slate-100 w-full" />
+
+                {/* --- NEW SECTION: WORKSPACE LIST --- */}
+                <div className="space-y-3">
+                   <h4 className="text-xs font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
+                     <Layers size={14} /> Keanggotaan Workspace
+                   </h4>
+                   <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                     {memberWorkspaces.map((mw) => (
+                       <div key={mw.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl group hover:border-slate-400 transition-colors">
+                          <div className="min-w-0">
+                             <p className="text-xs font-bold text-slate-800 truncate">{mw.workspaces?.name}</p>
+                             <span className="text-[9px] font-black uppercase px-1.5 py-0.5 bg-slate-200 text-slate-500 rounded">{mw.role}</span>
+                          </div>
+                          {isOwner && (
+                            <button 
+                              onClick={() => handleRemoveFromWorkspace(mw.id, mw.workspaces?.name)}
+                              className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-secondary hover:border-secondary hover:bg-secondary/5 transition-all"
+                              title="Hapus dari Workspace ini"
+                            >
+                               <Trash2 size={14} />
+                            </button>
+                          )}
+                       </div>
+                     ))}
+                     {memberWorkspaces.length === 0 && (
+                       <p className="text-[10px] text-slate-400 italic">User belum masuk workspace manapun.</p>
+                     )}
                    </div>
                 </div>
 
@@ -621,13 +714,6 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                     </div>
                   </div>
                 )}
-                
-                {/* Danger Actions */}
-                <div className="pt-4 border-t-2 border-slate-100">
-                   <button onClick={() => handleDeleteUser(selectedMember.user_id, selectedMember.id)} className="w-full py-3 text-xs font-bold text-secondary hover:bg-secondary/5 rounded-xl transition-colors flex items-center justify-center gap-2">
-                     <Trash2 size={14} /> Hapus User dari Workspace Ini
-                   </button>
-                </div>
              </div>
           </div>
         </div>

@@ -86,12 +86,14 @@ const App: React.FC = () => {
   const [accountRole, setAccountRole] = useState('Owner');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Notification State
+  // Notification & Logout Message State
   const [currentNotification, setCurrentNotification] = useState<Notification | null>(null);
+  const [loginMessage, setLoginMessage] = useState<string | null>(null);
 
   const taskChannelRef = useRef<any>(null);
   const notificationChannelRef = useRef<any>(null);
   const workspaceChannelRef = useRef<any>(null);
+  const userStatusChannelRef = useRef<any>(null);
 
   const getConnectionStatus = () => {
     if (!isOnline) return { color: 'text-secondary', label: 'Offline', icon: <WifiOff size={16} /> };
@@ -286,6 +288,26 @@ const App: React.FC = () => {
            setTimeout(() => setCurrentNotification(null), 5000);
         })
         .subscribe();
+
+      // Monitor Account Status (Auto Logout if deactivated)
+      if (userStatusChannelRef.current) supabase.removeChannel(userStatusChannelRef.current);
+      userStatusChannelRef.current = supabase
+        .channel(`user-status-${currentUser.id}`)
+        .on('postgres_changes', { 
+            event: 'UPDATE', 
+            schema: 'public', 
+            table: 'users',
+            filter: `id=eq.${currentUser.id}`
+        }, async (payload: any) => {
+             // If status becomes inactive, force logout
+             if (payload.new.is_active === false) {
+                 await supabase.auth.signOut();
+                 setLoginMessage("Akses aplikasi telah ditutup oleh Administrator. Silakan hubungi admin.");
+                 setIsAuthenticated(false);
+                 setCurrentUser(null);
+             }
+        })
+        .subscribe();
     }
   }, [currentUser?.id, isAuthenticated, fetchData]);
 
@@ -443,7 +465,7 @@ const App: React.FC = () => {
     );
   }
 
-  if (!isAuthenticated) return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
+  if (!isAuthenticated) return <Login onLoginSuccess={() => { setIsAuthenticated(true); setLoginMessage(null); }} initialMessage={loginMessage} />;
   if (!currentUser) return <div className="h-screen w-full flex items-center justify-center">Failed to load profile.</div>;
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
