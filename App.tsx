@@ -520,15 +520,21 @@ const App: React.FC = () => {
     try {
         const personalSettings = { notificationsEnabled: settingsUpdate.notificationsEnabled, googleConnected: settingsUpdate.googleConnected, sourceColors: currentUser.app_settings?.sourceColors, visibleSources: currentUser.app_settings?.visibleSources, googleAccessToken: settingsUpdate.googleAccessToken || currentUser.app_settings?.googleAccessToken };
         const updates = { ...profileData, status: newRole, app_settings: personalSettings };
+        
+        // --- CRITICAL FIX: OPTIMISTIC UPDATE LOCAL STATE IMMEDIATELY ---
+        // This prevents the "glitch" where data reverts to old state before the DB confirms.
+        setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
+        
         const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
         if (error) throw error;
+        
         const isAdmin = newRole.toLowerCase() === 'admin' || newRole.toLowerCase() === 'owner' || accountRole === 'Owner';
         if (isAdmin) {
            const { error: configError } = await supabase.from('app_config').upsert({ id: 1, app_name: settingsUpdate.appName, app_logo: settingsUpdate.appLogo, app_favicon: settingsUpdate.appFavicon, updated_by: currentUser.id, updated_at: new Date().toISOString() });
            if (configError) throw configError;
            setGlobalBranding({ id: 1, app_name: settingsUpdate.appName, app_logo: settingsUpdate.appLogo, app_favicon: settingsUpdate.appFavicon });
         }
-        setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
+        
         const calculatedRole = (newRole?.toLowerCase() === 'admin' || newRole?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
         setAccountRole(calculatedRole);
         alert("Pengaturan berhasil disimpan! Perubahan global akan terlihat oleh semua user.");
@@ -922,7 +928,13 @@ const App: React.FC = () => {
           </header>
 
           <div className="flex-1 mx-auto w-full transition-all duration-300 p-4 px-12 max-w-[1920px]">
-            {activeTab === 'dashboard' && <Dashboard />}
+            {activeTab === 'dashboard' && (
+              <Dashboard 
+                workspaces={workspaces} 
+                tasks={tasks} 
+                currentUser={currentUser} 
+              />
+            )}
             {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
             {activeTab === 'team' && <TeamSpace currentWorkspace={activeWorkspace} currentUser={currentUser} workspaces={workspaces} />}
             

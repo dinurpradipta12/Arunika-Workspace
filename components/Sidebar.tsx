@@ -37,7 +37,7 @@ interface SidebarProps {
   onAddWorkspace?: () => void;
   onSelectWorkspace?: (workspaceId: string) => void;
   activeWorkspaceId?: string | null;
-  onJoinWorkspace?: () => void; // New prop
+  onJoinWorkspace?: () => void; 
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -58,35 +58,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeWorkspaceId,
   onJoinWorkspace
 }) => {
-  const [currentTime, setCurrentTime] = useState(new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   const appName = customBranding?.name || 'TaskPlay Management';
   const appLogo = customBranding?.logo;
-
-  const getGreeting = () => {
-    const hour = currentTime.getHours();
-    if (hour >= 5 && hour < 11) return 'Pagi';
-    if (hour >= 11 && hour < 15) return 'Siang';
-    if (hour >= 15 && hour < 18) return 'Sore';
-    return 'Malam';
-  };
-
-  const formattedTime = currentTime.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
-  });
-
-  const formattedDate = currentTime.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  });
 
   const isMember = role === 'Member';
 
@@ -101,7 +74,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     `}>
       <div className="flex flex-col h-full w-64 shrink-0">
         {/* Branding & Profil Section */}
-        <div className="p-5 shrink-0 space-y-8">
+        <div className="p-5 shrink-0 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               {appLogo ? (
@@ -124,23 +97,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <X size={18} />
             </button>
           </div>
-
-          {/* User Greeting Area */}
-          <div className="bg-slate-50 border-2 border-slate-800 rounded-xl p-4 shadow-pop-active transition-all hover:bg-white group">
-            <div className="flex flex-col gap-0">
-              <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Halo, {currentUser?.name?.split(' ')[0]}!</span>
-              <span className="text-lg font-heading text-slate-800 leading-tight">Selamat {getGreeting()}</span>
-              
-              <div className="mt-2 pt-2 border-t-2 border-slate-100">
-                 <span className="text-3xl font-heading text-slate-800 tracking-tighter block text-left leading-none">
-                   {formattedTime}
-                 </span>
-                 <span className="text-xs font-bold text-slate-400 mt-1 block tracking-wider">
-                   {formattedDate}
-                 </span>
-              </div>
-            </div>
-          </div>
         </div>
 
         <div className="px-5 mb-3">
@@ -152,7 +108,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <nav className="space-y-1">
             <NavItem icon={<LayoutGrid size={18} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
             
-            {/* Modified My Tasks NavItem (No Dropdown) */}
             <NavItem icon={<CheckSquare size={18} />} label="My Tasks" active={activeTab === 'tasks'} onClick={() => { setActiveTab('tasks'); setSelectedTaskId(null); }} />
 
             <NavItem icon={<CalendarIcon size={18} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
