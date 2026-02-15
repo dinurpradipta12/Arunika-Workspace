@@ -25,6 +25,7 @@ export enum MemberRole {
 export interface User {
   id: string;
   email: string;
+  username?: string; // Field baru
   name: string;
   avatar_url: string;
   created_at: string;
@@ -37,7 +38,7 @@ export interface User {
     notificationsEnabled?: boolean;
     sourceColors?: Record<string, string>;
     visibleSources?: string[];
-    googleAccessToken?: string; // Menyimpan token di DB
+    googleAccessToken?: string; 
   };
 }
 
@@ -47,6 +48,8 @@ export interface Workspace {
   type: WorkspaceType;
   owner_id: string;
   created_at: string;
+  description?: string;
+  category?: string;
 }
 
 export interface Task {
@@ -56,7 +59,7 @@ export interface Task {
   title: string;
   description?: string;
   assigned_to?: string;
-  due_date?: string; // This will act as end date
+  due_date?: string; 
   start_date?: string;
   is_all_day?: boolean;
   priority: TaskPriority;
@@ -67,6 +70,7 @@ export interface Task {
   created_at: string;
   completed_at?: string;
   is_archived?: boolean;
+  category?: string; 
 }
 
 export interface Notification {

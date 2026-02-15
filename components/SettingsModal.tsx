@@ -44,6 +44,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const faviconInputRef = useRef<HTMLInputElement>(null);
   const calendarService = useRef<GoogleCalendarService | null>(null);
 
+  const isMember = role === 'Member';
+
   // Inisialisasi state sementara dari data asli saat modal dibuka
   useEffect(() => {
     if (isOpen) {
@@ -168,7 +170,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="flex-1 w-full space-y-5">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <Input label="Nama Lengkap" value={tempName} onChange={(e) => setTempName(e.target.value)} icon={<User size={16} />} />
-                      <Input label="Role Jabatan" value={tempRole} onChange={(e) => setTempRole(e.target.value)} icon={<ShieldCheck size={18} />} />
+                      <div className="space-y-2">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Role Jabatan</label>
+                        <div className="w-full p-3 bg-slate-100 border-2 border-slate-200 rounded-lg text-slate-500 font-medium flex items-center gap-2">
+                          <ShieldCheck size={18} /> {tempRole}
+                        </div>
+                      </div>
                     </div>
                     <Input label="Email Sync" value={tempEmail} onChange={(e) => setTempEmail(e.target.value)} icon={<Mail size={16} />} />
                   </div>
@@ -177,53 +184,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             )}
           </div>
 
-          {/* Section: Branding */}
-          <div className="border-4 border-slate-800 rounded-2xl overflow-hidden shadow-pop transition-all">
-            <button 
-              onClick={() => setExpandedSection(expandedSection === 'branding' ? null : 'branding')}
-              className={`w-full flex items-center justify-between p-4 text-left transition-colors ${expandedSection === 'branding' ? 'bg-secondary text-white' : 'bg-white hover:bg-slate-50'}`}
-            >
-              <div className="flex items-center gap-3">
-                <Palette size={20} strokeWidth={3} />
-                <span className="font-heading text-lg">Branding Aplikasi</span>
-              </div>
-              <ChevronDown className={`transition-transform duration-300 ${expandedSection === 'branding' ? 'rotate-180' : ''}`} />
-            </button>
+          {/* Section: Branding (Hidden for Member) */}
+          {!isMember && (
+            <div className="border-4 border-slate-800 rounded-2xl overflow-hidden shadow-pop transition-all">
+              <button 
+                onClick={() => setExpandedSection(expandedSection === 'branding' ? null : 'branding')}
+                className={`w-full flex items-center justify-between p-4 text-left transition-colors ${expandedSection === 'branding' ? 'bg-secondary text-white' : 'bg-white hover:bg-slate-50'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <Palette size={20} strokeWidth={3} />
+                  <span className="font-heading text-lg">Branding Aplikasi</span>
+                </div>
+                <ChevronDown className={`transition-transform duration-300 ${expandedSection === 'branding' ? 'rotate-180' : ''}`} />
+              </button>
 
-            {expandedSection === 'branding' && (
-              <div className="p-6 bg-white space-y-6 animate-in slide-in-from-top-4 duration-300">
-                <Input 
-                  label="Nama Custom Dashboard" 
-                  value={tempAppName} 
-                  onChange={(e) => setTempAppName(e.target.value)} 
-                  icon={<Type size={18} />} 
-                />
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-slate-400">Logo Dashboard</label>
-                    <div onClick={() => logoInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 cursor-pointer hover:bg-slate-100">
-                      <div className="w-16 h-16 bg-white border-2 border-slate-800 rounded-xl flex items-center justify-center overflow-hidden">
-                        {tempAppLogo ? <img src={tempAppLogo} className="w-full h-full object-contain p-1" /> : <ImageIcon size={24} className="text-slate-300" />}
+              {expandedSection === 'branding' && (
+                <div className="p-6 bg-white space-y-6 animate-in slide-in-from-top-4 duration-300">
+                  <Input 
+                    label="Nama Custom Dashboard" 
+                    value={tempAppName} 
+                    onChange={(e) => setTempAppName(e.target.value)} 
+                    icon={<Type size={18} />} 
+                  />
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-400">Logo Dashboard</label>
+                      <div onClick={() => logoInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 cursor-pointer hover:bg-slate-100">
+                        <div className="w-16 h-16 bg-white border-2 border-slate-800 rounded-xl flex items-center justify-center overflow-hidden">
+                          {tempAppLogo ? <img src={tempAppLogo} className="w-full h-full object-contain p-1" /> : <ImageIcon size={24} className="text-slate-300" />}
+                        </div>
+                        <span className="text-[9px] font-black uppercase text-slate-400">Pilih Logo</span>
+                        <input type="file" ref={logoInputRef} className="hidden" accept="image/png" onChange={(e) => handleBrandingUpload(e, 'logo')} />
                       </div>
-                      <span className="text-[9px] font-black uppercase text-slate-400">Pilih Logo</span>
-                      <input type="file" ref={logoInputRef} className="hidden" accept="image/png" onChange={(e) => handleBrandingUpload(e, 'logo')} />
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-slate-400">Browser Favicon</label>
-                    <div onClick={() => faviconInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 cursor-pointer hover:bg-slate-100">
-                      <div className="w-12 h-12 bg-white border-2 border-slate-800 rounded-lg flex items-center justify-center overflow-hidden">
-                        {tempFavicon ? <img src={tempFavicon} className="w-full h-full object-contain p-1" /> : <Chrome size={20} className="text-slate-300" />}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-400">Browser Favicon</label>
+                      <div onClick={() => faviconInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 cursor-pointer hover:bg-slate-100">
+                        <div className="w-12 h-12 bg-white border-2 border-slate-800 rounded-lg flex items-center justify-center overflow-hidden">
+                          {tempFavicon ? <img src={tempFavicon} className="w-full h-full object-contain p-1" /> : <Chrome size={20} className="text-slate-300" />}
+                        </div>
+                        <span className="text-[9px] font-black uppercase text-slate-400">Pilih Favicon</span>
+                        <input type="file" ref={faviconInputRef} className="hidden" accept="image/png" onChange={(e) => handleBrandingUpload(e, 'favicon')} />
                       </div>
-                      <span className="text-[9px] font-black uppercase text-slate-400">Pilih Favicon</span>
-                      <input type="file" ref={faviconInputRef} className="hidden" accept="image/png" onChange={(e) => handleBrandingUpload(e, 'favicon')} />
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {/* Section: Google Sync */}
           <div className="border-4 border-slate-800 rounded-2xl overflow-hidden shadow-pop transition-all">

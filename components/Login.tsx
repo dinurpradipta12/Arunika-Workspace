@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { CheckSquare, Lock, User as UserIcon, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from './ui/Button';
@@ -20,8 +21,10 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setError('');
 
     try {
-      // Mengonversi username menjadi email format untuk Supabase Auth di latar belakang
-      const loginEmail = username.includes('@') ? username : `${username}@taskplay.com`;
+      // Otomatis convert username ke format email internal
+      // Hapus spasi dan lowercase untuk konsistensi
+      const cleanUsername = username.trim().toLowerCase().replace(/\s+/g, '');
+      const loginEmail = `${cleanUsername}@taskplay.com`;
       
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: loginEmail,
@@ -36,7 +39,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         onLoginSuccess();
       }
     } catch (err: any) {
-      setError(err.message || 'Kredensial login tidak valid. Silakan periksa dashboard Supabase Auth Anda.');
+      setError('Username atau password salah.');
     } finally {
       setIsLoading(false);
     }
@@ -68,11 +71,12 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               <UserIcon size={18} className="absolute left-3 top-11 text-mutedForeground" />
               <Input 
                 label="Username" 
-                placeholder="Contoh: arunika" 
+                placeholder="Masukkan username Anda" 
                 className="pl-10"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
+                autoCapitalize="none"
               />
             </div>
 
@@ -97,14 +101,13 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             )}
 
             <Button variant="primary" className="w-full text-lg py-4" type="submit" disabled={isLoading}>
-              {isLoading ? <Loader2 className="animate-spin" /> : "Masuk Sekarang"}
+              {isLoading ? <Loader2 className="animate-spin" /> : "Masuk"}
             </Button>
           </form>
 
           <div className="mt-8 pt-6 border-t-2 border-slate-100 text-center">
-            <p className="text-[10px] text-mutedForeground font-medium leading-relaxed">
-              Gunakan akun lama untuk mengakses:<br/>
-              User: <span className="font-bold text-accent">arunika</span> | Pass: <span className="font-bold text-accent">ar4925</span>
+             <p className="text-[10px] text-mutedForeground font-medium leading-relaxed">
+              Hubungi Admin Workspace untuk mendapatkan Username & Password.
             </p>
           </div>
         </div>

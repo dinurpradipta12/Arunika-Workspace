@@ -2,19 +2,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
-  Search,
-  Bell, 
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
   Wifi,
   WifiOff,
   RefreshCw,
-  Clock,
-  CheckCircle2,
-  CircleDashed,
-  Archive,
-  Loader2
+  Loader2,
+  AlertTriangle
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -29,21 +24,39 @@ import { TaskInspectModal } from './components/TaskInspectModal';
 import { RescheduleModal } from './components/RescheduleModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CalendarView } from './components/CalendarView';
+import { NewWorkspaceModal } from './components/NewWorkspaceModal';
+import { WorkspaceView } from './components/WorkspaceView';
 import { supabase } from './lib/supabase';
 import { Task, TaskStatus, TaskPriority, Workspace, User, WorkspaceType } from './types';
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
 
+const UI_PALETTE = [
+  '#8B5CF6', // Accent (Purple)
+  '#F472B6', // Secondary (Pink)
+  '#FBBF24', // Tertiary (Amber)
+  '#34D399', // Quaternary (Emerald)
+  '#38BDF8', // Sky Blue
+  '#FB7185', // Rose
+  '#1E293B', // Slate
+];
+
 const App: React.FC = () => {
-  // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+  const [isProfileLoading, setIsProfileLoading] = useState<boolean>(false);
+  
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive' | 'workspace_view'>('dashboard');
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive'>('dashboard');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isNewWorkspaceModalOpen, setIsNewWorkspaceModalOpen] = useState(false);
+
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [inspectedTask, setInspectedTask] = useState<Task | null>(null);
   const [reschedulingTask, setReschedulingTask] = useState<Task | null>(null);
@@ -53,88 +66,68 @@ const App: React.FC = () => {
   const [sourceColors, setSourceColors] = useState<Record<string, string>>({});
   const [visibleSources, setVisibleSources] = useState<string[]>([]);
   
+  // Default Categories
+  const defaultCategories = ['General', 'Meeting', 'Design', 'Development'];
+  const [categories, setCategories] = useState<string[]>(defaultCategories); 
+  const [activeCategories, setActiveCategories] = useState<string[]>(defaultCategories);
+  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
+  
   const [googleEvents, setGoogleEvents] = useState<Task[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [isApiConnected, setIsApiConnected] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  const taskChannelRef = useRef<any>(null);
-  const userChannelRef = useRef<any>(null);
-  
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
-
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [accountRole, setAccountRole] = useState('Owner');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Connection Quality Logic
+  const taskChannelRef = useRef<any>(null);
+
+  // Perbaikan Logika Status Koneksi
   const getConnectionStatus = () => {
     if (!isOnline) return { color: 'text-secondary', label: 'Offline', icon: <WifiOff size={16} /> };
     if (isFetching) return { color: 'text-tertiary', label: 'Sinkronisasi...', icon: <Wifi size={16} className="animate-pulse" /> };
-    if (isApiConnected && isRealtimeConnected) return { color: 'text-quaternary', label: 'Sangat Baik', icon: <Wifi size={16} /> };
-    if (isApiConnected) return { color: 'text-tertiary', label: 'Cukup Baik', icon: <Wifi size={16} /> };
-    return { color: 'text-secondary', label: 'Buruk', icon: <WifiOff size={16} /> };
+    
+    // Cukup cek isApiConnected. Realtime bersifat opsional/enhancement.
+    if (isApiConnected) {
+       // Jika Realtime juga aktif, itu bonus (Live Sync), jika tidak, tetap "Terhubung" (via HTTP)
+       return { color: 'text-quaternary', label: isRealtimeConnected ? 'Live Sync' : 'Terhubung', icon: <Wifi size={16} /> };
+    }
+    
+    return { color: 'text-secondary', label: 'Menyambungkan', icon: <WifiOff size={16} /> };
   };
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => { setIsOnline(false); setIsApiConnected(false); setIsRealtimeConnected(false); };
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
+    if (tasks.length > 0) {
+      const usedCategories = new Set(tasks.map(t => t.category || 'General'));
+      const allCats = Array.from(new Set([...categories, ...Array.from(usedCategories)]));
+      
+      setCategories(prev => {
+        const unique = Array.from(new Set([...prev, ...allCats]));
+        return unique;
+      });
 
-  const fetchAndSubscribeUser = useCallback(async (userId: string) => {
-    setIsFetching(true);
-    try {
-      const { data: userData, error } = await supabase.from('users').select('*').eq('id', userId).single();
-      if (!error && userData) {
-        setCurrentUser(userData as User);
-        setAccountRole(userData.status || 'Owner');
-        setIsApiConnected(true);
-      } else {
-        const defaultUser = { id: userId, email: 'user@taskplay.io', name: 'New Player', avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`, status: 'Owner', app_settings: { appName: 'TaskPlay' }, created_at: new Date().toISOString() };
-        setCurrentUser(defaultUser as any);
-      }
-
-      if (userChannelRef.current) supabase.removeChannel(userChannelRef.current);
-      userChannelRef.current = supabase
-        .channel(`sync-user-${userId}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${userId}` }, (payload) => {
-          setCurrentUser(payload.new as User);
-        })
-        .subscribe();
-    } catch (e) { setIsApiConnected(false); } finally { setIsFetching(false); }
-  }, []);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setIsAuthenticated(true);
-        fetchAndSubscribeUser(session.user.id);
-      }
-      setIsAuthLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
-        setIsAuthenticated(true);
-        fetchAndSubscribeUser(session.user.id);
-      } else {
-        setIsAuthenticated(false);
-        setCurrentUser(null);
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [fetchAndSubscribeUser]);
+      setCategoryColors(prev => {
+        const next = { ...prev };
+        allCats.forEach((cat, idx) => {
+          if (!next[cat]) {
+            next[cat] = UI_PALETTE[idx % UI_PALETTE.length];
+          }
+        });
+        return next;
+      });
+    } else {
+      setCategoryColors(prev => {
+        const next = { ...prev };
+        categories.forEach((cat, idx) => {
+           if (!next[cat]) next[cat] = UI_PALETTE[idx % UI_PALETTE.length];
+        });
+        return next;
+      });
+    }
+  }, [tasks]); 
 
   const fetchData = useCallback(async () => {
     if (!currentUser) return;
@@ -144,53 +137,186 @@ const App: React.FC = () => {
         supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false })
       ]);
+      
+      // Set API Connected to TRUE immediately after successful fetch
       setIsApiConnected(true);
-      if (wsData) setWorkspaces(wsData as Workspace[]);
+      
+      if (wsData) {
+        setWorkspaces(wsData as Workspace[]);
+        if (visibleSources.length === 0) {
+          setVisibleSources(wsData.map(ws => ws.id));
+        }
+      }
       if (tData) setTasks(tData as Task[]);
-    } catch (err) { setIsApiConnected(false); } finally { setIsFetching(false); }
-  }, [currentUser?.id]);
+    } catch (err) {
+      console.error("Fetch error:", err);
+      setIsApiConnected(false);
+    } finally {
+      setIsFetching(false);
+    }
+  }, [currentUser?.id, visibleSources.length]);
+
+  const fetchOrCreateUser = useCallback(async (sessionUser: any) => {
+    setIsProfileLoading(true);
+    try {
+      let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
+      
+      if (error || !data) {
+        const newUser = {
+          id: sessionUser.id,
+          email: sessionUser.email,
+          name: sessionUser.user_metadata?.name || sessionUser.email.split('@')[0],
+          avatar_url: sessionUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${sessionUser.id}`,
+          status: 'Owner',
+          app_settings: { appName: 'TaskPlay' }
+        };
+        const { data: createdData, error: createError } = await supabase.from('users').upsert(newUser).select().single();
+        if (!createError) data = createdData;
+      }
+
+      if (data) {
+        setCurrentUser(data as User);
+        const role = data.status?.toLowerCase() === 'member' ? 'Member' : 'Owner';
+        setAccountRole(role);
+      }
+    } catch (e) {
+      console.error("Error profile sync:", e);
+    } finally {
+      setIsProfileLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setIsAuthenticated(true);
+        fetchOrCreateUser(session.user);
+      }
+      setIsAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        setIsAuthenticated(true);
+        fetchOrCreateUser(session.user);
+      } else {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+      }
+      setIsAuthLoading(false);
+    });
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      subscription.unsubscribe();
+    };
+  }, [fetchOrCreateUser]);
 
   useEffect(() => {
     if (currentUser && isAuthenticated) {
       fetchData();
       if (taskChannelRef.current) supabase.removeChannel(taskChannelRef.current);
       taskChannelRef.current = supabase
-        .channel('tasks-live-v2')
+        .channel('tasks-live-v7')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setTasks(prev => [payload.new as Task, ...prev]);
-          } else if (payload.eventType === 'UPDATE') {
-            setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
-          } else if (payload.eventType === 'DELETE') {
-            setTasks(prev => prev.filter(t => t.id !== payload.old.id));
-          }
+          if (payload.eventType === 'INSERT') setTasks(prev => [payload.new as Task, ...prev]);
+          if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
+          if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
         })
-        .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
+        .subscribe((status) => {
+           // Only update realtime status, don't affect main connection status visual if API is already OK
+           setIsRealtimeConnected(status === 'SUBSCRIBED');
+        });
     }
-  }, [currentUser?.id, isAuthenticated]);
+  }, [currentUser?.id, isAuthenticated, fetchData]);
+
+  const handleCreateWorkspace = async (data: { name: string; category: string; description: string; type: WorkspaceType }) => {
+    if (!currentUser) return;
+    try {
+      // 1. Buat Workspace di Tabel 'workspaces'
+      const { data: newWs, error } = await supabase.from('workspaces').insert({
+        name: data.name,
+        type: data.type,
+        owner_id: currentUser.id,
+        category: data.category,
+        description: data.description
+      }).select().single();
+
+      if (error) {
+         console.error("Supabase Error:", error);
+         throw error;
+      }
+
+      if (newWs) {
+        // 2. PENTING: Masukkan Diri Sendiri sebagai 'Member' (Owner Role)
+        // Ini memastikan workspace muncul jika query Anda memeriksa tabel workspace_members
+        const { error: memberError } = await supabase.from('workspace_members').insert({
+          workspace_id: newWs.id,
+          user_id: currentUser.id,
+          role: 'owner' // Pastikan role ini sesuai enum di DB Anda (owner/admin)
+        });
+
+        if (memberError) console.error("Warning: Gagal insert member owner", memberError);
+
+        // 3. Update State Lokal (Sidebar langsung update tanpa refresh)
+        setWorkspaces(prev => [...prev, newWs as Workspace]);
+        
+        // 4. Pindah ke Workspace Baru
+        setActiveWorkspaceId(newWs.id);
+        setActiveTab('workspace_view');
+      }
+    } catch (err: any) {
+      console.error("Gagal membuat workspace:", err);
+      // Penanganan Error Khusus 42P17 (Infinite Recursion)
+      if (err.code === '42P17') {
+         alert("Database Policy Error (42P17): Terdeteksi konflik 'Infinite Recursion' pada Policy Database. \n\nSOLUSI: Harap jalankan script SQL 'Pembersih Total' yang baru saja disediakan di Supabase SQL Editor untuk mereset semua policy.");
+      } else {
+         alert("Gagal membuat workspace: " + (err.message || "Unknown error"));
+      }
+    }
+  };
 
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
     setIsFetching(true);
+    
     try {
-      if (editingTask) {
-        await supabase.from('tasks').update(taskData).eq('id', editingTask.id);
+      const payload: any = {
+        title: taskData.title,
+        description: taskData.description || null,
+        status: taskData.status || TaskStatus.TODO,
+        priority: taskData.priority || TaskPriority.MEDIUM,
+        workspace_id: taskData.workspace_id || workspaces[0]?.id || null,
+        parent_id: taskData.parent_id || null, 
+        due_date: taskData.due_date || null,
+        start_date: taskData.start_date || null,
+        is_all_day: taskData.is_all_day ?? true,
+        is_archived: taskData.is_archived ?? false,
+        category: taskData.category || 'General',
+        created_by: currentUser.id
+      };
+
+      if (editingTask && editingTask.id) {
+        const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
+        if (error) throw error;
       } else {
-        const finalTask = {
-          ...taskData,
-          created_by: currentUser.id,
-          status: taskData.status || TaskStatus.TODO,
-          priority: taskData.priority || TaskPriority.MEDIUM,
-          workspace_id: taskData.workspace_id || (workspaces[0]?.id || 'ws-1'),
-          is_archived: false,
-        };
-        const { error } = await supabase.from('tasks').insert(finalTask);
+        payload.created_at = new Date().toISOString();
+        const { error } = await supabase.from('tasks').insert(payload);
         if (error) throw error;
       }
+      
       setIsNewTaskModalOpen(false);
       setEditingTask(null);
-    } catch (err) {
-      console.error("Save task error:", err);
+      fetchData();
+    } catch (err: any) {
+      console.error("Save task failure:", err);
+      alert("Gagal menyimpan agenda: " + (err.message || "Unknown error"));
     } finally {
       setIsFetching(false);
     }
@@ -198,20 +324,47 @@ const App: React.FC = () => {
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-    await supabase.from('tasks').update({ status }).eq('id', id);
+    try {
+      const { error } = await supabase.from('tasks').update({ status }).eq('id', id);
+      if (error) throw error;
+    } catch (err) {
+      fetchData(); 
+    }
   };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setIsAuthenticated(false);
+    setCurrentUser(null);
   };
 
-  if (isAuthLoading) return (
-    <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
-      <div className="w-16 h-16 border-4 border-slate-800 border-t-accent rounded-full animate-spin mb-4" />
-      <h2 className="font-heading text-xl">Inisialisasi...</h2>
-    </div>
-  );
+  const openEditModal = (task: Task) => {
+    setEditingTask(task);
+    setIsNewTaskModalOpen(true);
+  };
+
+  const parentTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
+  
+  const currentWorkspaceTasks = activeWorkspaceId 
+    ? tasks.filter(t => t.workspace_id === activeWorkspaceId)
+    : [];
+
+  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
+
+  if (isAuthLoading || (isAuthenticated && isProfileLoading)) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
+        <div className="relative">
+          <div className="w-24 h-24 border-[10px] border-slate-200 rounded-[32px] animate-spin border-t-accent" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2 className="animate-pulse text-accent" size={28} />
+          </div>
+        </div>
+        <h2 className="mt-10 font-heading text-3xl text-slate-800">Sinkronisasi Cloud...</h2>
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mt-4 animate-pulse">Menyiapkan Workspace TaskPlay</p>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
   if (!currentUser) return null;
@@ -221,103 +374,210 @@ const App: React.FC = () => {
 
   return (
     <div className="h-full w-full bg-background overflow-hidden flex justify-center">
-      <div className="h-full w-full dot-grid flex overflow-hidden text-foreground bg-background">
+      <div className="h-full w-full dot-grid flex overflow-hidden">
         <NewTaskModal 
           isOpen={isNewTaskModalOpen} 
-          onClose={() => setIsNewTaskModalOpen(false)} 
+          onClose={() => { setIsNewTaskModalOpen(false); setEditingTask(null); }} 
           onSave={handleSaveTask} 
           workspaces={workspaces} 
-          googleCalendars={googleCalendars}
+          googleCalendars={googleCalendars} 
           initialData={editingTask}
+          parentTasks={parentTasks}
+          categories={categories}
+          onAddCategory={(cat) => {
+            if (!categories.includes(cat)) {
+              setCategories(prev => [...prev, cat]);
+              setActiveCategories(prev => [...prev, cat]); 
+              setCategoryColors(prev => ({...prev, [cat]: UI_PALETTE[categories.length % UI_PALETTE.length]}));
+            }
+          }}
         />
-
+        
+        <NewWorkspaceModal 
+          isOpen={isNewWorkspaceModalOpen}
+          onClose={() => setIsNewWorkspaceModalOpen(false)}
+          onSave={handleCreateWorkspace}
+        />
+        
         <Sidebar 
-          isOpen={isSidebarOpen} setSidebarOpen={setSidebarOpen} activeTab={activeTab} setActiveTab={setActiveTab}
-          selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} isTasksExpanded={isTasksExpanded} setIsTasksExpanded={setIsTasksExpanded}
-          topLevelTasks={tasks.filter(t => !t.parent_id && !t.is_archived)} tasks={tasks} workspaces={workspaces}
-          handleTaskClick={(t) => { setSelectedTaskId(t.id); setActiveTab('tasks'); }} onLogout={handleLogout} currentUser={currentUser}
-          customBranding={{ name: currentUser.app_settings?.appName, logo: currentUser.app_settings?.appLogo }}
+          isOpen={isSidebarOpen} 
+          setSidebarOpen={setSidebarOpen} 
+          activeTab={activeTab} 
+          setActiveTab={setActiveTab} 
+          selectedTaskId={selectedTaskId} 
+          setSelectedTaskId={setSelectedTaskId} 
+          isTasksExpanded={isTasksExpanded} 
+          setIsTasksExpanded={setIsTasksExpanded} 
+          topLevelTasks={parentTasks} 
+          tasks={tasks} 
+          workspaces={workspaces} 
+          handleTaskClick={(t) => { setSelectedTaskId(t.id); setActiveTab('tasks'); }} 
+          onLogout={handleLogout} 
+          currentUser={currentUser} 
+          role={accountRole}
+          customBranding={{ name: currentUser.app_settings?.appName, logo: currentUser.app_settings?.appLogo }} 
+          onAddWorkspace={() => setIsNewWorkspaceModalOpen(true)}
+          onSelectWorkspace={(id) => { setActiveWorkspaceId(id); setActiveTab('workspace_view'); }}
+          activeWorkspaceId={activeWorkspaceId}
         />
 
-        <TaskInspectModal
-          task={inspectedTask} isOpen={!!inspectedTask} onClose={() => setInspectedTask(null)}
+        <TaskInspectModal 
+          task={inspectedTask} 
+          isOpen={!!inspectedTask} 
+          onClose={() => setInspectedTask(null)} 
           onStatusChange={handleStatusChange} 
-          onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
-          onReschedule={(t) => setReschedulingTask(t)}
-          onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); }}
-          onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); }}
+          onEdit={openEditModal} 
+          onReschedule={(t) => setReschedulingTask(t)} 
+          onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }} 
+          onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }} 
         />
 
-        <RescheduleModal task={reschedulingTask} isOpen={!!reschedulingTask} onClose={() => setReschedulingTask(null)} onSave={async (id, date) => { await supabase.from('tasks').update({ due_date: new Date(date).toISOString() }).eq('id', id); }} />
+        <RescheduleModal 
+          task={reschedulingTask} 
+          isOpen={!!reschedulingTask} 
+          onClose={() => setReschedulingTask(null)} 
+          onSave={async (id, date) => { await supabase.from('tasks').update({ due_date: new Date(date).toISOString() }).eq('id', id); fetchData(); }} 
+        />
 
         <SettingsModal 
-          isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} user={currentUser} role={accountRole}
+          isOpen={isSettingsModalOpen} 
+          onClose={() => setIsSettingsModalOpen(false)} 
+          user={currentUser} 
+          role={accountRole} 
           notificationsEnabled={currentUser.app_settings?.notificationsEnabled ?? true} 
-          onSaveProfile={(p, r, s) => { setIsFetching(true); fetchData(); }}
-          googleAccessToken={googleAccessToken} setGoogleAccessToken={setGoogleAccessToken}
+          onSaveProfile={async (p, r, s) => { await supabase.from('users').update({ ...p, status: r, app_settings: s }).eq('id', currentUser.id); fetchData(); }} 
+          googleAccessToken={googleAccessToken} 
+          setGoogleAccessToken={setGoogleAccessToken} 
         />
-
+        
         <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0">
-          <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b-2 border-slate-100 px-8 py-4 flex items-center justify-between">
+          <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
+            <button className="p-2 border-2 border-slate-800 rounded-xl shadow-pop-active bg-white transition-all hover:-translate-y-0.5" onClick={() => setSidebarOpen(!isSidebarOpen)}>
+              {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
+            </button>
             <div className="flex items-center gap-4">
-              <button className="p-2 border-2 border-slate-800 rounded-lg shadow-pop-active bg-white" onClick={() => setSidebarOpen(!isSidebarOpen)}>
-                {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
-              </button>
-            </div>
-            
-            <div className="flex items-center gap-4">
-              <button onClick={fetchData} className="group flex items-center px-4 py-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all">
+              <button onClick={fetchData} className="group hidden md:flex items-center px-4 py-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all">
                  <div className={`${connStatus.color} mr-2`}>{connStatus.icon}</div>
                  <div className="flex flex-col items-start leading-none pr-3">
-                   <span className="text-[9px] font-black tracking-tighter text-slate-400 uppercase">Status</span>
-                   <span className={`text-[10px] font-bold ${connStatus.color}`}>{connStatus.label}</span>
+                   <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">Database</span>
+                   <span className={`text-[9px] font-bold ${connStatus.color}`}>{connStatus.label}</span>
                  </div>
-                 <RefreshCw size={12} className={`text-slate-300 ${isFetching ? 'animate-spin' : ''}`} />
+                 <RefreshCw size={12} className={`text-slate-300 ${isFetching ? 'animate-spin text-accent' : ''}`} />
               </button>
-              <Button variant="ghost" className="p-2" onClick={() => setIsSettingsModalOpen(true)}><Settings size={20} /></Button>
-              <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer" onClick={() => setActiveTab('profile')}>
+              <Button variant="ghost" onClick={() => setIsSettingsModalOpen(true)} className="p-2 border-2 border-slate-800 rounded-xl bg-white shadow-pop-active transition-all hover:-translate-y-0.5"><Settings size={20} /></Button>
+              <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer group" onClick={() => setActiveTab('profile')}>
                 <div className="text-right hidden sm:block">
-                  <p className="text-xs font-black text-slate-800 leading-none">{currentUser.name}</p>
-                  <p className="text-[10px] font-bold text-slate-400 mt-0.5">{currentUser.email}</p>
+                  <p className="text-xs font-black text-slate-800 leading-none group-hover:text-accent transition-colors">{currentUser.name}</p>
+                  <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{accountRole}</p>
                 </div>
-                <img src={currentUser.avatar_url} className="w-10 h-10 rounded-full border-2 border-slate-800 bg-white" alt="Avatar" />
+                <img src={currentUser.avatar_url} className="w-10 h-10 rounded-xl border-2 border-slate-800 bg-white shadow-pop-active transition-transform group-hover:rotate-6" alt="Avatar" />
               </div>
             </div>
           </header>
 
-          <div className="flex-1 p-8 max-w-7xl mx-auto w-full">
+          <div className="flex-1 p-6 max-w-7xl mx-auto w-full">
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
-            {activeTab === 'team' && <TeamSpace currentWorkspace={workspaces.find(w => w.type === 'team') || null} currentUser={currentUser} />}
+            {activeTab === 'team' && <TeamSpace currentWorkspace={workspaces.find(w => w.type === 'team') || null} currentUser={currentUser} workspaces={workspaces} />}
+            
+            {/* WORKSPACE VIEW: Integrasi Layout Baru */}
+            {activeTab === 'workspace_view' && activeWorkspace && (
+              <WorkspaceView 
+                workspace={activeWorkspace}
+                tasks={currentWorkspaceTasks}
+                onAddTask={() => {
+                  setEditingTask({ workspace_id: activeWorkspaceId } as Task);
+                  setIsNewTaskModalOpen(true);
+                }}
+                onStatusChange={handleStatusChange}
+                onEditTask={openEditModal}
+                onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+              />
+            )}
+
             {activeTab === 'calendar' && (
               <CalendarView 
-                tasks={tasks.filter(t => !t.is_archived)} workspaces={workspaces} onTaskClick={setInspectedTask} userEmail={currentUser.email} googleAccessToken={googleAccessToken} onDayClick={(d) => { setIsNewTaskModalOpen(true); }}
-                sourceColors={sourceColors} setSourceColors={setSourceColors} visibleSources={visibleSources} setVisibleSources={setVisibleSources}
-                googleEvents={googleEvents} setGoogleEvents={setGoogleEvents} googleCalendars={googleCalendars} setGoogleCalendars={setGoogleCalendars}
+                tasks={tasks} 
+                workspaces={workspaces} 
+                onTaskClick={setInspectedTask} 
+                userEmail={currentUser.email} 
+                googleAccessToken={googleAccessToken} 
+                onDayClick={(date) => {
+                  const offset = date.getTimezoneOffset();
+                  const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+                  const dateStr = localDate.toISOString();
+                  setEditingTask({ due_date: dateStr, start_date: dateStr } as Task);
+                  setIsNewTaskModalOpen(true);
+                }}
+                sourceColors={sourceColors}
+                setSourceColors={setSourceColors}
+                visibleSources={visibleSources}
+                setVisibleSources={setVisibleSources}
+                googleEvents={googleEvents}
+                setGoogleEvents={setGoogleEvents}
+                googleCalendars={googleCalendars}
+                setGoogleCalendars={setGoogleCalendars}
+                categories={categories}
+                setCategories={setCategories}
+                activeCategories={activeCategories}
+                setActiveCategories={setActiveCategories}
+                categoryColors={categoryColors}
+                setCategoryColors={setCategoryColors}
               />
             )}
             {activeTab === 'tasks' && (
               selectedTaskId && selectedTask ? (
                 <TaskDetailView 
-                  parentTask={selectedTask} subTasks={tasks.filter(t => t.parent_id === selectedTaskId && !t.is_archived)} onBack={() => setSelectedTaskId(null)}
-                  onStatusChange={handleStatusChange} onAddTask={() => setIsNewTaskModalOpen(true)} onEditTask={setEditingTask}
-                  onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); }} 
-                  onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); }} 
+                  parentTask={selectedTask} 
+                  subTasks={tasks.filter(t => t.parent_id === selectedTaskId && !t.is_archived)} 
+                  onBack={() => setSelectedTaskId(null)}
+                  onStatusChange={handleStatusChange} 
+                  onAddTask={() => {
+                    setEditingTask({ parent_id: selectedTask.id, workspace_id: selectedTask.workspace_id } as Task);
+                    setIsNewTaskModalOpen(true);
+                  }} 
+                  onEditTask={openEditModal}
+                  onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }} 
+                  onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }} 
                   priorityFilter={priorityFilter} onPriorityFilterChange={setPriorityFilter}
                   onInspectTask={setInspectedTask} onRescheduleTask={setReschedulingTask}
                 />
               ) : (
                 <div className="space-y-6">
-                  <div className="flex justify-between items-center">
-                    <h2 className="text-4xl font-heading">My Board</h2>
-                    <Button variant="primary" onClick={() => setIsNewTaskModalOpen(true)}>+ New Task</Button>
+                  <div className="flex justify-between items-end">
+                    <div>
+                      <h2 className="text-4xl font-heading tracking-tighter">My Board</h2>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola alur kerja personal Anda</p>
+                    </div>
+                    <Button variant="primary" onClick={() => { setEditingTask(null); setIsNewTaskModalOpen(true); }} className="px-6 py-3 shadow-pop text-md font-black">+ New Task</Button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-10">
                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.DONE].map(status => (
                       <div key={status} className="space-y-4">
-                        <h3 className="font-heading text-lg pb-2 border-b-2 border-slate-200 uppercase tracking-widest">{status.replace('_', ' ')}</h3>
-                        {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).map(task => <TaskItem key={task.id} task={task} onStatusChange={handleStatusChange} onClick={setInspectedTask} />)}
-                        {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length === 0 && <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl text-[10px] font-bold text-slate-400 uppercase tracking-widest">Kosong</div>}
+                        <div className="flex items-center justify-between border-b-2 border-slate-800 pb-2">
+                           <h3 className="font-heading text-lg uppercase tracking-widest">{status.replace('_', ' ')}</h3>
+                           <span className="text-[9px] font-black bg-slate-800 text-white px-2 py-0.5 rounded-lg">
+                             {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length}
+                           </span>
+                        </div>
+                        <div className="space-y-3">
+                          {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).map(task => (
+                            <TaskItem 
+                              key={task.id} 
+                              task={task} 
+                              onStatusChange={handleStatusChange} 
+                              onClick={setInspectedTask}
+                              onEdit={openEditModal}
+                              onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+                              onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }}
+                            />
+                          ))}
+                          {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length === 0 && (
+                            <div className="py-10 text-center border-2 border-dashed border-slate-100 rounded-2xl opacity-50">
+                               <p className="text-[9px] font-black uppercase text-slate-300 tracking-widest italic">Belum ada task</p>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

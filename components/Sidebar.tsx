@@ -6,15 +6,13 @@ import {
   Calendar as CalendarIcon, 
   Users, 
   Plus, 
-  ChevronRight, 
   LogOut, 
   X, 
-  Layers, 
   FolderArchive, 
   ChevronDown,
-  Clock as ClockIcon
+  Briefcase
 } from 'lucide-react';
-import { Task, Workspace, WorkspaceType, User } from '../types';
+import { Task, Workspace, User } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -31,10 +29,14 @@ interface SidebarProps {
   handleTaskClick: (task: Task) => void;
   onLogout: () => void;
   currentUser: User | null;
+  role?: string;
   customBranding?: {
     name?: string;
     logo?: string;
   };
+  onAddWorkspace?: () => void;
+  onSelectWorkspace?: (workspaceId: string) => void;
+  activeWorkspaceId?: string | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -47,12 +49,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isTasksExpanded,
   setIsTasksExpanded,
   topLevelTasks,
-  tasks,
   workspaces,
-  handleTaskClick,
   onLogout,
   currentUser,
-  customBranding
+  role = 'Owner',
+  customBranding,
+  onAddWorkspace,
+  onSelectWorkspace,
+  activeWorkspaceId
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -73,88 +77,96 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const formattedTime = currentTime.toLocaleTimeString('en-US', {
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
-    second: '2-digit',
     hour12: true
   });
 
+  const formattedDate = currentTime.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+
+  const isMember = role === 'Member';
+
   return (
     <aside className={`
-      fixed inset-y-0 left-0 z-[70] bg-white transition-all duration-300 ease-in-out flex flex-col h-screen border-r-4 border-slate-800
+      fixed inset-y-0 left-0 z-[70] bg-white transition-all duration-300 ease-in-out flex flex-col h-screen border-r-2 border-slate-800
       ${isOpen 
-        ? 'w-72 translate-x-0 shadow-2xl lg:shadow-none' 
-        : 'w-72 -translate-x-full lg:w-0 lg:translate-x-0 lg:border-r-0 lg:overflow-hidden'
+        ? 'w-64 translate-x-0 shadow-2xl lg:shadow-none' 
+        : 'w-64 -translate-x-full lg:w-0 lg:translate-x-0 lg:border-r-0 lg:overflow-hidden'
       }
       lg:sticky lg:top-0 shrink-0
     `}>
-      <div className="flex flex-col h-full w-72 shrink-0">
+      <div className="flex flex-col h-full w-64 shrink-0">
         {/* Branding & Profil Section */}
-        <div className="p-6 shrink-0 space-y-4">
+        <div className="p-5 shrink-0 space-y-8">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               {appLogo ? (
-                <div className="w-16 h-16 shrink-0 flex items-center justify-center">
+                <div className="w-10 h-10 shrink-0 flex items-center justify-center">
                   <img src={appLogo} className="max-w-full max-h-full object-contain" alt="App Logo" />
                 </div>
               ) : (
-                <div className="w-14 h-14 bg-accent rounded-2xl border-2 border-slate-800 shadow-pop flex items-center justify-center text-white shrink-0">
-                  <CheckSquare size={30} strokeWidth={3} />
+                <div className="w-10 h-10 bg-accent rounded-xl border-2 border-slate-800 shadow-pop-active flex items-center justify-center text-white shrink-0">
+                  <CheckSquare size={20} strokeWidth={3} />
                 </div>
               )}
               
               <div className="min-w-0 flex-1">
-                <h1 className="text-3xl font-heading tracking-tighter text-foreground leading-[1] whitespace-normal break-words overflow-hidden">
+                <h1 className="text-xl font-heading tracking-tighter text-foreground leading-[1] whitespace-normal break-words overflow-hidden">
                   {appName}
                 </h1>
               </div>
             </div>
-            <button className="lg:hidden p-1 hover:bg-muted rounded-lg ml-2" onClick={() => setSidebarOpen(false)}>
-              <X size={20} />
+            <button className="lg:hidden p-1 hover:bg-muted rounded-lg ml-1" onClick={() => setSidebarOpen(false)}>
+              <X size={18} />
             </button>
           </div>
 
           {/* User Greeting Area */}
-          <div className="bg-slate-50 border-2 border-slate-800 rounded-2xl p-4 shadow-pop-active transition-all hover:bg-white group">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">Halo, {currentUser?.name?.split(' ')[0]}!</span>
-              <span className="text-lg font-heading text-slate-800 leading-none mt-1">Selamat {getGreeting()}</span>
+          <div className="bg-slate-50 border-2 border-slate-800 rounded-xl p-4 shadow-pop-active transition-all hover:bg-white group">
+            <div className="flex flex-col gap-0">
+              <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Halo, {currentUser?.name?.split(' ')[0]}!</span>
+              <span className="text-lg font-heading text-slate-800 leading-tight">Selamat {getGreeting()}</span>
               
-              <div className="flex items-center gap-2 mt-3 pt-3 border-t-2 border-slate-100 group-hover:border-slate-800/10 transition-colors">
-                <ClockIcon size={14} className="text-secondary" />
-                <span className="text-sm font-black font-mono text-slate-600 tracking-wider">
-                  {formattedTime}
-                </span>
+              <div className="mt-2 pt-2 border-t-2 border-slate-100">
+                 <span className="text-3xl font-heading text-slate-800 tracking-tighter block text-left leading-none">
+                   {formattedTime}
+                 </span>
+                 <span className="text-xs font-bold text-slate-400 mt-1 block tracking-wider">
+                   {formattedDate}
+                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Divider Utama */}
-        <div className="px-6 mb-4">
-          <div className="h-1 bg-slate-800 rounded-full w-full opacity-10" />
+        <div className="px-5 mb-3">
+          <div className="h-[1px] bg-slate-100 rounded-full w-full" />
         </div>
 
-        {/* Navigation - Scrollable Area */}
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-6 pb-6">
-          <nav className="space-y-2">
-            <NavItem icon={<LayoutGrid size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+        {/* Navigation */}
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-5 pb-5 flex flex-col">
+          <nav className="space-y-1">
+            <NavItem icon={<LayoutGrid size={18} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
             
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <button 
                 onClick={() => setIsTasksExpanded(!isTasksExpanded)} 
-                className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'tasks' ? 'bg-accent/5 text-accent' : 'text-mutedForeground hover:bg-muted'}`}
+                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'tasks' ? 'bg-accent/5 text-accent' : 'text-mutedForeground hover:bg-muted'}`}
               >
-                <div className="flex items-center gap-3">
-                  <CheckSquare size={20} className={activeTab === 'tasks' ? 'text-accent' : 'text-slate-400'} />
-                  <span>My Tasks</span>
+                <div className="flex items-center gap-2.5">
+                  <CheckSquare size={18} className={activeTab === 'tasks' ? 'text-accent' : 'text-slate-400'} />
+                  <span className="text-sm">My Tasks</span>
                 </div>
-                <ChevronDown size={16} className={`transition-transform ${isTasksExpanded ? 'rotate-180' : ''}`} />
+                <ChevronDown size={14} className={`transition-transform ${isTasksExpanded ? 'rotate-180' : ''}`} />
               </button>
               
               {isTasksExpanded && (
-                <div className="ml-6 space-y-1 pl-2 border-l-2 border-slate-100 animate-in slide-in-from-top-2 duration-200">
-                  <button onClick={() => { setActiveTab('tasks'); setSelectedTaskId(null); }} className="w-full text-left px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600">All Tasks</button>
+                <div className="ml-5 space-y-0.5 pl-2 border-l-2 border-slate-100 animate-in slide-in-from-top-2 duration-200">
+                  <button onClick={() => { setActiveTab('tasks'); setSelectedTaskId(null); }} className="w-full text-left px-2 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600">All Tasks</button>
                   {topLevelTasks.map((task) => (
                     <SubNavItem key={task.id} label={task.title} active={selectedTaskId === task.id} onClick={() => { setSelectedTaskId(task.id); setActiveTab('tasks'); }} priority={task.priority} />
                   ))}
@@ -162,18 +174,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
 
-            <NavItem icon={<CalendarIcon size={20} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
-            <NavItem icon={<Users size={20} />} label="Team Space" active={activeTab === 'team'} onClick={() => setActiveTab('team')} />
-            <div className="pt-4 border-t-2 border-slate-50 mt-4">
-              <NavItem icon={<FolderArchive size={20} />} label="Archive" active={activeTab === 'archive'} onClick={() => setActiveTab('archive')} />
+            <NavItem icon={<CalendarIcon size={18} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
+            
+            {/* Team Space & Archive Moved ABOVE Workspaces */}
+            {!isMember && (
+              <NavItem icon={<Users size={18} />} label="Team Space" active={activeTab === 'team'} onClick={() => setActiveTab('team')} />
+            )}
+            
+            <div className="pb-2">
+              <NavItem icon={<FolderArchive size={18} />} label="Archive" active={activeTab === 'archive'} onClick={() => setActiveTab('archive')} />
             </div>
+
+            {/* WORKSPACES SECTION - Moved to Bottom (inside scrollable area) */}
+            <div className="pt-4 mt-2 border-t-2 border-slate-100">
+              <div className="flex items-center justify-between px-3 mb-2 pb-2 border-b border-slate-50">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Workspaces</span>
+                {onAddWorkspace && (
+                  <button 
+                    onClick={onAddWorkspace} 
+                    className="p-1.5 bg-slate-100 hover:bg-accent hover:text-white rounded-lg text-slate-500 transition-all shadow-sm hover:shadow-pop-active"
+                    title="Buat Workspace Baru"
+                  >
+                    <Plus size={12} strokeWidth={4} />
+                  </button>
+                )}
+              </div>
+              <div className="space-y-1">
+                {workspaces.map(ws => (
+                   <button 
+                    key={ws.id}
+                    onClick={() => onSelectWorkspace?.(ws.id)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-bold transition-all text-sm group ${activeWorkspaceId === ws.id && activeTab === 'workspace_view' ? 'bg-secondary text-white shadow-pop border-2 border-slate-800' : 'text-mutedForeground hover:bg-muted'}`}
+                   >
+                     <Briefcase size={16} className={activeWorkspaceId === ws.id && activeTab === 'workspace_view' ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'} />
+                     <span className="truncate flex-1 text-left">{ws.name}</span>
+                     {activeWorkspaceId === ws.id && activeTab === 'workspace_view' && <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
+                   </button>
+                ))}
+                {workspaces.length === 0 && (
+                  <div className="px-3 py-4 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">No Workspaces</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
           </nav>
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 px-6 py-4 mt-auto">
-          <button onClick={onLogout} className="w-full bg-secondary border-2 border-slate-800 rounded-lg py-2 px-3 shadow-pop-active flex items-center justify-center gap-2 text-white font-black uppercase text-[10px] tracking-widest">
-            <LogOut size={14} />
+        <div className="shrink-0 px-5 py-3 mt-auto border-t border-slate-50">
+          <button onClick={onLogout} className="w-full bg-secondary border-2 border-slate-800 rounded-lg py-2 px-2 shadow-pop-active flex items-center justify-center gap-2 text-white font-black uppercase text-[9px] tracking-widest transition-transform active:translate-y-0.5 active:shadow-none">
+            <LogOut size={12} />
             <span>Logout</span>
           </button>
         </div>
@@ -183,14 +235,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 };
 
 const NavItem: React.FC<any> = ({ icon, label, active, onClick }) => (
-  <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${active ? 'bg-accent text-white shadow-pop border-2 border-slate-800' : 'text-mutedForeground hover:bg-muted'}`}>
+  <button onClick={onClick} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-bold transition-all text-sm ${active ? 'bg-accent text-white shadow-pop border-2 border-slate-800' : 'text-mutedForeground hover:bg-muted'}`}>
     {icon} {label}
   </button>
 );
 
 const SubNavItem: React.FC<any> = ({ label, active, onClick, priority }) => (
-  <button onClick={onClick} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all text-left ${active ? 'text-accent' : 'text-mutedForeground hover:text-foreground'}`}>
-    <div className={`w-1.5 h-1.5 rounded-full ${priority === 'high' ? 'bg-secondary' : 'bg-tertiary'}`} />
+  <button onClick={onClick} className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all text-left ${active ? 'text-accent' : 'text-mutedForeground hover:text-foreground'}`}>
+    <div className={`w-1 h-1 rounded-full ${priority === 'high' ? 'bg-secondary' : 'bg-tertiary'}`} />
     <span className="truncate">{label}</span>
   </button>
 );
