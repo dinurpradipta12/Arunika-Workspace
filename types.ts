@@ -31,6 +31,8 @@ export interface User {
   created_at: string;
   last_seen?: string;
   status?: string;
+  is_active?: boolean;
+  temp_password?: string;
   app_settings?: {
     appName?: string;
     appLogo?: string;

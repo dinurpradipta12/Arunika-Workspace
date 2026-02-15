@@ -1,6 +1,6 @@
 
 -- ==========================================
--- SCRIPT DATABASE TASKPLAY (DEV MODE: AUTO CONFIRM v13 - JOIN CODE & NOTIFS)
+-- SCRIPT DATABASE TASKPLAY (DEV MODE: AUTO CONFIRM v14 - ADMIN CONTROL)
 -- ==========================================
 
 -- 1. DROP EXISTING TABLES (CLEANUP)
@@ -26,9 +26,11 @@ CREATE TABLE public.users (
   username TEXT,
   name TEXT,
   avatar_url TEXT,
-  status TEXT DEFAULT 'Member',
+  status TEXT DEFAULT 'Member', -- System Role
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  app_settings JSONB DEFAULT '{}'::jsonb
+  app_settings JSONB DEFAULT '{}'::jsonb,
+  is_active BOOLEAN DEFAULT true, -- Status Login Active/Non-Active
+  temp_password TEXT -- Disimpan untuk Admin (Sesuai Request)
 );
 
 CREATE TABLE public.workspaces (
@@ -39,16 +41,16 @@ CREATE TABLE public.workspaces (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   category TEXT DEFAULT 'General',
   description TEXT,
-  join_code TEXT DEFAULT UPPER(substring(md5(random()::text) from 0 for 7)) -- Kode Unik 6 Karakter
+  join_code TEXT DEFAULT UPPER(substring(md5(random()::text) from 0 for 7)) 
 );
 
 CREATE TABLE public.workspace_members (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   workspace_id TEXT REFERENCES public.workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-  role TEXT DEFAULT 'member',
+  role TEXT DEFAULT 'member', -- Workspace Role (admin/member)
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(workspace_id, user_id) -- Mencegah duplikat member
+  UNIQUE(workspace_id, user_id) 
 );
 
 CREATE TABLE public.tasks (
@@ -74,7 +76,7 @@ CREATE TABLE public.tasks (
 CREATE TABLE public.notifications (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id TEXT REFERENCES public.users(id) ON DELETE CASCADE,
-  type TEXT NOT NULL, -- 'join_workspace', 'task_assigned', etc
+  type TEXT NOT NULL, 
   title TEXT NOT NULL,
   message TEXT NOT NULL,
   is_read BOOLEAN DEFAULT false,
@@ -101,14 +103,15 @@ CREATE TRIGGER on_auth_user_signup_confirm
 CREATE OR REPLACE FUNCTION public.handle_new_user() 
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.users (id, email, name, username, avatar_url, status)
+  INSERT INTO public.users (id, email, name, username, avatar_url, status, is_active)
   VALUES (
     new.id::text, 
     new.email, 
     COALESCE(new.raw_user_meta_data->>'name', new.email),
     COALESCE(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1)),
     COALESCE(new.raw_user_meta_data->>'avatar_url', ''),
-    'Member'
+    'Member',
+    true
   )
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
@@ -176,14 +179,15 @@ BEGIN
     UPDATE auth.users SET email_confirmed_at = NOW() WHERE email_confirmed_at IS NULL;
 END $$;
 
-INSERT INTO public.users (id, email, name, username, avatar_url, status)
+INSERT INTO public.users (id, email, name, username, avatar_url, status, is_active)
 SELECT 
   id::text, 
   email, 
   COALESCE(raw_user_meta_data->>'name', email), 
   COALESCE(raw_user_meta_data->>'username', split_part(email, '@', 1)), 
   COALESCE(raw_user_meta_data->>'avatar_url', ''),
-  'Member'
+  'Member',
+  true
 FROM auth.users
 ON CONFLICT (id) DO NOTHING;
 
@@ -207,7 +211,7 @@ ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
 -- Users
 CREATE POLICY "Users view all" ON public.users FOR SELECT USING (true);
-CREATE POLICY "Users update self" ON public.users FOR UPDATE USING (auth.uid()::text = id);
+CREATE POLICY "Users update self or admin" ON public.users FOR UPDATE USING (true); -- Simplified for Admin functionality
 CREATE POLICY "System insert users" ON public.users FOR INSERT WITH CHECK (true);
 
 -- Workspaces

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   UserPlus, 
@@ -18,7 +19,10 @@ import {
   Copy,
   Hash,
   Briefcase,
-  Plus
+  Plus,
+  Eye,
+  EyeOff,
+  UserCheck
 } from 'lucide-react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
@@ -46,9 +50,8 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   const [selectedMember, setSelectedMember] = useState<any | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [memberActionMenuId, setMemberActionMenuId] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isTogglingAccess, setIsTogglingAccess] = useState(false);
   const [isAddingToWorkspace, setIsAddingToWorkspace] = useState(false);
+  const [showMemberPassword, setShowMemberPassword] = useState(false);
   
   // Registration Form State
   const [newEmail, setNewEmail] = useState('');
@@ -104,13 +107,12 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
           role,
           user_id,
           created_at,
-          users:user_id (id, name, email, username, avatar_url, status)
+          users:user_id (id, name, email, username, avatar_url, status, is_active, temp_password)
         `)
         .eq('workspace_id', activeWsId)
         .order('created_at', { ascending: false });
 
       if (error) {
-         // Fallback logic omitted for brevity, keeping existing flow
          throw error;
       } else {
         setMembers(data || []);
@@ -154,21 +156,21 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     try {
       // 1. SignUp User
       const { data: authData, error: authError } = await supabase.auth.signUp({
-       email: cleanEmail,
-       password: newPassword,
-       options: {
-       emailRedirectTo: `${window.location.origin}/auth/callback`,
-        data: {
-        name: newName,
-         username: cleanUsername,
-          avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
-         }
-         }
+  email: cleanEmail,
+  password: newPassword,
+  options: {
+    emailRedirectTo: `${window.location.origin}/auth/callback`,
+    data: {
+      name: newName,
+      username: cleanUsername,
+      avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
+      }
+    }
       });
       if (authError) throw authError;
 
       if (authData.user) {
-        // 2. Insert to public.users
+        // 2. Insert/Update to public.users with temp_password
         const newUser = authData.user;
         const { error: userError } = await supabase.from('users').upsert({
           id: newUser.id,
@@ -176,7 +178,9 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
           username: cleanUsername, 
           name: newName,
           avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
-          status: newRole === MemberRole.ADMIN ? 'Admin' : 'Member',
+          status: 'Member',
+          is_active: true,
+          temp_password: newPassword, // Simpan password (Sesuai request Admin)
           app_settings: { appName: 'TaskPlay' }
         });
 
@@ -236,15 +240,63 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     }
   };
 
+  const handleToggleActive = async (currentStatus: boolean) => {
+    if (!selectedMember) return;
+    const newStatus = !currentStatus;
+    
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ is_active: newStatus })
+        .eq('id', selectedMember.user_id);
+
+      if (error) throw error;
+      
+      // Update local state
+      setSelectedMember({
+        ...selectedMember,
+        users: { ...selectedMember.users, is_active: newStatus }
+      });
+      fetchMembers(false);
+    } catch (err: any) {
+      alert("Gagal mengubah status: " + err.message);
+    }
+  };
+
+  const handleChangeRole = async (newRole: string) => {
+    if (!selectedMember) return;
+    
+    try {
+      const { error } = await supabase
+        .from('workspace_members')
+        .update({ role: newRole })
+        .eq('id', selectedMember.id);
+
+      if (error) throw error;
+      
+      setSelectedMember({ ...selectedMember, role: newRole });
+      fetchMembers(false);
+    } catch (err: any) {
+      alert("Gagal mengubah role: " + err.message);
+    }
+  };
+
   const handleRowClick = (member: any) => {
     setSelectedMember(member);
     setIsDetailOpen(true);
-    // Reset selection for add to workspace
     setTargetAddWsId('');
+    setShowMemberPassword(false);
   };
 
-  const handleToggleAccess = async () => { /* Logic same as previous */ };
-  const handleDeleteUser = async (targetUserId: string, targetMemberId: string) => { /* Logic same as previous */ };
+  const handleDeleteUser = async (targetUserId: string, targetMemberId: string) => {
+     if(confirm("Yakin hapus user ini dari workspace?")) {
+        try {
+           await supabase.from('workspace_members').delete().eq('id', targetMemberId);
+           fetchMembers(false);
+           setIsDetailOpen(false);
+        } catch(e) { console.error(e); }
+     }
+  };
 
   return (
     <div className="space-y-12 pt-6 animate-in fade-in slide-in-from-right-4 duration-500 pb-20">
@@ -342,6 +394,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                   <tr className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
                     <th className="px-4 pb-2">User</th>
                     <th className="px-4 pb-2">Username</th>
+                    <th className="px-4 pb-2">Status</th>
                     <th className="px-4 pb-2">Role</th>
                     <th className="px-4 pb-2 text-right">Aksi</th>
                   </tr>
@@ -368,6 +421,13 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                       </td>
                       <td className="bg-slate-50 border-y-2 border-slate-800 px-4 py-4 group-hover:bg-accent/5 transition-colors">
                         <span className="text-[10px] font-bold text-slate-500">@{member.users?.username || '-'}</span>
+                      </td>
+                      <td className="bg-slate-50 border-y-2 border-slate-800 px-4 py-4 group-hover:bg-accent/5 transition-colors">
+                         {member.users?.is_active === false ? (
+                           <span className="text-[9px] font-black uppercase px-2 py-1 rounded-full border border-slate-200 bg-slate-200 text-slate-500">Non-Aktif</span>
+                         ) : (
+                           <span className="text-[9px] font-black uppercase px-2 py-1 rounded-full border border-quaternary bg-quaternary text-white">Aktif</span>
+                         )}
                       </td>
                       <td className="bg-slate-50 border-y-2 border-slate-800 px-4 py-4 group-hover:bg-accent/5 transition-colors">
                          <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border border-slate-800 ${member.role === 'admin' ? 'bg-accent text-white' : 'bg-white'}`}>{member.role}</span>
@@ -411,17 +471,84 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                 {/* Profile Header */}
                 <div className="flex items-center gap-4">
                    <img src={selectedMember.users?.avatar_url} className="w-20 h-20 rounded-2xl border-4 border-slate-800 bg-slate-100 shadow-sm" alt="User Avatar" />
-                   <div>
+                   <div className="flex-1">
                       <h3 className="text-xl font-heading text-slate-900 leading-none">{selectedMember.users?.name}</h3>
                       <p className="text-sm font-bold text-slate-500 mt-1">@{selectedMember.users?.username}</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        {/* ROLE SELECTOR */}
+                        <div className="relative inline-block">
+                           <select 
+                             value={selectedMember.role}
+                             onChange={(e) => handleChangeRole(e.target.value)}
+                             className="appearance-none bg-slate-100 border-2 border-slate-300 text-xs font-black uppercase px-2 py-1 pr-6 rounded-lg outline-none focus:border-accent"
+                           >
+                             <option value="member">Member</option>
+                             <option value="admin">Admin</option>
+                           </select>
+                           <UserCheck size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                        </div>
+                      </div>
                    </div>
                 </div>
 
                 <div className="h-[1px] bg-slate-100 w-full" />
+                
+                {/* Active / Inactive Switch */}
+                <div className="flex items-center justify-between p-4 bg-slate-50 border-2 border-slate-200 rounded-xl">
+                   <div className="flex items-center gap-3">
+                      <Power size={20} className={selectedMember.users?.is_active !== false ? 'text-quaternary' : 'text-slate-400'} />
+                      <div>
+                         <p className="text-xs font-black uppercase text-slate-800">Status Akun</p>
+                         <p className="text-[10px] font-bold text-slate-500">
+                           {selectedMember.users?.is_active !== false ? 'User dapat login' : 'Akses login diblokir'}
+                         </p>
+                      </div>
+                   </div>
+                   <button 
+                     onClick={() => handleToggleActive(selectedMember.users?.is_active ?? true)}
+                     className={`w-12 h-6 rounded-full border-2 border-slate-800 relative transition-colors ${selectedMember.users?.is_active !== false ? 'bg-quaternary' : 'bg-slate-300'}`}
+                   >
+                     <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white border-2 border-slate-800 transition-all ${selectedMember.users?.is_active !== false ? 'left-6' : 'left-1'}`} />
+                   </button>
+                </div>
+
+                {/* Password Viewer (Admin Request) */}
+                <div className="space-y-2">
+                   <label className="text-xs font-bold uppercase text-slate-500 flex items-center gap-2"><Key size={14} /> Password User</label>
+                   <div className="flex gap-2">
+                      <div className="flex-1 relative">
+                         <input 
+                           type={showMemberPassword ? "text" : "password"}
+                           value={selectedMember.users?.temp_password || "Tidak tersedia"}
+                           readOnly
+                           className="w-full pl-3 pr-10 py-2 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-xs text-slate-600 outline-none"
+                         />
+                         <button 
+                           onClick={() => setShowMemberPassword(!showMemberPassword)}
+                           className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                         >
+                            {showMemberPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                         </button>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        className="bg-white border-2 border-slate-200 px-3"
+                        onClick={() => {
+                          if (selectedMember.users?.temp_password) {
+                             navigator.clipboard.writeText(selectedMember.users.temp_password);
+                             alert("Password disalin!");
+                          }
+                        }}
+                      >
+                         <Copy size={14} />
+                      </Button>
+                   </div>
+                   <p className="text-[9px] text-slate-400 italic">Hanya password yang dibuat oleh Admin via Team Space yang terlihat disini.</p>
+                </div>
 
                 {/* Add to Another Workspace Feature */}
                 {isOwner && (
-                  <div className="space-y-3">
+                  <div className="space-y-3 pt-2 border-t border-slate-100">
                     <label className="text-xs font-bold uppercase text-slate-500 flex items-center gap-2"><Briefcase size={14} /> Beri Akses Workspace Lain</label>
                     <div className="flex gap-2">
                        <select 

@@ -30,7 +30,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
       if (!isEmail) {
         // LOGIKA HYBRID:
-        // 1. Coba cari di tabel public.users (untuk user baru yang daftar pakai email asli)
         const cleanUsername = identifier.trim().toLowerCase();
         
         const { data: userData, error: fetchError } = await supabase
@@ -40,12 +39,9 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           .single();
 
         if (userData && userData.email) {
-           // User ditemukan di database modern
            loginEmail = userData.email;
         } else {
-           // 2. FALLBACK LEGACY (PENTING UNTUK ADMIN LAMA)
-           // Jika username tidak ada di public.users, asumsikan ini akun lama (arunika)
-           // yang menggunakan format dummy @taskplay.com
+           // Fallback Legacy
            console.warn("Username tidak ditemukan di public DB, mencoba format legacy...");
            loginEmail = `${cleanUsername}@taskplay.com`;
         }
@@ -63,7 +59,19 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
       if (authError) throw authError;
 
+      // CEK STATUS ACTIVE/INACTIVE
       if (data.session) {
+         const { data: userProfile, error: profileError } = await supabase
+            .from('users')
+            .select('is_active')
+            .eq('id', data.session.user.id)
+            .single();
+
+         if (userProfile && userProfile.is_active === false) {
+             await supabase.auth.signOut();
+             throw new Error("Akun Anda telah dinonaktifkan oleh Administrator.");
+         }
+
         onLoginSuccess();
       } else {
         throw new Error("Sesi tidak valid.");
@@ -82,6 +90,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       } else if (msg.includes("invalid login credentials")) {
          setErrorState({
            message: "Username atau Password salah.",
+           isConfirmationError: false
+         });
+      } else if (msg.includes("dinonaktifkan")) {
+         setErrorState({
+           message: "Akses Ditolak: Akun Non-Aktif.",
            isConfirmationError: false
          });
       } else {
