@@ -317,6 +317,48 @@ const App: React.FC = () => {
     }
   };
 
+  const handleUpdateProfile = async (profileData: Partial<User>, newRole: string, settingsUpdate: any) => {
+    if (!currentUser) return;
+    
+    try {
+        const updates = {
+            ...profileData,
+            status: newRole,
+            app_settings: settingsUpdate
+        };
+
+        const { error } = await supabase
+            .from('users')
+            .update(updates)
+            .eq('id', currentUser.id);
+        
+        if (error) throw error;
+
+        // CRITICAL FIX: Update state lokal agar UI langsung berubah
+        setCurrentUser(prev => {
+            if (!prev) return null;
+            return {
+                ...prev,
+                ...profileData,
+                status: newRole,
+                app_settings: settingsUpdate
+            };
+        });
+        
+        // Update Role state jika berubah
+        const calculatedRole = (newRole?.toLowerCase() === 'admin' || newRole?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
+        setAccountRole(calculatedRole);
+        
+        // Optional: Trigger global fetch jika diperlukan (tapi state update di atas sudah cukup untuk UI)
+        fetchData(); 
+        
+        alert("Data profil berhasil disimpan!");
+    } catch (err: any) {
+        console.error("Update profil gagal:", err);
+        alert("Gagal menyimpan perubahan: " + err.message);
+    }
+  };
+
   const handleStatusChange = async (id: string, status: TaskStatus) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
     try {
@@ -455,7 +497,7 @@ const App: React.FC = () => {
           user={currentUser} 
           role={accountRole} 
           notificationsEnabled={currentUser.app_settings?.notificationsEnabled ?? true} 
-          onSaveProfile={async (p, r, s) => { await supabase.from('users').update({ ...p, status: r, app_settings: s }).eq('id', currentUser.id); fetchData(); }} 
+          onSaveProfile={handleUpdateProfile} 
           googleAccessToken={googleAccessToken} 
           setGoogleAccessToken={setGoogleAccessToken} 
         />

@@ -1,9 +1,9 @@
 
 -- ==========================================
--- SCRIPT DATABASE TASKPLAY (FINAL FIX - RECURSION & 500 ERROR)
+-- SCRIPT DATABASE TASKPLAY (RLS TYPE CAST FIX FINAL)
 -- ==========================================
 
--- 1. PASTIKAN TABEL UTAMA ADA
+-- 1. Setup Tabel Dasar (Idempotent)
 CREATE TABLE IF NOT EXISTS public.users (
   id TEXT PRIMARY KEY,
   email TEXT,
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS public.tasks (
   google_calendar_id TEXT
 );
 
--- 2. BERSIHKAN POLICY LAMA (Reset Total)
+-- 2. RESET TOTAL POLICY & FUNCTION
 DO $$ 
 DECLARE 
     pol record; 
@@ -67,43 +67,43 @@ BEGIN
     END LOOP;
 END $$;
 
--- 3. FUNGSI BYPASS RLS (The Chain Breaker)
--- Fungsi ini membaca workspace_members SECARA LANGSUNG (bypassing RLS)
--- Ini memutus rantai: Workspaces -> Policy -> Fungsi -> Raw Data (Stop)
+-- 3. FUNGSI BYPASS RLS (Jalur Cepat dengan Casting)
 DROP FUNCTION IF EXISTS public.get_my_workspace_ids();
 CREATE OR REPLACE FUNCTION public.get_my_workspace_ids()
 RETURNS SETOF text
 LANGUAGE sql
-SECURITY DEFINER -- Berjalan sebagai superuser/creator, bypass RLS tabel
+SECURITY DEFINER
 SET search_path = public
 STABLE
 AS $$
-    SELECT workspace_id 
+    SELECT workspace_id::text  -- Pastikan output selalu text
     FROM public.workspace_members 
-    WHERE user_id = auth.uid()::text
+    WHERE user_id::text = auth.uid()::text -- Bandingkan Text vs Text
 $$;
 
--- 4. PERBAIKI CONSTRAINT
-ALTER TABLE public.workspace_members DROP CONSTRAINT IF EXISTS workspace_members_user_id_fkey;
-ALTER TABLE public.workspace_members 
-  ADD CONSTRAINT workspace_members_user_id_fkey 
-  FOREIGN KEY (user_id) 
-  REFERENCES public.users(id) 
-  ON DELETE CASCADE;
+-- 4. PERBAIKI CONSTRAINT FOREIGN KEY (Safe Mode)
+DO $$
+BEGIN
+    BEGIN
+        ALTER TABLE public.workspace_members DROP CONSTRAINT IF EXISTS workspace_members_user_id_fkey;
+        ALTER TABLE public.workspace_members 
+          ADD CONSTRAINT workspace_members_user_id_fkey 
+          FOREIGN KEY (user_id) 
+          REFERENCES public.users(id) 
+          ON DELETE CASCADE;
+    EXCEPTION
+        WHEN OTHERS THEN
+            RAISE NOTICE 'Skipping Foreign Key creation due to type mismatch: %', SQLERRM;
+    END;
+END $$;
 
--- 5. GRANT PERMISSIONS (Termasuk Anon untuk Login Check)
-GRANT ALL ON TABLE public.users TO authenticated;
-GRANT ALL ON TABLE public.users TO service_role;
-GRANT SELECT ON TABLE public.users TO anon; -- Fix 401 error saat login check
-
-GRANT ALL ON TABLE public.workspaces TO authenticated;
-GRANT ALL ON TABLE public.workspaces TO service_role;
-
-GRANT ALL ON TABLE public.workspace_members TO authenticated;
-GRANT ALL ON TABLE public.workspace_members TO service_role;
-
-GRANT ALL ON TABLE public.tasks TO authenticated;
-GRANT ALL ON TABLE public.tasks TO service_role;
+-- 5. GRANT PERMISSIONS
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.users TO authenticated, service_role;
+GRANT SELECT ON TABLE public.users TO anon;
+GRANT ALL ON TABLE public.workspaces TO authenticated, service_role;
+GRANT ALL ON TABLE public.workspace_members TO authenticated, service_role;
+GRANT ALL ON TABLE public.tasks TO authenticated, service_role;
 
 -- 6. AKTIFKAN RLS
 ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
@@ -112,67 +112,55 @@ ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 
 -- 7. POLICY: USERS
--- Semua orang (termasuk anon) bisa baca profil (untuk login & collab)
 CREATE POLICY "view_all_users" ON public.users FOR SELECT USING (true);
--- Hanya user ybs bisa edit
-CREATE POLICY "update_own_profile" ON public.users FOR UPDATE USING (auth.uid()::text = id);
-CREATE POLICY "insert_own_profile" ON public.users FOR INSERT WITH CHECK (auth.uid()::text = id);
+CREATE POLICY "update_own_profile" ON public.users FOR UPDATE USING (auth.uid()::text = id::text);
+CREATE POLICY "insert_own_profile" ON public.users FOR INSERT WITH CHECK (auth.uid()::text = id::text);
 
--- 8. POLICY: WORKSPACES (Menggunakan Fungsi Bypass)
--- User bisa lihat workspace jika Owner ATAU Member (via fungsi bypass)
+-- 8. POLICY: WORKSPACES
+-- Casting id::text di sisi kiri memastikan perbandingan IN selalu Text vs Text
 CREATE POLICY "view_accessible_workspaces" ON public.workspaces FOR SELECT USING (
-  owner_id = auth.uid()::text 
+  owner_id::text = auth.uid()::text 
   OR 
-  id IN (SELECT public.get_my_workspace_ids())
+  id::text IN (SELECT public.get_my_workspace_ids())
 );
 
-CREATE POLICY "create_workspaces" ON public.workspaces FOR INSERT WITH CHECK (
-  owner_id = auth.uid()::text
-);
+CREATE POLICY "create_workspaces" ON public.workspaces FOR INSERT WITH CHECK (owner_id::text = auth.uid()::text);
+CREATE POLICY "update_own_workspaces" ON public.workspaces FOR UPDATE USING (owner_id::text = auth.uid()::text);
+CREATE POLICY "delete_own_workspaces" ON public.workspaces FOR DELETE USING (owner_id::text = auth.uid()::text);
 
-CREATE POLICY "update_own_workspaces" ON public.workspaces FOR UPDATE USING (
-  owner_id = auth.uid()::text
-);
-
--- 9. POLICY: WORKSPACE MEMBERS (Mengandalkan Workspaces)
--- User bisa lihat member dari workspace yang BISA DIA LIHAT.
--- Rantai: Members -> Workspaces Policy -> Fungsi Bypass -> Raw Data. Aman.
+-- 9. POLICY: WORKSPACE MEMBERS
+-- Casting workspace_id::text di sisi kiri sangat penting di sini
 CREATE POLICY "view_members" ON public.workspace_members FOR SELECT USING (
-  workspace_id IN (SELECT id FROM public.workspaces)
+  workspace_id::text IN (SELECT public.get_my_workspace_ids())
 );
 
--- Hanya owner workspace yang bisa menambah/mengubah member
--- Menggunakan subquery langsung ke workspaces untuk menghindari ambiguitas
+-- Manage Members: Owner Only
 CREATE POLICY "manage_members" ON public.workspace_members FOR ALL USING (
-  workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text)
+  workspace_id::text IN (SELECT id::text FROM public.workspaces WHERE owner_id::text = auth.uid()::text)
 );
 
--- Member bisa leave (hapus diri sendiri)
 CREATE POLICY "leave_workspace" ON public.workspace_members FOR DELETE USING (
-  user_id = auth.uid()::text
+  user_id::text = auth.uid()::text
 );
 
--- 10. POLICY: TASKS (Mengandalkan Workspaces)
--- User bisa lihat task di workspace yang BISA DIA LIHAT.
+-- 10. POLICY: TASKS
+-- Casting workspace_id::text di sisi kiri
 CREATE POLICY "view_tasks" ON public.tasks FOR SELECT USING (
-  workspace_id IN (SELECT id FROM public.workspaces)
-);
-
-CREATE POLICY "create_tasks" ON public.tasks FOR INSERT WITH CHECK (
-  created_by = auth.uid()::text
-);
-
--- Edit/Hapus task: Pembuat task ATAU Owner Workspace
-CREATE POLICY "manage_tasks" ON public.tasks FOR ALL USING (
-  created_by = auth.uid()::text
+  workspace_id::text IN (SELECT public.get_my_workspace_ids())
   OR
-  workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text)
+  workspace_id::text IN (SELECT id::text FROM public.workspaces WHERE owner_id::text = auth.uid()::text)
 );
 
--- 11. KHUSUS: PASTIKAN ARUNIKA ADALAH ADMIN
-UPDATE public.users 
-SET status = 'Admin' 
-WHERE email = 'arunika@taskplay.com' OR username = 'arunika';
+CREATE POLICY "create_tasks" ON public.tasks FOR INSERT WITH CHECK (created_by::text = auth.uid()::text);
 
--- 12. RELOAD CACHE
+CREATE POLICY "manage_tasks" ON public.tasks FOR ALL USING (
+  created_by::text = auth.uid()::text
+  OR
+  workspace_id::text IN (SELECT id::text FROM public.workspaces WHERE owner_id::text = auth.uid()::text)
+);
+
+-- 11. FIX USER ADMIN
+UPDATE public.users SET status = 'Admin' WHERE email = 'arunika@taskplay.com' OR username = 'arunika';
+
+-- 12. RELOAD SCHEMA
 NOTIFY pgrst, 'reload schema';

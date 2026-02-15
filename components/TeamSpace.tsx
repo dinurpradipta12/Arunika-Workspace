@@ -22,7 +22,9 @@ import {
   X,
   Trash2,
   Mail,
-  AlertTriangle
+  AlertTriangle,
+  Ban,
+  Unlock
 } from 'lucide-react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
@@ -50,9 +52,9 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
   // Member Detail Modal State
   const [selectedMember, setSelectedMember] = useState<any | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [showMemberPassword, setShowMemberPassword] = useState(false);
   const [memberActionMenuId, setMemberActionMenuId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isTogglingAccess, setIsTogglingAccess] = useState(false);
   
   // Registration Form State
   const [newEmail, setNewEmail] = useState(''); // Field baru untuk email asli
@@ -109,7 +111,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
 
       if (error) {
         if (error.code === 'PGRST200') {
-          // Fallback manual join logic (tetap dipertahankan untuk keamanan)
+          // Fallback manual join logic
           const { data: rawMembers, error: rawError } = await supabase.from('workspace_members').select('*').eq('workspace_id', activeWsId);
           if (rawError) throw rawError;
           if (rawMembers && rawMembers.length > 0) {
@@ -152,13 +154,6 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     }
   }, [fetchMembers, targetWorkspaceId, currentWorkspace?.id]);
 
-  const handleCopyLink = () => {
-    const appUrl = window.location.origin;
-    navigator.clipboard.writeText(appUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const handleRegisterMember = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -183,7 +178,6 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
 
     try {
       // 1. SignUp User dengan Email Asli
-      // Supabase akan otomatis mengirim email konfirmasi jika setting di dashboard aktif
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: cleanEmail,
         password: newPassword,
@@ -200,10 +194,12 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
 
       if (authData.user) {
         // 2. Insert ke tabel public.users
-        // Meskipun email belum dikonfirmasi, kita masukkan data profil agar username tersimpan
-        const { error: userError } = await supabase.from('users').upsert({
-          id: authData.user.id,
-          email: cleanEmail,
+        // Menggunakan authData.user secara eksplisit sesuai permintaan untuk ID dan Email
+        const newUser = authData.user;
+        
+        const { error: userError } = await supabase.from('users').insert({
+          id: newUser.id,
+          email: newUser.email, 
           username: cleanUsername, 
           name: newName,
           avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername || Date.now()}`,
@@ -211,12 +207,16 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
           app_settings: { appName: 'TaskPlay' }
         });
 
-        if (userError) console.error("Warning user insert:", userError);
+        if (userError) {
+          console.error("User insert failed:", userError);
+          // Jika insert user gagal (misal RLS error), kita harus stop agar tidak lanjut ke workspace_member
+          throw new Error("Gagal menyimpan profil user baru. Cek izin database (RLS).");
+        }
 
         // 3. Masukkan ke Workspace Member
         const { error: memberError } = await supabase.from('workspace_members').insert({
           workspace_id: targetWorkspaceId,
-          user_id: authData.user.id,
+          user_id: newUser.id,
           role: newRole
         });
 
@@ -225,7 +225,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
         setSuccessData({ 
           username: cleanUsername, 
           name: newName,
-          email: cleanEmail
+          email: newUser.email || cleanEmail
         });
 
         // Reset Form
@@ -255,6 +255,49 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     }
   };
 
+  const handleRowClick = (member: any) => {
+    setSelectedMember(member);
+    setIsDetailOpen(true);
+  };
+
+  const handleToggleAccess = async () => {
+    if (!selectedMember || !selectedMember.users) return;
+    
+    setIsTogglingAccess(true);
+    const currentStatus = selectedMember.users.status;
+    const isSuspended = currentStatus === 'Suspended';
+    // Jika Suspended -> Kembalikan ke Member. Jika Active/Member/Admin -> Suspended.
+    const newStatus = isSuspended ? 'Member' : 'Suspended';
+    
+    try {
+      // 1. Update di Database
+      const { error } = await supabase
+        .from('users')
+        .update({ status: newStatus })
+        .eq('id', selectedMember.user_id);
+      
+      if (error) throw error;
+
+      // 2. Update Local State (List Members)
+      setMembers(prev => prev.map(m => 
+        m.id === selectedMember.id 
+          ? { ...m, users: { ...m.users, status: newStatus } } 
+          : m
+      ));
+
+      // 3. Update Modal State
+      setSelectedMember((prev: any) => ({
+        ...prev,
+        users: { ...prev.users, status: newStatus }
+      }));
+
+    } catch (err: any) {
+      alert("Gagal mengubah status akses: " + err.message);
+    } finally {
+      setIsTogglingAccess(false);
+    }
+  };
+
   const handleDeleteUser = async (targetUserId: string, targetMemberId: string) => {
     if (!targetUserId || !targetMemberId) return;
     if (!window.confirm("PERINGATAN FINAL: User akan dihapus permanen. Lanjutkan?")) return;
@@ -262,7 +305,7 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
     setIsDeleting(true);
     const previousMembers = [...members];
     setMembers(prev => prev.filter(m => m.id !== targetMemberId));
-    setIsDetailOpen(false);
+    setIsDetailOpen(false); // Tutup modal jika user dihapus dari dalam modal
     
     try {
       const { error: userError } = await supabase.from('users').delete().eq('id', targetUserId);
@@ -453,8 +496,12 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                 </thead>
                 <tbody>
                   {members.map((member) => (
-                    <tr key={member.id} className="group animate-in fade-in duration-300">
-                      <td className="bg-slate-50 border-y-2 border-l-2 border-slate-800 rounded-l-2xl px-4 py-4">
+                    <tr 
+                      key={member.id} 
+                      className="group animate-in fade-in duration-300 cursor-pointer hover:scale-[1.01] transition-transform"
+                      onClick={() => handleRowClick(member)}
+                    >
+                      <td className="bg-slate-50 border-y-2 border-l-2 border-slate-800 rounded-l-2xl px-4 py-4 group-hover:bg-accent/5">
                         <div className="flex items-center gap-3">
                           <img 
                             src={member.users?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${member.id}`} 
@@ -467,35 +514,34 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
                           </div>
                         </div>
                       </td>
-                      <td className="bg-slate-50 border-y-2 border-slate-800 px-4 py-4">
+                      <td className="bg-slate-50 border-y-2 border-slate-800 px-4 py-4 group-hover:bg-accent/5">
                         <span className="text-[10px] font-bold text-slate-500">
                           @{member.users?.username || member.users?.email?.split('@')[0] || '-'}
                         </span>
                       </td>
-                      <td className="bg-slate-50 border-y-2 border-slate-800 px-4 py-4">
+                      <td className="bg-slate-50 border-y-2 border-slate-800 px-4 py-4 group-hover:bg-accent/5">
                          <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border border-slate-800 ${member.role === 'admin' ? 'bg-accent text-white' : 'bg-white'}`}>
                            {member.role}
                          </span>
                       </td>
-                      <td className="bg-slate-50 border-y-2 border-slate-800 px-4 py-4">
+                      <td className="bg-slate-50 border-y-2 border-slate-800 px-4 py-4 group-hover:bg-accent/5">
                          <div className="flex items-center gap-1">
                             <div className={`w-1.5 h-1.5 rounded-full ${member.users?.status === 'Suspended' ? 'bg-secondary' : 'bg-quaternary'} animate-pulse`} />
                             <span className={`text-[9px] font-black uppercase ${member.users?.status === 'Suspended' ? 'text-secondary' : 'text-quaternary'}`}>
-                                {member.users?.status === 'Suspended' ? 'Inactive' : 'Active'}
+                                {member.users?.status === 'Suspended' ? 'Suspended' : 'Active'}
                             </span>
                          </div>
                       </td>
-                      <td className="bg-slate-50 border-y-2 border-r-2 border-slate-800 rounded-r-2xl px-4 py-4 text-right relative">
+                      <td className="bg-slate-50 border-y-2 border-r-2 border-slate-800 rounded-r-2xl px-4 py-4 text-right relative group-hover:bg-accent/5">
                          <button 
                            onClick={(e) => { e.stopPropagation(); setMemberActionMenuId(memberActionMenuId === member.id ? null : member.id); }}
-                           className="p-2 hover:bg-slate-200 rounded-lg"
+                           className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
                          >
                            <MoreHorizontal size={18} />
                          </button>
-                         {/* Action Dropdown removed for brevity in diff, assume logic similar to previous */}
                          {memberActionMenuId === member.id && (
                            <div className="absolute right-4 top-14 bg-white border-2 border-slate-800 rounded-xl shadow-pop z-50 w-40 overflow-hidden animate-in fade-in zoom-in-95">
-                              <button onClick={() => handleDeleteUser(member.user_id, member.id)} className="w-full text-left px-4 py-3 text-xs font-bold text-secondary hover:bg-secondary/10 flex items-center gap-2">
+                              <button onClick={(e) => { e.stopPropagation(); handleDeleteUser(member.user_id, member.id); }} className="w-full text-left px-4 py-3 text-xs font-bold text-secondary hover:bg-secondary/10 flex items-center gap-2">
                                  <Trash2 size={14} /> Hapus User
                               </button>
                            </div>
@@ -509,6 +555,88 @@ export const TeamSpace: React.FC<TeamSpaceProps> = ({ currentWorkspace, currentU
           </Card>
         </div>
       </div>
+
+      {/* MODAL DETAIL USER & ACCESS CONTROL */}
+      {isDetailOpen && selectedMember && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white border-4 border-slate-800 rounded-3xl shadow-[16px_16px_0px_0px_#1E293B] w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+             
+             {/* Header */}
+             <div className="p-6 bg-tertiary border-b-4 border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                   <Shield size={24} className="text-slate-900" strokeWidth={3} />
+                   <h2 className="text-2xl font-heading text-slate-900">Detail Akses</h2>
+                </div>
+                <button onClick={() => setIsDetailOpen(false)} className="p-2 hover:bg-black/10 rounded-xl transition-colors">
+                   <X size={24} strokeWidth={3} />
+                </button>
+             </div>
+
+             <div className="p-6 space-y-6">
+                {/* User Profile */}
+                <div className="flex items-center gap-4">
+                   <img 
+                      src={selectedMember.users?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedMember.id}`} 
+                      className="w-20 h-20 rounded-2xl border-4 border-slate-800 bg-slate-100 shadow-sm"
+                      alt="User Avatar"
+                   />
+                   <div>
+                      <h3 className="text-xl font-heading text-slate-900 leading-none">{selectedMember.users?.name}</h3>
+                      <p className="text-sm font-bold text-slate-500 mt-1">@{selectedMember.users?.username}</p>
+                      <p className="text-xs font-medium text-slate-400 mt-0.5">{selectedMember.users?.email}</p>
+                   </div>
+                </div>
+
+                <div className="h-[1px] bg-slate-100 w-full" />
+
+                {/* Status Toggle Card */}
+                <div className={`p-5 rounded-2xl border-4 border-slate-800 transition-all ${selectedMember.users?.status === 'Suspended' ? 'bg-secondary/10' : 'bg-quaternary/10'}`}>
+                   <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                         <Power size={20} className={selectedMember.users?.status === 'Suspended' ? 'text-secondary' : 'text-quaternary'} strokeWidth={3} />
+                         <span className="font-heading text-lg text-slate-800">Status Akses</span>
+                      </div>
+                      <div className={`px-3 py-1 rounded-full border-2 border-slate-800 text-[10px] font-black uppercase ${selectedMember.users?.status === 'Suspended' ? 'bg-secondary text-white' : 'bg-quaternary text-white'}`}>
+                         {selectedMember.users?.status === 'Suspended' ? 'Suspended' : 'Active'}
+                      </div>
+                   </div>
+                   
+                   <p className="text-xs font-bold text-slate-600 mb-4 leading-relaxed">
+                      {selectedMember.users?.status === 'Suspended' 
+                        ? 'Akses user ini sedang dimatikan. Mereka tidak dapat login atau mengakses workspace.' 
+                        : 'User ini memiliki akses penuh ke workspace sesuai dengan role mereka.'}
+                   </p>
+
+                   <button 
+                     onClick={handleToggleAccess}
+                     disabled={isTogglingAccess}
+                     className={`w-full py-3 rounded-xl border-2 border-slate-800 font-black uppercase text-xs flex items-center justify-center gap-2 shadow-pop active:shadow-none active:translate-y-1 transition-all ${selectedMember.users?.status === 'Suspended' ? 'bg-quaternary text-white' : 'bg-secondary text-white'}`}
+                   >
+                      {isTogglingAccess ? (
+                         <Loader2 size={16} className="animate-spin" />
+                      ) : selectedMember.users?.status === 'Suspended' ? (
+                         <><Unlock size={16} /> Aktifkan Kembali Akses</>
+                      ) : (
+                         <><Ban size={16} /> Matikan Akses (Suspend)</>
+                      )}
+                   </button>
+                </div>
+
+                {/* Danger Zone */}
+                <div className="pt-4 border-t-2 border-slate-100">
+                   <button 
+                     onClick={() => handleDeleteUser(selectedMember.user_id, selectedMember.id)}
+                     disabled={isDeleting}
+                     className="w-full py-3 text-xs font-bold text-secondary hover:bg-secondary/5 rounded-xl transition-colors flex items-center justify-center gap-2"
+                   >
+                     {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} 
+                     Hapus User Secara Permanen
+                   </button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

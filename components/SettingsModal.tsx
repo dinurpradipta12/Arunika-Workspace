@@ -64,25 +64,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   }, [isOpen, user, role]);
 
+  const validateAndReadImage = (file: File, callback: (base64: string) => void) => {
+    if (file.size > 800 * 1024) { // Limit 800KB
+      alert("Ukuran file terlalu besar. Maksimum 800KB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => callback(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => setTempAvatar(reader.result as string);
-      reader.readAsDataURL(file);
+      validateAndReadImage(file, (base64) => setTempAvatar(base64));
     }
   };
 
   const handleBrandingUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon') => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result as string;
+      validateAndReadImage(file, (base64) => {
         if (type === 'logo') setTempAppLogo(base64);
         else setTempFavicon(base64);
-      };
-      reader.readAsDataURL(file);
+      });
     }
   };
 
@@ -177,7 +182,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
                       </div>
                     </div>
-                    <Input label="Email Sync" value={tempEmail} onChange={(e) => setTempEmail(e.target.value)} icon={<Mail size={16} />} />
+                    <Input label="Email Sync (Tampilan)" value={tempEmail} onChange={(e) => setTempEmail(e.target.value)} icon={<Mail size={16} />} />
+                    <p className="text-[10px] text-slate-400 italic">Catatan: Mengubah email di sini hanya mengubah data profil, bukan email login.</p>
                   </div>
                 </div>
               </div>
@@ -209,23 +215,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase text-slate-400">Logo Dashboard</label>
+                      <label className="text-[10px] font-black uppercase text-slate-400">Logo Dashboard (Max 800KB)</label>
                       <div onClick={() => logoInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 cursor-pointer hover:bg-slate-100">
                         <div className="w-16 h-16 bg-white border-2 border-slate-800 rounded-xl flex items-center justify-center overflow-hidden">
                           {tempAppLogo ? <img src={tempAppLogo} className="w-full h-full object-contain p-1" /> : <ImageIcon size={24} className="text-slate-300" />}
                         </div>
                         <span className="text-[9px] font-black uppercase text-slate-400">Pilih Logo</span>
-                        <input type="file" ref={logoInputRef} className="hidden" accept="image/png" onChange={(e) => handleBrandingUpload(e, 'logo')} />
+                        <input type="file" ref={logoInputRef} className="hidden" accept="image/png, image/jpeg" onChange={(e) => handleBrandingUpload(e, 'logo')} />
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase text-slate-400">Browser Favicon</label>
+                      <label className="text-[10px] font-black uppercase text-slate-400">Browser Favicon (Max 800KB)</label>
                       <div onClick={() => faviconInputRef.current?.click()} className="flex items-center gap-4 p-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 cursor-pointer hover:bg-slate-100">
                         <div className="w-12 h-12 bg-white border-2 border-slate-800 rounded-lg flex items-center justify-center overflow-hidden">
                           {tempFavicon ? <img src={tempFavicon} className="w-full h-full object-contain p-1" /> : <Chrome size={20} className="text-slate-300" />}
                         </div>
                         <span className="text-[9px] font-black uppercase text-slate-400">Pilih Favicon</span>
-                        <input type="file" ref={faviconInputRef} className="hidden" accept="image/png" onChange={(e) => handleBrandingUpload(e, 'favicon')} />
+                        <input type="file" ref={faviconInputRef} className="hidden" accept="image/png, image/jpeg" onChange={(e) => handleBrandingUpload(e, 'favicon')} />
                       </div>
                     </div>
                   </div>
