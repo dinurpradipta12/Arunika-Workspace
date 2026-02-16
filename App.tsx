@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
@@ -1044,6 +1043,7 @@ const App: React.FC = () => {
                 tasks={tasks}
                 googleEvents={googleEvents}
                 currentUser={currentUser}
+                onEditTask={openEditModal}
               />
             )}
             

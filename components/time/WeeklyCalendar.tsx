@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { EventCard } from './EventCard';
 import { EventPopup } from './EventPopup';
@@ -9,6 +8,7 @@ interface WeeklyCalendarProps {
   events: CalendarEvent[];
   onEventUpdate: (event: CalendarEvent) => void;
   onEventDelete: (id: string) => void;
+  onEditEvent?: (event: CalendarEvent) => void;
 }
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -18,7 +18,8 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
   currentDate,
   events,
   onEventUpdate,
-  onEventDelete
+  onEventDelete,
+  onEditEvent
 }) => {
   // --- STATE ---
   const [hoveredEvent, setHoveredEvent] = useState<CalendarEvent | null>(null);
@@ -181,7 +182,7 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
         onClose={() => setHoveredEvent(null)}
         onMouseEnter={keepPopupOpen}
         onMouseLeave={handleEventLeave}
-        onEdit={(ev) => console.log('Edit', ev)}
+        onEdit={(ev) => onEditEvent?.(ev)}
         onDelete={onEventDelete}
       />
 

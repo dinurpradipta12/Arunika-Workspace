@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { CalendarHeader } from './time/CalendarHeader';
 import { WeeklyCalendar } from './time/WeeklyCalendar';
@@ -8,6 +7,7 @@ interface TimeTrackingViewProps {
   tasks: Task[];
   googleEvents: Task[];
   currentUser: any;
+  onEditTask: (task: Task) => void;
 }
 
 const COLORS = ['#8B5CF6', '#F472B6', '#FBBF24', '#34D399', '#38BDF8'];
@@ -15,7 +15,8 @@ const COLORS = ['#8B5CF6', '#F472B6', '#FBBF24', '#34D399', '#38BDF8'];
 export const TimeTrackingView: React.FC<TimeTrackingViewProps> = ({
   tasks,
   googleEvents,
-  currentUser
+  currentUser,
+  onEditTask
 }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   
@@ -56,6 +57,14 @@ export const TimeTrackingView: React.FC<TimeTrackingViewProps> = ({
     console.log("Update Event (Time Tracking):", updatedEvent);
   };
 
+  const handleEditEvent = (event: CalendarEvent) => {
+    // Find original task from ID or originalTaskId
+    const originalTask = tasks.find(t => t.id === event.originalTaskId || t.id === event.id);
+    if (originalTask) {
+        onEditTask(originalTask);
+    }
+  };
+
   const handleEventDelete = (id: string) => {
     console.log("Delete Event:", id);
   };
@@ -74,6 +83,7 @@ export const TimeTrackingView: React.FC<TimeTrackingViewProps> = ({
           events={events}
           onEventUpdate={handleEventUpdate}
           onEventDelete={handleEventDelete}
+          onEditEvent={handleEditEvent}
         />
       </div>
     </div>
