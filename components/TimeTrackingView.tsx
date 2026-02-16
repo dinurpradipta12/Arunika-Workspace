@@ -8,6 +8,8 @@ interface TimeTrackingViewProps {
   googleEvents: Task[];
   currentUser: any;
   onEditTask: (task: Task) => void;
+  onDeleteTask: (id: string) => void;
+  onUpdateTask: (task: Task) => void;
 }
 
 const COLORS = ['#8B5CF6', '#F472B6', '#FBBF24', '#34D399', '#38BDF8'];
@@ -16,7 +18,9 @@ export const TimeTrackingView: React.FC<TimeTrackingViewProps> = ({
   tasks,
   googleEvents,
   currentUser,
-  onEditTask
+  onEditTask,
+  onDeleteTask,
+  onUpdateTask
 }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   
@@ -54,7 +58,17 @@ export const TimeTrackingView: React.FC<TimeTrackingViewProps> = ({
   const handleToday = () => setCurrentDate(new Date());
 
   const handleEventUpdate = (updatedEvent: CalendarEvent) => {
-    console.log("Update Event (Time Tracking):", updatedEvent);
+    // Find original task to keep other properties
+    const originalTask = tasks.find(t => t.id === updatedEvent.id);
+    if (originalTask) {
+      // Map CalendarEvent back to Task properties
+      const updatedTask = {
+        ...originalTask,
+        start_date: updatedEvent.start,
+        due_date: updatedEvent.end
+      };
+      onUpdateTask(updatedTask);
+    }
   };
 
   const handleEditEvent = (event: CalendarEvent) => {
@@ -66,7 +80,7 @@ export const TimeTrackingView: React.FC<TimeTrackingViewProps> = ({
   };
 
   const handleEventDelete = (id: string) => {
-    console.log("Delete Event:", id);
+    onDeleteTask(id);
   };
 
   return (

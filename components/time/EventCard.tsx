@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { CalendarEvent } from '../../types';
 
@@ -37,12 +36,13 @@ export const EventCard: React.FC<EventCardProps> = ({
       onDragStart={(e) => onDragStart(e, event)}
       onMouseEnter={(e) => onHover(e, event)}
       onMouseLeave={onLeave}
-      className="absolute left-1 right-1 rounded-lg border-l-4 p-1.5 cursor-grab active:cursor-grabbing hover:z-20 transition-all hover:shadow-lg group overflow-hidden select-none"
+      className="absolute left-1 right-1 rounded-lg border-2 border-slate-900 p-1.5 cursor-grab active:cursor-grabbing hover:z-20 transition-all hover:shadow-lg group overflow-hidden select-none"
       style={{
         top: `${top}px`,
         height: `${height}px`,
-        backgroundColor: `${event.color}20`, // 20% opacity
-        borderColor: event.color,
+        backgroundColor: `${event.color}30`, // Increased opacity slightly for visibility against white bg
+        borderColor: '#1E293B', // Slate 900 explicitly
+        borderLeftWidth: '4px',
         borderLeftColor: event.color,
       }}
     >

@@ -707,6 +707,31 @@ const App: React.FC = () => {
   const currentWorkspaceTasks = activeWorkspaceId ? tasks.filter(t => t.workspace_id === activeWorkspaceId) : [];
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
 
+  // TimeTracking DB Handlers
+  const handleTimeTrackingDelete = async (id: string) => {
+    if(!confirm("Yakin ingin menghapus event ini?")) return;
+    try {
+      const { error } = await supabase.from('tasks').delete().eq('id', id);
+      if(error) throw error;
+      // fetchData() is triggered by realtime subscription in App.tsx
+    } catch(err: any) {
+      alert("Gagal menghapus: " + err.message);
+    }
+  };
+
+  const handleTimeTrackingUpdate = async (task: Task) => {
+    try {
+      const { error } = await supabase.from('tasks').update({
+        start_date: task.start_date,
+        due_date: task.due_date
+      }).eq('id', task.id);
+      
+      if(error) throw error;
+    } catch(err: any) {
+      console.error("Gagal update time tracking:", err);
+    }
+  };
+
   if (isAuthLoading || (isAuthenticated && isProfileLoading)) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
@@ -1044,6 +1069,8 @@ const App: React.FC = () => {
                 googleEvents={googleEvents}
                 currentUser={currentUser}
                 onEditTask={openEditModal}
+                onDeleteTask={handleTimeTrackingDelete}
+                onUpdateTask={handleTimeTrackingUpdate}
               />
             )}
             
