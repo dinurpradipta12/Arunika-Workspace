@@ -373,10 +373,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       {renderContextualModal()}
 
       {/* --- HEADER --- */}
-      <div className="flex flex-col md:flex-row justify-between items-start gap-4 border-b-2 border-slate-100 pb-6">
-        {/* Left Side */}
-        <div className="flex-1">
-          {/* LOGO WORKSPACE - ADDED HERE */}
+      <div className="border-b-2 border-slate-100 pb-6">
+        
+        {/* TOP SECTION: Logo, Tags, Title, Description */}
+        <div className="mb-6">
+          {/* LOGO WORKSPACE */}
           <div className="mb-4">
              {workspace.logo_url ? (
                <img src={workspace.logo_url} alt="Workspace Logo" className="w-16 h-16 object-contain rounded-xl bg-transparent" />
@@ -393,9 +394,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           </div>
           <h2 className="text-5xl font-heading text-slate-900 tracking-tight">{workspace.name}</h2>
           <p className="text-slate-400 font-medium text-sm mt-2 max-w-xl leading-relaxed">{workspace.description || 'Ruang kerja kolaboratif untuk mengelola proyek dan tugas tim.'}</p>
+        </div>
+
+        {/* BOTTOM SECTION: Members & Actions Aligned */}
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           
           {/* AVATAR STACK (MEMBER JOINED) */}
-          <div className="mt-4 flex items-center gap-2">
+          <div className="flex items-center gap-2">
              <div className="flex -space-x-3">
                {members.slice(0, 5).map((m, i) => (
                  <img 
@@ -414,30 +419,31 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
              </div>
              {members.length > 0 && <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">{memberCount} Member Bergabung</span>}
           </div>
-        </div>
 
-        {/* Right Side: Button & Copy Code */}
-        <div className="flex flex-col items-end gap-3 w-full md:w-auto shrink-0">
-          <Button variant="primary" onClick={() => onAddTask()} className="px-8 py-4 shadow-pop-active w-full md:w-auto">
-            <Plus size={20} className="mr-2" strokeWidth={3} /> Buat Task Baru
-          </Button>
+          {/* ACTION BUTTONS (Moved Here) */}
+          <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+            <Button variant="primary" onClick={() => onAddTask()} className="px-8 py-3 shadow-pop-active w-full md:w-auto h-12">
+              <Plus size={20} className="mr-2" strokeWidth={3} /> Buat Task Baru
+            </Button>
 
-          {/* COPY CODE BUTTON (Replacing Info Card) */}
-          {workspace.join_code && (
-            <button
-              onClick={handleCopyCode}
-              className="group flex items-center justify-center gap-2 px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl text-xs font-black text-slate-500 uppercase tracking-widest hover:bg-white hover:border-slate-800 hover:text-slate-800 transition-all w-full md:w-auto animate-in fade-in slide-in-from-right-4 active:scale-95"
-              title="Klik untuk menyalin kode join"
-            >
-              <Key size={14} className={isCodeCopied ? "text-quaternary" : "text-slate-400 group-hover:text-slate-800"} />
-              <span>Code: {workspace.join_code}</span>
-              {isCodeCopied ? (
-                <Check size={14} className="text-quaternary animate-in zoom-in duration-300" strokeWidth={3} />
-              ) : (
-                <Copy size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400" />
-              )}
-            </button>
-          )}
+            {/* COPY CODE BUTTON */}
+            {workspace.join_code && (
+              <button
+                onClick={handleCopyCode}
+                className="group h-12 flex items-center justify-center gap-2 px-4 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl text-xs font-black text-slate-500 uppercase tracking-widest hover:bg-white hover:border-slate-800 hover:text-slate-800 transition-all w-full md:w-auto active:scale-95"
+                title="Klik untuk menyalin kode join"
+              >
+                <Key size={14} className={isCodeCopied ? "text-quaternary" : "text-slate-400 group-hover:text-slate-800"} />
+                <span>Code: {workspace.join_code}</span>
+                {isCodeCopied ? (
+                  <Check size={14} className="text-quaternary animate-in zoom-in duration-300" strokeWidth={3} />
+                ) : (
+                  <Copy size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400" />
+                )}
+              </button>
+            )}
+          </div>
+
         </div>
       </div>
 
