@@ -780,7 +780,7 @@ const App: React.FC = () => {
       {currentNotification && (
         <div 
           onClick={() => handleNotificationClick(currentNotification)}
-          className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-top-4 duration-500 cursor-pointer"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] animate-in slide-in-from-top-4 duration-500 cursor-pointer"
         >
            <div className="bg-white border-4 border-slate-800 rounded-2xl shadow-pop p-4 flex items-start gap-4 max-w-sm transition-transform hover:scale-105">
               <div className="w-12 h-12 bg-accent rounded-xl border-2 border-slate-800 flex items-center justify-center text-white shrink-0 shadow-sm">
@@ -914,7 +914,7 @@ const App: React.FC = () => {
         {/* RESTRUCTURED MAIN CONTENT AREA - FROZEN HEADER */}
         <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
           {/* Header - Fixed/Sticky Logic */}
-          <header className="shrink-0 z-40 bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
+          <header className="shrink-0 relative z-[65] bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
             <button className="p-2 border-2 border-slate-800 rounded-xl shadow-pop-active bg-white transition-all hover:-translate-y-0.5" onClick={() => setSidebarOpen(!isSidebarOpen)}>
               {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
             </button>
