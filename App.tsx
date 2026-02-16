@@ -747,7 +747,8 @@ const App: React.FC = () => {
   const connStatus = getConnectionStatus();
 
   return (
-    <div className="h-full w-full bg-background overflow-hidden flex justify-center">
+    // CHANGED: h-full to h-screen to force viewport height and fix sticky scrolling issues
+    <div className="h-screen w-full bg-background overflow-hidden flex justify-center">
       
       {/* --- TOAST NOTIFICATION POPUP --- */}
       {currentNotification && (

@@ -24,7 +24,8 @@ import {
   Info,
   Key,
   Copy,
-  Check
+  Check,
+  Briefcase
 } from 'lucide-react';
 import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
@@ -279,6 +280,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       <div className="flex flex-col md:flex-row justify-between items-start gap-4 border-b-2 border-slate-100 pb-6">
         {/* Left Side */}
         <div className="flex-1">
+          {/* LOGO WORKSPACE - ADDED HERE */}
+          <div className="mb-4">
+             {workspace.logo_url ? (
+               <img src={workspace.logo_url} alt="Workspace Logo" className="w-16 h-16 object-contain rounded-xl bg-transparent" />
+             ) : (
+               <div className="w-16 h-16 bg-slate-100 rounded-xl flex items-center justify-center border-2 border-slate-200">
+                  <Briefcase size={32} className="text-slate-400" />
+               </div>
+             )}
+          </div>
+
           <div className="flex items-center gap-2 mb-2">
             <span className="px-3 py-1 bg-slate-800 text-white text-[10px] font-black uppercase rounded-full tracking-widest border-2 border-slate-800 shadow-sm">{workspace.type}</span>
             <span className="px-3 py-1 bg-white text-slate-500 text-[10px] font-black uppercase rounded-full tracking-widest border-2 border-slate-200">{workspace.category || 'General'}</span>

@@ -541,10 +541,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {/* ROW 2: Workload & Productivity (New Layout) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
          
-         {/* LEFT COL: Analytics Charts (Expanded) */}
-         <div className="lg:col-span-2 bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-col min-h-[500px]">
-            <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-2">
-               <h3 className="text-xl font-heading text-slate-800">Analytics Overview</h3>
+         {/* LEFT COL: Analytics Charts (Compact) */}
+         <div className="lg:col-span-2 bg-white border-2 border-slate-800 rounded-[32px] p-4 shadow-pop flex flex-col min-h-[150px]">
+            <div className="flex items-center justify-between mb-2 border-b border-slate-100 pb-2">
+               <h3 className="text-lg font-heading text-slate-800">Analytics Overview</h3>
                <div className="flex gap-2">
                  <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 rounded-full border border-blue-100 text-blue-600">
                     <Target size={12} strokeWidth={3} />
@@ -557,19 +557,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full items-center flex-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 h-full items-center flex-1">
                
                {/* CHART 1: STATUS DISTRIBUTION (Enlarged) */}
-               <div className="flex flex-col items-center justify-center gap-6 h-full">
-                  <div className="w-64 h-64 relative shrink-0">
+               <div className="flex flex-row md:flex-col items-center justify-center gap-4 h-full">
+                  <div className="h-32 w-32 relative shrink-0">
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                         <Pie
                             data={statusCounts}
                             cx="50%"
                             cy="50%"
-                            innerRadius={70} 
-                            outerRadius={100} 
+                            innerRadius={35} 
+                            outerRadius={55} 
                             paddingAngle={5}
                             dataKey="value"
                         >
@@ -579,37 +579,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </Pie>
                         <Tooltip 
                             contentStyle={{ borderRadius: '12px', border: '2px solid #1E293B', boxShadow: '4px 4px 0px 0px #1E293B', fontWeight: 'bold' }}
-                            itemStyle={{ fontSize: '12px' }}
+                            itemStyle={{ fontSize: '10px' }}
                         />
                         </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                        <span className="text-4xl font-heading text-slate-900">{totalTasks}</span>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total</span>
+                        <span className="text-2xl font-heading text-slate-900">{totalTasks}</span>
                     </div>
                   </div>
-                  {/* Legend Status - Capitalized (Not Uppercase) */}
-                  <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">
+                  {/* Legend Status */}
+                  <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
                      {statusCounts.map((s, idx) => (
                         <div key={s.name} className="flex items-center gap-1.5">
-                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: STATUS_COLORS[idx] }} />
-                            <span className="text-xs font-bold text-slate-600 capitalize">{s.name}: {s.value}</span>
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLORS[idx] }} />
+                            <span className="text-[10px] font-bold text-slate-600 capitalize">{s.name}: {s.value}</span>
                         </div>
                      ))}
                   </div>
                </div>
 
                {/* CHART 2: PRIORITY DISTRIBUTION (Enlarged) */}
-               <div className="flex flex-col items-center justify-center gap-6 h-full border-t md:border-t-0 md:border-l border-slate-100 pt-6 md:pt-0">
-                  <div className="w-64 h-64 relative shrink-0">
+               <div className="flex flex-row md:flex-col items-center justify-center gap-4 h-full border-t md:border-t-0 md:border-l border-slate-100 pt-4 md:pt-0">
+                  <div className="h-32 w-32 relative shrink-0">
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                         <Pie
                             data={priorityCounts}
                             cx="50%"
                             cy="50%"
-                            innerRadius={70} 
-                            outerRadius={100} 
+                            innerRadius={35} 
+                            outerRadius={55} 
                             paddingAngle={5}
                             dataKey="value"
                         >
@@ -619,20 +618,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </Pie>
                         <Tooltip 
                             contentStyle={{ borderRadius: '12px', border: '2px solid #1E293B', boxShadow: '4px 4px 0px 0px #1E293B', fontWeight: 'bold' }}
-                            itemStyle={{ fontSize: '12px' }}
+                            itemStyle={{ fontSize: '10px' }}
                         />
                         </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                        <Flag size={32} className="text-slate-300" strokeWidth={2} />
+                        <Flag size={20} className="text-slate-300" strokeWidth={2} />
                     </div>
                   </div>
-                  {/* Legend Priority - Capitalized */}
-                  <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">
+                  {/* Legend Priority */}
+                  <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
                      {priorityCounts.map((p, idx) => (
                         <div key={p.name} className="flex items-center gap-1.5">
-                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[idx] }} />
-                            <span className="text-xs font-bold text-slate-600 capitalize">{p.name}: {p.value}</span>
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[idx] }} />
+                            <span className="text-[10px] font-bold text-slate-600 capitalize">{p.name}: {p.value}</span>
                         </div>
                      ))}
                   </div>
