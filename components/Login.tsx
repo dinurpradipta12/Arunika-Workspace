@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckSquare, Lock, User as UserIcon, AlertCircle, Loader2, HelpCircle, Eye, EyeOff, Mail } from 'lucide-react';
+import { CheckSquare, Lock, User as UserIcon, AlertCircle, Loader2, HelpCircle, Eye, EyeOff } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { supabase } from '../lib/supabase';
@@ -11,7 +11,7 @@ interface LoginProps {
 }
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) => {
-  const [identifier, setIdentifier] = useState(''); // Bisa Username atau Email
+  const [identifier, setIdentifier] = useState(''); 
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorState, setErrorState] = useState<{message: string, isConfirmationError: boolean} | null>(null);
@@ -59,11 +59,9 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
       const isEmail = identifier.includes('@');
 
       if (!isEmail) {
-        // LOGIKA HYBRID:
-        // FIX: Match registration logic (remove spaces)
         const cleanUsername = identifier.trim().toLowerCase().replace(/\s+/g, '');
         
-        const { data: userData, error: fetchError } = await supabase
+        const { data: userData } = await supabase
           .from('users')
           .select('email')
           .eq('username', cleanUsername)
@@ -73,16 +71,12 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
            loginEmail = userData.email;
         } else {
            // Fallback Legacy
-           console.warn(`Username '${cleanUsername}' tidak ditemukan di public DB atau RLS memblokir. Mencoba format legacy...`);
            loginEmail = `${cleanUsername}@taskplay.com`;
         }
       } else {
         loginEmail = identifier.trim().toLowerCase();
       }
       
-      console.log("Attempting login with:", loginEmail);
-
-      // Login ke Supabase Auth
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: password,
@@ -90,9 +84,8 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
 
       if (authError) throw authError;
 
-      // CEK STATUS ACTIVE/INACTIVE
       if (data.session) {
-         const { data: userProfile, error: profileError } = await supabase
+         const { data: userProfile } = await supabase
             .from('users')
             .select('is_active')
             .eq('id', data.session.user.id)
@@ -108,9 +101,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
         throw new Error("Sesi tidak valid.");
       }
     } catch (err: any) {
-      console.error("Login Error:", err);
       setRawError(err);
-      
       const msg = err.message?.toLowerCase() || '';
       
       if (msg.includes("email not confirmed")) {
@@ -140,12 +131,13 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
   };
 
   return (
-    <div className="min-h-screen bg-background dot-grid flex items-center justify-center p-4">
+    // Hardcoded bg color to prevent black screen issue
+    <div className="min-h-screen dot-grid flex items-center justify-center p-4 bg-[#FFFDF5]">
       <div className="fixed top-20 left-20 w-32 h-32 bg-secondary/20 rounded-full blur-3xl" />
       <div className="fixed bottom-20 right-20 w-48 h-48 bg-tertiary/20 rounded-full blur-3xl" />
       <div className="fixed top-1/2 left-10 w-12 h-12 bg-accent/20 rotate-45" />
 
-      <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-500">
+      <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-500 relative z-10">
         <div className="flex flex-col items-center mb-10">
           {appLogo ? (
              <div className="w-24 h-24 mb-4 flex items-center justify-center">
@@ -209,14 +201,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
                    <div className="flex-1">
                      <p className="text-sm font-black mb-1">Gagal Masuk</p>
                      <p>{errorState.message}</p>
-                     {errorState.isConfirmationError && (
-                       <p className="mt-2 text-[10px] text-slate-500">
-                         <strong>Tips Admin:</strong> Jalankan script SQL berikut di Dashboard untuk mem-bypass verifikasi:<br/>
-                         <code className="block bg-slate-100 p-1 mt-1 rounded border border-slate-300">
-                           UPDATE auth.users SET email_confirmed_at = NOW() WHERE email = '...';
-                         </code>
-                       </p>
-                     )}
                    </div>
                 </div>
               </div>
@@ -227,7 +211,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
             </Button>
           </form>
 
-          {/* Technical Details Toggler */}
+          {/* Technical Details */}
           {rawError && (
              <div className="mt-6 border-t-2 border-slate-100 pt-4 text-center">
                 <button 
@@ -237,7 +221,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
                 >
                   <HelpCircle size={10} /> {showTechnicalDetails ? 'Sembunyikan' : 'Lihat'} Detail Error
                 </button>
-                
                 {showTechnicalDetails && (
                   <div className="mt-2 p-2 bg-slate-900 text-slate-200 text-[10px] font-mono rounded-lg text-left overflow-x-auto max-h-32">
                     <pre>{JSON.stringify(rawError, null, 2)}</pre>

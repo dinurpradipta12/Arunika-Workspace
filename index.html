@@ -25,6 +25,7 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script>
       tailwind.config = {
+        darkMode: 'class', // Force manual dark mode to prevent system preference override
         theme: {
           extend: {
             colors: {
@@ -57,6 +58,19 @@
         }
       }
     </script>
+    <style>
+      .dot-grid {
+        background-size: 40px 40px;
+        background-image: radial-gradient(circle, #E2E8F0 1px, transparent 1px);
+      }
+      .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+      }
+      .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+      }
+    </style>
     <script type="importmap">
 {
   "imports": {
@@ -64,7 +78,7 @@
     "react/": "https://esm.sh/react@18.3.1/",
     "react-dom": "https://esm.sh/react-dom@18.3.1",
     "react-dom/": "https://esm.sh/react-dom@18.3.1/",
-    "@google/genai": "https://esm.sh/@google/genai@0.1.1",
+    "@google/genai": "https://esm.sh/@google/genai@0.2.1",
     "recharts": "https://esm.sh/recharts@2.12.7?deps=react@18.3.1,react-dom@18.3.1",
     "lucide-react": "https://esm.sh/lucide-react@0.344.0?deps=react@18.3.1",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.8",
@@ -73,7 +87,7 @@
 }
 </script>
   </head>
-  <body class="text-slate-900 antialiased">
+  <body class="text-slate-900 antialiased bg-[#FFFDF5]">
     <div id="root" class="text-slate-900"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

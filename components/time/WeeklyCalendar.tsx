@@ -187,8 +187,8 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
 
       {/* FIXED HEADER (DAYS) */}
       <div className="flex border-b border-slate-100 shrink-0 bg-white z-30">
-        {/* Time Col Spacer */}
-        <div className="w-20 border-r border-slate-100 flex items-center justify-center bg-white">
+        {/* Time Col Spacer (Sticky Left) */}
+        <div className="w-20 border-r border-slate-100 flex items-center justify-center bg-white sticky left-0 z-40 shadow-[4px_0px_10px_rgba(0,0,0,0.02)]">
            <span className="text-[10px] font-black text-slate-400">GMT+7</span>
         </div>
         
@@ -197,8 +197,8 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
            {weekDays.map((date, idx) => {
               const isToday = date.toDateString() === now.toDateString();
               return (
-                <div key={idx} className={`py-3 text-center border-r border-slate-100 transition-colors ${isToday ? 'bg-orange-50' : ''}`}>
-                  <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${isToday ? 'text-orange-500' : 'text-slate-400'}`}>
+                <div key={idx} className={`py-3 text-center border-r border-slate-100 transition-colors ${isToday ? 'bg-orange-100/50' : ''}`}>
+                  <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${isToday ? 'text-orange-600' : 'text-slate-400'}`}>
                     {date.toLocaleDateString('en-US', { weekday: 'short' })}
                   </p>
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto text-sm font-bold ${isToday ? 'bg-orange-500 text-white shadow-pop' : 'text-slate-800'}`}>
@@ -213,8 +213,8 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
       {/* SCROLLABLE BODY */}
       <div className="flex-1 overflow-y-auto scrollbar-hide relative">
         <div className="flex relative">
-            {/* TIME COLUMN (Scrolls with grid) */}
-            <div className="w-20 shrink-0 border-r border-slate-100 bg-white z-20">
+            {/* TIME COLUMN (Sticky Left) */}
+            <div className="w-20 shrink-0 border-r border-slate-100 bg-white z-20 sticky left-0 shadow-[4px_0px_10px_rgba(0,0,0,0.02)]">
                {HOURS.map(h => (
                  <div key={h} className="relative border-b border-transparent box-border" style={{ height: `${HOUR_HEIGHT}px` }}>
                     <span className="absolute -top-2 right-2 text-xs font-bold text-slate-400">
@@ -234,12 +234,14 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
                   ))}
                </div>
 
-               {/* Current Time Line Overlay (Across entire grid) */}
+               {/* Current Time Line Overlay (Across entire container, absolute to row) */}
+               {/* Note: Placing it here makes it span the scrollable grid width */}
                <div 
                  className="absolute left-0 right-0 border-t-2 border-dashed border-orange-500 z-10 pointer-events-none flex items-center"
                  style={{ top: `${currentTop}px` }}
                >
-                 <div className="absolute left-[-5px] w-3 h-3 rounded-full bg-orange-500" />
+                 {/* Dot positioned relative to grid start, visually bridging time col */}
+                 <div className="absolute -left-1.5 w-3 h-3 rounded-full bg-orange-500 shadow-sm" />
                </div>
 
                {/* Day Columns */}
@@ -253,7 +255,7 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
                   return (
                     <div 
                       key={idx} 
-                      className={`relative border-r border-slate-100 group ${isToday ? 'bg-orange-50/30' : ''}`}
+                      className={`relative border-r border-slate-100 group ${isToday ? 'bg-orange-50/40' : ''}`}
                       style={{ height: `${HOURS.length * HOUR_HEIGHT}px` }}
                       onDragOver={handleDragOver}
                       onDrop={(e) => handleDrop(e, date)}

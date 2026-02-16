@@ -42,12 +42,9 @@ export const CalendarHeader: React.FC<CalendarHeaderProps> = ({
         </div>
       </div>
 
-      {/* RIGHT */}
+      {/* RIGHT - Clean (Removed Buttons) */}
       <div className="flex items-center gap-3">
-        <button className="flex items-center gap-2 px-4 py-2.5 bg-white border-2 border-slate-800 rounded-xl text-xs font-bold text-slate-800 shadow-sm hover:shadow-pop hover:-translate-y-0.5 transition-all">
-          <Calendar size={14} />
-          Last Week
-        </button>
+         {/* No settings button here as requested */}
       </div>
     </div>
   );
