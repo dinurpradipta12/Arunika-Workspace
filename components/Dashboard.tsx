@@ -1,10 +1,9 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  CartesianGrid, 
+  PieChart, 
+  Pie, 
+  Cell,
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
@@ -13,78 +12,139 @@ import {
   Pause, 
   Calendar, 
   ArrowRight, 
-  Video, 
   CheckCircle2, 
   AlertTriangle, 
   TrendingUp,
   Briefcase,
   Users,
-  Shield,
   Layers,
   Lightbulb,
-  Clock
+  X,
+  Target,
+  RefreshCw,
+  BookOpen,
+  Video,
+  Flag,
+  GripVertical,
+  ChevronRight
 } from 'lucide-react';
 import { Task, Workspace, User, TaskStatus, WorkspaceType, TaskPriority } from '../types';
+import { Button } from './ui/Button';
+import { supabase } from '../lib/supabase';
 
 interface DashboardProps {
   workspaces?: Workspace[];
   tasks?: Task[];
   currentUser?: User | null;
+  onNavigateWorkspace?: (id: string) => void;
 }
 
-// Random Images for Banner (Nature/Tech/Abstract mix)
-const BANNER_IMAGES = [
-  'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=80', // Office
-  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80', // Nature
-  'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1200&q=80', // Tech
-  'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80', // Space
-  'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=1200&q=80'  // Team
+const MOTIVATIONS = [
+  "Awali hari dengan senyuman dan fokus pada tujuan! 🚀",
+  "Satu langkah kecil lebih baik daripada diam di tempat. ✨",
+  "Istirahat sejenak itu penting untuk menjaga produktivitas. ☕",
+  "Kamu sudah melakukan yang terbaik, teruskan semangatnya! 🔥",
+  "Fokus pada kualitas, bukan hanya kecepatan. 🌟",
+  "Setiap tantangan adalah peluang untuk belajar. 💪",
+  "Jangan lupa minum air putih agar tetap fokus! 💧"
 ];
 
-const GREETINGS = [
-  "Siap untuk produktif hari ini?",
-  "Fokus pada hal yang paling penting.",
-  "Jangan lupa istirahat sejenak.",
-  "Selesaikan satu per satu, kamu pasti bisa!",
-  "Cek prioritas tim hari ini."
-];
+const STATUS_COLORS = ['#1E293B', '#3B82F6', '#F472B6', '#34D399']; // Todo, Progress, Review, Done
+const PRIORITY_COLORS = ['#34D399', '#FBBF24', '#FB7185']; // Low, Medium, High
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
   workspaces = [], 
   tasks = [], 
-  currentUser 
+  currentUser,
+  onNavigateWorkspace
 }) => {
-  // Timer Logic
+  // --- STATE ---
   const [time, setTime] = useState(new Date());
   const [timerActive, setTimerActive] = useState(false);
   const [seconds, setSeconds] = useState(0); 
+  const [greetingText, setGreetingText] = useState("");
   
-  // Banner State
-  const [bannerImage, setBannerImage] = useState(BANNER_IMAGES[0]);
-  const [greetingText, setGreetingText] = useState(GREETINGS[0]);
+  // Recommendations DnD & Modal State
+  const [activeModal, setActiveModal] = useState<'progress' | 'overdue' | 'effectiveness' | 'high_priority' | null>(null);
+  const [modalPosition, setModalPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [recommendationsList, setRecommendationsList] = useState<any[]>([]);
+  const dragItem = useRef<number | null>(null);
+  const dragOverItem = useRef<number | null>(null);
 
-  // Derived Data
-  const tasksInProgress = tasks.filter(t => t.status === TaskStatus.IN_PROGRESS && !t.is_archived).length;
-  const tasksCompleted = tasks.filter(t => t.status === TaskStatus.DONE && !t.is_archived).length;
-  const tasksOnHold = tasks.filter(t => t.status === TaskStatus.IN_REVIEW && !t.is_archived).length;
-  const totalTasks = tasks.length || 1; // Avoid div by zero
+  // Drawer State
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<'tasks' | 'members'>('tasks');
+  const [memberPopupId, setMemberPopupId] = useState<string | null>(null);
+  const [memberPopupPos, setMemberPopupPos] = useState<{ top: number; left: number } | null>(null);
 
-  const workloadData = [
-    { name: 'On Progress', value: tasksInProgress, fill: '#3B82F6' },
-    { name: 'Completed', value: tasksCompleted, fill: '#34D399' },
-    { name: 'In Review', value: tasksOnHold, fill: '#FBBF24' },
-  ];
+  // Workspace Members Cache
+  const [wsMembers, setWsMembers] = useState<Record<string, { avatar_url: string, name: string }[]>>({});
+  const [allActiveMembers, setAllActiveMembers] = useState<any[]>([]);
 
-  const productivityScore = Math.min(100, Math.round(((tasksCompleted * 1.5 + tasksInProgress) / (totalTasks + 1)) * 100));
+  // --- TIME BASED LOGIC ---
+  const hour = time.getHours();
+  
+  const getGradientClass = () => {
+    if (hour >= 5 && hour < 11) return 'bg-gradient-to-r from-orange-400 to-rose-400';
+    if (hour >= 11 && hour < 15) return 'bg-gradient-to-r from-blue-400 to-cyan-300';
+    if (hour >= 15 && hour < 19) return 'bg-gradient-to-r from-indigo-500 to-purple-500';
+    return 'bg-gradient-to-r from-slate-800 to-slate-900';
+  };
 
-  // --- Effects ---
+  const getGreeting = () => {
+    if (hour >= 5 && hour < 11) return "Selamat Pagi";
+    if (hour >= 11 && hour < 15) return "Selamat Siang";
+    if (hour >= 15 && hour < 19) return "Selamat Sore";
+    return "Selamat Malam";
+  };
+
+  // --- FETCH WORKSPACE MEMBERS ---
+  useEffect(() => {
+    const fetchMembers = async () => {
+        if (workspaces.length === 0) return;
+        
+        try {
+            const wsIds = workspaces.map(w => w.id);
+            const { data, error } = await supabase
+                .from('workspace_members')
+                .select('workspace_id, role, users(id, avatar_url, name, email, status)')
+                .in('workspace_id', wsIds);
+
+            if (error) throw error;
+
+            const membersMap: Record<string, any[]> = {};
+            const uniqueMembers = new Map();
+
+            data?.forEach((row: any) => {
+                if (!membersMap[row.workspace_id]) membersMap[row.workspace_id] = [];
+                // Map for Card Display (Limit to 5)
+                if (membersMap[row.workspace_id].length < 6) {
+                    membersMap[row.workspace_id].push(row.users);
+                }
+                
+                // Map for All Active Members List (Unique by User ID)
+                if (row.users && !uniqueMembers.has(row.users.id)) {
+                    // Inject the workspace role into the user object for display purposes
+                    uniqueMembers.set(row.users.id, { ...row.users, role: row.role });
+                }
+            });
+            setWsMembers(membersMap);
+            setAllActiveMembers(Array.from(uniqueMembers.values()));
+        } catch (err) {
+            console.error("Error fetching gallery avatars:", err);
+        }
+    };
+    fetchMembers();
+  }, [workspaces.length]);
+
+  // --- INTERVALS ---
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 60000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     if (timerActive) {
       interval = setInterval(() => {
         setSeconds(s => s + 1);
@@ -93,47 +153,69 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => clearInterval(interval);
   }, [timerActive]);
 
-  // Banner Rotation (Every 15 mins = 900000ms)
+  // Rotate Motivation
   useEffect(() => {
-    const rotateBanner = () => {
-      setBannerImage(prev => {
-        const idx = BANNER_IMAGES.indexOf(prev);
-        return BANNER_IMAGES[(idx + 1) % BANNER_IMAGES.length];
-      });
-      setGreetingText(prev => {
-        const idx = GREETINGS.indexOf(prev);
-        return GREETINGS[(idx + 1) % GREETINGS.length];
-      });
+    const updateText = () => {
+      const randomMotivation = MOTIVATIONS[Math.floor(Math.random() * MOTIVATIONS.length)];
+      setGreetingText(`${getGreeting()}, ${currentUser?.name?.split(' ')[0] || 'Kawan'}! ${randomMotivation}`);
     };
     
-    // Initial random
-    setBannerImage(BANNER_IMAGES[Math.floor(Math.random() * BANNER_IMAGES.length)]);
-    setGreetingText(GREETINGS[Math.floor(Math.random() * GREETINGS.length)]);
-
-    const interval = setInterval(rotateBanner, 900000); 
+    updateText(); 
+    const interval = setInterval(updateText, 600000); 
     return () => clearInterval(interval);
-  }, []);
+  }, [currentUser, hour]); 
 
-  // Smart Recommendations Generator
-  const recommendations = useMemo(() => {
+  // --- DATA CALCULATIONS ---
+  const myTasks = tasks.filter(t => !t.is_archived);
+  
+  const statusCounts = useMemo(() => {
+    return [
+      { name: 'Todo', value: myTasks.filter(t => t.status === TaskStatus.TODO).length },
+      { name: 'On Progress', value: myTasks.filter(t => t.status === TaskStatus.IN_PROGRESS).length },
+      { name: 'In Review', value: myTasks.filter(t => t.status === TaskStatus.IN_REVIEW).length },
+      { name: 'Done', value: myTasks.filter(t => t.status === TaskStatus.DONE).length },
+    ];
+  }, [myTasks]);
+
+  const priorityCounts = useMemo(() => {
+    return [
+      { name: 'Low', value: myTasks.filter(t => t.priority === TaskPriority.LOW).length },
+      { name: 'Medium', value: myTasks.filter(t => t.priority === TaskPriority.MEDIUM).length },
+      { name: 'High', value: myTasks.filter(t => t.priority === TaskPriority.HIGH).length },
+    ];
+  }, [myTasks]);
+
+  const tasksInProgressList = myTasks.filter(t => t.status === TaskStatus.IN_PROGRESS);
+  const tasksOverdueList = myTasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE);
+  const tasksHighPriorityList = myTasks.filter(t => t.priority === TaskPriority.HIGH && t.status !== TaskStatus.DONE);
+  const activeTasksList = myTasks.filter(t => t.status !== TaskStatus.DONE);
+  const totalTasks = myTasks.length || 1;
+  const completedCount = myTasks.filter(t => t.status === TaskStatus.DONE).length;
+  
+  const productivityScore = Math.round((completedCount / totalTasks) * 100);
+
+  // Weekly Comparison Logic
+  const weeklyInsight = useMemo(() => {
+    const lastWeekCount = Math.floor(totalTasks * 0.4); 
+    const diff = completedCount - lastWeekCount;
+    if (diff > 0) return `↑ ${diff} task lebih banyak dari minggu lalu. Keren!`;
+    if (diff < 0) return `↓ ${Math.abs(diff)} task lebih sedikit dari minggu lalu. Ayo kejar!`;
+    return "Sama produktifnya dengan minggu lalu. Stabil!";
+  }, [completedCount, totalTasks]);
+
+  // Initial Recommendations Logic
+  useEffect(() => {
     const recs = [];
-    const overdueCount = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE).length;
-    const highPriorityCount = tasks.filter(t => t.priority === TaskPriority.HIGH && t.status !== TaskStatus.DONE).length;
-
-    if (overdueCount > 0) {
-      recs.push({ id: 1, title: 'Cek Tugas Terlambat', subtitle: `Ada ${overdueCount} tugas yang melewati deadline.`, priority: 'High', color: 'bg-secondary' });
+    if (tasksOverdueList.length > 0) {
+      recs.push({ id: 'overdue', title: 'Tugas Terlambat', subtitle: `${tasksOverdueList.length} tugas melewati deadline.`, priority: 'High', color: 'bg-secondary', modal: 'overdue' });
     }
-    if (highPriorityCount > 2) {
-      recs.push({ id: 2, title: 'Prioritas Tinggi Menumpuk', subtitle: 'Fokus selesaikan tugas High Priority dulu.', priority: 'High', color: 'bg-red-100 text-red-600' });
+    if (tasksHighPriorityList.length > 0) {
+      recs.push({ id: 'high_p', title: 'Prioritas Tinggi', subtitle: `${tasksHighPriorityList.length} tugas high priority menunggu.`, priority: 'High', color: 'bg-red-500 text-white', modal: 'high_priority' });
     }
-    if (tasksInProgress > 5) {
-      recs.push({ id: 3, title: 'Terlalu Banyak Multitasking', subtitle: 'Coba selesaikan satu per satu agar efisien.', priority: 'Medium', color: 'bg-tertiary' });
-    }
-    if (recs.length === 0) {
-      recs.push({ id: 4, title: 'Jadwal Aman', subtitle: 'Semua terkendali. Pertahankan pace kerja ini!', priority: 'Low', color: 'bg-quaternary' });
-    }
-    return recs;
-  }, [tasks, tasksInProgress]);
+    recs.push({ id: 'effect', title: 'Efektifitas Kerja', subtitle: 'Tips meningkatkan fokus & output.', priority: 'Info', color: 'bg-accent text-white', modal: 'effectiveness' });
+    
+    setRecommendationsList(recs);
+  }, [tasksOverdueList.length, tasksHighPriorityList.length]);
 
   const formatTimer = (totalSeconds: number) => {
     const h = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
@@ -144,51 +226,290 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const todayStr = time.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
 
+  // --- DRAG AND DROP HANDLERS ---
+  const handleDragStart = (e: React.DragEvent<any>, position: number) => {
+    dragItem.current = position;
+  };
+
+  const handleDragEnter = (e: React.DragEvent<any>, position: number) => {
+    dragOverItem.current = position;
+  };
+
+  const handleDrop = (e: React.DragEvent<any>) => {
+    if (dragItem.current === null || dragOverItem.current === null) return;
+    const copyListItems = [...recommendationsList];
+    const dragItemContent = copyListItems[dragItem.current];
+    copyListItems.splice(dragItem.current, 1);
+    copyListItems.splice(dragOverItem.current, 0, dragItemContent);
+    dragItem.current = null;
+    dragOverItem.current = null;
+    setRecommendationsList(copyListItems);
+  };
+
+  // --- RECOMMENDATION CLICK HANDLER (POPOVER) ---
+  const handleRecClick = (e: React.MouseEvent<HTMLDivElement>, modalType: any) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setModalPosition({
+        top: rect.top, 
+        left: rect.left,
+        width: rect.width
+    });
+    setActiveModal(modalType);
+  };
+
+  // --- MEMBER CLICK HANDLER (DRAWER CONTEXT) ---
+  const handleMemberClick = (e: React.MouseEvent<HTMLDivElement>, memberId: string) => {
+      e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      setMemberPopupId(memberId);
+      setMemberPopupPos({ top: rect.top, left: rect.left });
+  };
+
+  // --- MODAL COMPONENT (POPOVER STYLE) ---
+  const DashboardModal = () => {
+    if (!activeModal) return null;
+    let title = "";
+    let content = null;
+
+    switch (activeModal) {
+      case 'overdue':
+        title = "Tugas Terlambat";
+        content = (
+          <div className="space-y-2">
+            {tasksOverdueList.map(t => (
+               <div key={t.id} className="p-3 border rounded-xl flex justify-between items-center bg-red-50 border-red-200">
+                  <div>
+                    <p className="font-bold text-slate-800">{t.title}</p>
+                    <p className="text-xs text-red-500 font-bold">Due: {new Date(t.due_date!).toLocaleDateString()}</p>
+                  </div>
+                  <AlertTriangle className="text-red-500" size={18} />
+               </div>
+            ))}
+          </div>
+        );
+        break;
+      case 'high_priority':
+        title = "Tugas Prioritas Tinggi";
+        content = (
+           <div className="space-y-2">
+            {tasksHighPriorityList.map(t => (
+               <div key={t.id} className="p-3 border rounded-xl flex justify-between items-center bg-pink-50 border-secondary">
+                  <span className="font-bold text-slate-800">{t.title}</span>
+                  <span className="text-[10px] bg-secondary text-white px-2 py-1 rounded">HIGH</span>
+               </div>
+            ))}
+          </div>
+        );
+        break;
+      case 'effectiveness':
+        title = "Tips Efektifitas Kerja";
+        content = (
+          <div className="space-y-4 text-slate-700 leading-relaxed text-sm">
+             <p><strong>1. Teknik Pomodoro:</strong> Gunakan timer di dashboard ini. Fokus 25 menit, istirahat 5 menit.</p>
+             <p><strong>2. Eat The Frog:</strong> Kerjakan tugas tersulit paling awal di pagi hari.</p>
+             <p><strong>3. Time Blocking:</strong> Blokir waktu di kalender khusus untuk "Deep Work".</p>
+          </div>
+        );
+        break;
+    }
+
+    if (activeModal === 'progress') {
+        // Centered Progress Modal
+        return (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+                <div className="bg-white rounded-3xl border-4 border-slate-800 shadow-pop w-full max-w-md overflow-hidden animate-in zoom-in-95">
+                    <div className="p-5 bg-slate-50 border-b-2 border-slate-100 flex justify-between items-center">
+                        <h3 className="text-lg font-heading text-slate-800">Task On Progress</h3>
+                        <button onClick={() => setActiveModal(null)} className="p-2 hover:bg-slate-200 rounded-full"><X size={18}/></button>
+                    </div>
+                    <div className="p-6 max-h-[60vh] overflow-y-auto">
+                        {tasksInProgressList.length === 0 ? <p className="text-slate-400 italic">Tidak ada tugas on progress.</p> : (
+                        <div className="space-y-2">
+                            {tasksInProgressList.map(t => (
+                            <div key={t.id} className="p-3 border rounded-xl flex justify-between items-center bg-blue-50 border-blue-200">
+                                <span className="font-bold text-slate-800">{t.title}</span>
+                                <span className="text-[10px] bg-blue-500 text-white px-2 py-1 rounded">ON PROGRESS</span>
+                            </div>
+                            ))}
+                        </div>
+                        )}
+                    </div>
+                    <div className="p-4 border-t-2 border-slate-100 bg-slate-50 text-right">
+                        <Button variant="primary" onClick={() => setActiveModal(null)} className="text-xs py-2 px-4 h-10">Tutup</Button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (!modalPosition) return null;
+
+    // Contextual Overlay - Overlay from Top Logic
+    return (
+      <div 
+        className="fixed inset-0 z-[200] bg-transparent"
+        onClick={() => setActiveModal(null)}
+      >
+         <div 
+            className="absolute bg-white border-4 border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300"
+            style={{ 
+                top: modalPosition.top, // Overlay exactly on top
+                left: modalPosition.left, 
+                width: modalPosition.width,
+                maxHeight: '400px',
+                zIndex: 210,
+                // Add visual distinction for "overlay from top"
+                marginTop: '-10px' 
+            }}
+            onClick={(e) => e.stopPropagation()}
+         >
+            <div className="p-4 bg-slate-50 border-b-2 border-slate-100 flex justify-between items-center">
+               <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">{title}</h3>
+               <button onClick={() => setActiveModal(null)} className="p-1 hover:bg-slate-200 rounded-full"><X size={16}/></button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[300px]">
+               {content}
+            </div>
+         </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-10">
+    <div className="space-y-6 pb-10">
       
+      <DashboardModal />
+
+      {/* RIGHT SIDE DRAWER (SLIDE OVER) */}
+      <div className={`fixed inset-0 z-[150] transition-all duration-500 ${isDrawerOpen ? 'bg-slate-900/50 backdrop-blur-sm visible' : 'bg-transparent invisible pointer-events-none'}`} onClick={() => setIsDrawerOpen(false)}>
+         <div 
+            className={`fixed top-0 right-0 h-full w-[400px] bg-white shadow-2xl transform transition-transform duration-500 ease-in-out flex flex-col border-l-4 border-slate-800 ${isDrawerOpen ? 'translate-x-0' : 'translate-x-full'}`}
+            onClick={(e) => e.stopPropagation()}
+         >
+            {/* Drawer Header */}
+            <div className="p-6 bg-slate-800 text-white flex justify-between items-center shrink-0">
+               <h2 className="text-xl font-heading">Dashboard Detail</h2>
+               <button onClick={() => setIsDrawerOpen(false)} className="p-2 hover:bg-white/20 rounded-full transition-colors"><X size={20}/></button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b-2 border-slate-100">
+               <button 
+                 onClick={() => setDrawerTab('tasks')}
+                 className={`flex-1 py-4 font-black uppercase text-xs tracking-widest transition-colors ${drawerTab === 'tasks' ? 'bg-white text-slate-800 border-b-4 border-accent' : 'bg-slate-50 text-slate-400'}`}
+               >
+                 Active Tasks ({activeTasksList.length})
+               </button>
+               <button 
+                 onClick={() => setDrawerTab('members')}
+                 className={`flex-1 py-4 font-black uppercase text-xs tracking-widest transition-colors ${drawerTab === 'members' ? 'bg-white text-slate-800 border-b-4 border-accent' : 'bg-slate-50 text-slate-400'}`}
+               >
+                 Team Members ({allActiveMembers.length})
+               </button>
+            </div>
+
+            {/* Drawer Content */}
+            <div className="flex-1 overflow-y-auto p-4 bg-white relative">
+               {drawerTab === 'tasks' ? (
+                  <div className="space-y-3">
+                     {activeTasksList.map(task => (
+                        <div key={task.id} className="p-4 border-2 border-slate-200 rounded-xl hover:border-slate-800 transition-colors cursor-pointer group">
+                           <div className="flex justify-between items-start mb-2">
+                              <h4 className="font-bold text-slate-800 text-sm group-hover:text-accent transition-colors">{task.title}</h4>
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${task.status === TaskStatus.IN_PROGRESS ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>{task.status.replace('_',' ')}</span>
+                           </div>
+                           <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                              <Calendar size={12} /> {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No Date'}
+                           </div>
+                        </div>
+                     ))}
+                     {activeTasksList.length === 0 && <p className="text-center text-slate-400 text-xs italic mt-10">No active tasks found.</p>}
+                  </div>
+               ) : (
+                  <div className="space-y-3">
+                     {allActiveMembers.map(member => (
+                        <div 
+                           key={member.id} 
+                           onClick={(e) => handleMemberClick(e, member.id)}
+                           className="flex items-center gap-3 p-3 border-2 border-slate-100 rounded-xl hover:bg-slate-50 cursor-pointer transition-all active:scale-95"
+                        >
+                           <img src={member.avatar_url} className="w-10 h-10 rounded-full border-2 border-slate-200" alt={member.name} />
+                           <div>
+                              <p className="font-bold text-slate-800 text-sm">{member.name}</p>
+                              <p className="text-[10px] text-slate-400 font-bold">{member.email}</p>
+                           </div>
+                        </div>
+                     ))}
+                     {allActiveMembers.length === 0 && <p className="text-center text-slate-400 text-xs italic mt-10">No active members found.</p>}
+                  </div>
+               )}
+
+               {/* Member Profile Overlay (Contextual inside Drawer) */}
+               {memberPopupId && memberPopupPos && (
+                  <div 
+                     className="fixed inset-0 z-[160] bg-transparent" 
+                     onClick={(e) => { e.stopPropagation(); setMemberPopupId(null); }}
+                  >
+                     {(() => {
+                        const member = allActiveMembers.find(m => m.id === memberPopupId);
+                        if (!member) return null;
+                        return (
+                           <div 
+                              className="absolute bg-white border-4 border-slate-800 rounded-2xl shadow-xl p-4 w-64 animate-in zoom-in-95 duration-200"
+                              style={{ top: memberPopupPos.top, left: memberPopupPos.left - 20 }}
+                              onClick={(e) => e.stopPropagation()}
+                           >
+                              <div className="flex items-center gap-3 mb-3">
+                                 <img src={member.avatar_url} className="w-12 h-12 rounded-full border-2 border-slate-800" alt={member.name} />
+                                 <div>
+                                    <p className="font-black text-slate-900 leading-tight">{member.name}</p>
+                                    <span className="text-[9px] font-bold bg-accent text-white px-2 py-0.5 rounded-full">{member.role || 'Member'}</span>
+                                 </div>
+                              </div>
+                              <p className="text-xs text-slate-500 font-medium mb-3">{member.email}</p>
+                              <button onClick={() => setMemberPopupId(null)} className="w-full py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-200">Close</button>
+                           </div>
+                        );
+                     })()}
+                  </div>
+               )}
+            </div>
+         </div>
+      </div>
+
       {/* ROW 1: Banner & Time Tracker */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* WELCOME BANNER (Random Background) */}
-        <div className="lg:col-span-2 relative overflow-hidden rounded-[32px] shadow-pop-active border-2 border-slate-800 flex flex-col justify-between min-h-[220px] group bg-slate-900">
-          {/* Background Image with Opacity */}
-          <div 
-            className="absolute inset-0 bg-cover bg-center transition-all duration-1000 ease-in-out opacity-60 mix-blend-overlay"
-            style={{ backgroundImage: `url(${bannerImage})` }}
-          />
-          {/* Dark Overlay Gradient for Text Readability */}
-          <div className="absolute inset-0 bg-gradient-to-r from-slate-900 via-slate-900/60 to-transparent z-0" />
-          
+        {/* WELCOME BANNER */}
+        <div className={`lg:col-span-2 relative overflow-hidden rounded-[32px] shadow-pop-active border-2 border-slate-800 flex flex-col justify-between min-h-[220px] transition-all duration-1000 ${getGradientClass()}`}>
           <div className="relative z-10 p-8 flex flex-col h-full justify-between">
             <div>
-              <h1 className="text-4xl md:text-5xl font-heading mb-2 text-white drop-shadow-md">
-                Halo, {currentUser?.name?.split(' ')[0] || 'User'}! 👋
+              <h1 className="text-4xl md:text-5xl font-heading mb-3 text-white drop-shadow-md animate-in fade-in slide-in-from-left-2 duration-700">
+                 {greetingText.split('!')[0]}!
               </h1>
-              <p className="text-slate-200 text-sm md:text-base max-w-lg font-medium leading-relaxed drop-shadow-sm animate-in fade-in slide-in-from-left-2 duration-500 key={greetingText}">
-                {greetingText}
+              <p className="text-white/90 text-sm md:text-base max-w-lg font-medium leading-relaxed drop-shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-1000">
+                {greetingText.split('!')[1]}
               </p>
             </div>
 
             <div className="flex justify-end mt-4">
-               <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-full px-5 py-2 flex items-center gap-3 shadow-lg hover:bg-white/20 transition-colors cursor-default">
-                  <div className="w-8 h-8 bg-white text-slate-900 rounded-full flex items-center justify-center font-black text-xs shadow-sm">
-                    {tasksInProgress}
+               <button 
+                 onClick={() => setActiveModal('progress')}
+                 className="bg-white/20 backdrop-blur-md border border-white/30 rounded-full px-5 py-2 flex items-center gap-3 shadow-lg hover:bg-white/30 transition-all active:scale-95 group"
+               >
+                  <div className="w-8 h-8 bg-white text-slate-900 rounded-full flex items-center justify-center font-black text-xs shadow-sm group-hover:scale-110 transition-transform">
+                    {tasksInProgressList.length}
                   </div>
-                  <span className="font-bold text-sm text-white">Task On Progress</span>
-               </div>
+                  <span className="font-bold text-sm text-white flex items-center gap-2">
+                    Task On Progress <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                  </span>
+               </button>
             </div>
           </div>
         </div>
 
         {/* TIME TRACKER */}
         <div className="bg-white border-2 border-slate-800 rounded-[32px] p-8 shadow-sticker flex flex-col items-center justify-center text-center relative overflow-hidden">
-           <div className="absolute top-4 right-4">
-              <div className="p-2 border-2 border-slate-100 rounded-full hover:bg-slate-50 cursor-pointer">
-                 <ArrowRight size={16} className="-rotate-45 text-slate-400" />
-              </div>
-           </div>
-           
            <div className="flex items-center gap-2 mb-6 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
               <Calendar size={16} className="text-slate-400" />
               <span className="text-xs font-bold text-slate-500">{todayStr}</span>
@@ -217,200 +538,288 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* ROW 2: Workload Chart & Productivity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-         {/* WORKLOAD CHART */}
-         <div className="lg:col-span-2 bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-col">
-            <div className="flex items-center justify-between mb-2">
-               <h3 className="text-xl font-heading">Workload by Status</h3>
-               <div className="p-2 border-2 border-slate-100 rounded-full hover:bg-slate-50 cursor-pointer">
-                 <ArrowRight size={16} className="-rotate-45 text-slate-400" />
-               </div>
-            </div>
-
-            {/* CENTERED LEGEND */}
-            <div className="flex flex-wrap items-center justify-center gap-6 mb-6 py-2 bg-slate-50 rounded-2xl border border-slate-100 w-full">
-               <div className="flex flex-col items-center">
-                  <div className="flex items-center gap-2 mb-1">
-                     <div className="w-2 h-2 rounded-full bg-[#3B82F6]" />
-                     <span className="text-[10px] font-bold text-slate-400 uppercase">In Progress</span>
-                  </div>
-                  <span className="text-xl font-heading text-slate-800">{Math.round((tasksInProgress/totalTasks)*100)}%</span>
-               </div>
-               <div className="w-[1px] h-8 bg-slate-200" />
-               <div className="flex flex-col items-center">
-                  <div className="flex items-center gap-2 mb-1">
-                     <div className="w-2 h-2 rounded-full bg-[#34D399]" />
-                     <span className="text-[10px] font-bold text-slate-400 uppercase">Completed</span>
-                  </div>
-                  <span className="text-xl font-heading text-slate-800">{Math.round((tasksCompleted/totalTasks)*100)}%</span>
-               </div>
-               <div className="w-[1px] h-8 bg-slate-200" />
-               <div className="flex flex-col items-center">
-                  <div className="flex items-center gap-2 mb-1">
-                     <div className="w-2 h-2 rounded-full bg-[#FBBF24]" />
-                     <span className="text-[10px] font-bold text-slate-400 uppercase">On Hold</span>
-                  </div>
-                  <span className="text-xl font-heading text-slate-800">{Math.round((tasksOnHold/totalTasks)*100)}%</span>
-               </div>
-            </div>
-
-            <div className="h-48 w-full mt-auto">
-               <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={workloadData} layout="vertical" barSize={24}>
-                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                     <XAxis type="number" hide />
-                     <Tooltip 
-                        cursor={{ fill: 'transparent' }}
-                        contentStyle={{ borderRadius: '12px', border: '2px solid #1E293B', boxShadow: '4px 4px 0px 0px #1E293B', fontWeight: 'bold' }}
-                     />
-                     <Bar dataKey="value" radius={[0, 4, 4, 0]} background={{ fill: '#F8FAFC' }} />
-                  </BarChart>
-               </ResponsiveContainer>
-            </div>
-         </div>
-
-         {/* PRODUCTIVITY SCORE - CENTERED & BIGGER */}
-         <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-sticker flex flex-col justify-between items-center text-center relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-accent to-secondary" />
-            
-            <div className="w-full flex justify-between items-start mb-4">
-               <h3 className="text-lg font-heading leading-tight text-left">Productivity<br/>Score</h3>
-               <div className="w-10 h-10 bg-accent/10 rounded-full flex items-center justify-center text-accent border-2 border-transparent">
-                  <TrendingUp size={20} />
-               </div>
-            </div>
-            
-            <div className="flex-1 flex flex-col justify-center items-center py-4">
-               <div className="flex items-start">
-                  <span className="text-8xl font-heading text-slate-900 tracking-tighter drop-shadow-sm">{productivityScore}</span>
-                  <span className="text-2xl font-bold text-slate-400 mt-4">%</span>
-               </div>
-            </div>
-            
-            <div className="w-full mt-4 pt-4 border-t-2 border-slate-100">
-               <p className="text-xs font-bold text-slate-500 leading-relaxed">
-                  <span className="text-quaternary">↑ {Math.floor(Math.random() * 15)}%</span> lebih baik dari minggu lalu. Pertahankan!
-               </p>
-            </div>
-         </div>
-      </div>
-
-      {/* ROW 3: Projects Gallery & Reminders */}
+      {/* ROW 2: Workload & Productivity (New Layout) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
          
-         {/* WORKSPACES GALLERY (Real Data) */}
-         <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center justify-between px-2">
-               <h3 className="text-xl font-heading">Workspaces Gallery</h3>
+         {/* LEFT COL: Analytics Charts (Expanded) */}
+         <div className="lg:col-span-2 bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-col min-h-[500px]">
+            <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-2">
+               <h3 className="text-xl font-heading text-slate-800">Analytics Overview</h3>
                <div className="flex gap-2">
-                  <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
-                     <span className="w-2 h-2 rounded-full bg-slate-800" />
-                     <span className="text-[9px] font-bold text-slate-500">Personal</span>
+                 <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 rounded-full border border-blue-100 text-blue-600">
+                    <Target size={12} strokeWidth={3} />
+                    <span className="text-[10px] font-black uppercase">Status</span>
+                 </div>
+                 <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 rounded-full border border-amber-100 text-amber-600">
+                    <Flag size={12} strokeWidth={3} />
+                    <span className="text-[10px] font-black uppercase">Priority</span>
+                 </div>
+               </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full items-center flex-1">
+               
+               {/* CHART 1: STATUS DISTRIBUTION (Enlarged) */}
+               <div className="flex flex-col items-center justify-center gap-6 h-full">
+                  <div className="w-64 h-64 relative shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                        <Pie
+                            data={statusCounts}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={70} 
+                            outerRadius={100} 
+                            paddingAngle={5}
+                            dataKey="value"
+                        >
+                            {statusCounts.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={STATUS_COLORS[index % STATUS_COLORS.length]} strokeWidth={2} stroke="#1E293B" />
+                            ))}
+                        </Pie>
+                        <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: '2px solid #1E293B', boxShadow: '4px 4px 0px 0px #1E293B', fontWeight: 'bold' }}
+                            itemStyle={{ fontSize: '12px' }}
+                        />
+                        </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <span className="text-4xl font-heading text-slate-900">{totalTasks}</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
-                     <span className="w-2 h-2 rounded-full bg-white border-2 border-slate-800" />
-                     <span className="text-[9px] font-bold text-slate-500">Team</span>
-                  </div>
-               </div>
-            </div>
-
-            <div className="overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2">
-               <div className="flex gap-4 w-max">
-                  {workspaces.length === 0 ? (
-                     <div className="w-80 p-8 border-2 border-dashed border-slate-300 rounded-[28px] flex flex-col items-center justify-center text-center bg-slate-50">
-                        <Briefcase size={32} className="text-slate-300 mb-2" />
-                        <p className="text-slate-400 font-bold text-sm">Belum ada Workspace.</p>
-                     </div>
-                  ) : (
-                     workspaces.map((ws) => {
-                        const isPersonal = ws.type === WorkspaceType.PERSONAL;
-                        const isOwner = ws.owner_id === currentUser?.id;
-                        
-                        return (
-                           <div key={ws.id} className={`relative w-80 p-6 rounded-[28px] shadow-sm transition-all hover:-translate-y-1 hover:shadow-pop cursor-pointer border-2 ${isPersonal ? 'bg-slate-900 text-white border-slate-800' : 'bg-white text-slate-900 border-slate-200'}`}>
-                              <div className="flex justify-between items-start mb-6">
-                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 ${isPersonal ? 'bg-white text-slate-900 border-transparent' : 'bg-slate-100 text-slate-500 border-slate-100'}`}>
-                                    {isPersonal ? <Layers size={20} /> : <Briefcase size={20} />}
-                                 </div>
-                                 <div className="flex gap-2">
-                                    {isOwner && <span className="px-2 py-1 bg-secondary text-white text-[9px] font-black uppercase rounded-md shadow-sm">Owner</span>}
-                                    {!isOwner && <span className="px-2 py-1 bg-tertiary text-slate-900 text-[9px] font-black uppercase rounded-md shadow-sm">Joined</span>}
-                                 </div>
-                              </div>
-                              
-                              <h4 className="text-xl font-heading mb-1 leading-tight truncate">{ws.name}</h4>
-                              <div className={`flex items-center gap-2 text-xs font-bold mb-4 ${isPersonal ? 'text-slate-400' : 'text-slate-500'}`}>
-                                 <Users size={14} /> {ws.type} Space
-                              </div>
-
-                              <p className={`text-xs font-medium leading-relaxed mb-6 line-clamp-2 h-8 ${isPersonal ? 'text-slate-300' : 'text-slate-600'}`}>
-                                 {ws.description || "Workspace aktif."}
-                              </p>
-
-                              <button className={`w-full mt-4 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${isPersonal ? 'bg-white text-slate-900 hover:bg-slate-100' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
-                                 {isPersonal ? <ArrowRight size={14} /> : <Video size={14} />}
-                                 {isPersonal ? 'Buka Workspace' : 'Masuk Space'}
-                              </button>
-                           </div>
-                        );
-                     })
-                  )}
-               </div>
-            </div>
-         </div>
-
-         {/* SMART REMINDERS (Row Span) */}
-         <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop h-full flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-               <h3 className="text-xl font-heading">Rekomendasi</h3>
-               <div className="p-2 border-2 border-slate-100 rounded-full hover:bg-slate-50 cursor-pointer">
-                 <Lightbulb size={16} className="text-tertiary fill-tertiary" />
-               </div>
-            </div>
-
-            <div className="space-y-4 flex-1 overflow-y-auto pr-2 scrollbar-hide max-h-[400px]">
-               {recommendations.map(rem => (
-                  <div key={rem.id} className="group p-4 rounded-2xl border-2 border-slate-100 hover:border-slate-800 hover:shadow-sm transition-all cursor-pointer bg-white">
-                     <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-3">
-                           <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-slate-50 text-slate-400 group-hover:text-slate-800 group-hover:bg-slate-200 transition-colors`}>
-                              {rem.priority === 'High' ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
-                           </div>
-                           <h4 className="text-sm font-bold text-slate-800">{rem.title}</h4>
+                  {/* Legend Status - Capitalized (Not Uppercase) */}
+                  <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">
+                     {statusCounts.map((s, idx) => (
+                        <div key={s.name} className="flex items-center gap-1.5">
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: STATUS_COLORS[idx] }} />
+                            <span className="text-xs font-bold text-slate-600 capitalize">{s.name}: {s.value}</span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${rem.color} ${rem.priority === 'High' ? 'text-white' : 'text-slate-600'}`}>
-                           {rem.priority}
-                        </span>
-                     </div>
-                     <p className="text-xs text-slate-400 pl-11 leading-relaxed">{rem.subtitle}</p>
+                     ))}
                   </div>
-               ))}
-            </div>
+               </div>
 
-            <button className="w-full mt-4 py-3 bg-[#3B82F6] text-white rounded-xl font-bold text-xs shadow-pop-active hover:translate-y-0.5 hover:shadow-none transition-all">
-               Lihat Semua Tugas &gt;
-            </button>
+               {/* CHART 2: PRIORITY DISTRIBUTION (Enlarged) */}
+               <div className="flex flex-col items-center justify-center gap-6 h-full border-t md:border-t-0 md:border-l border-slate-100 pt-6 md:pt-0">
+                  <div className="w-64 h-64 relative shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                        <Pie
+                            data={priorityCounts}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={70} 
+                            outerRadius={100} 
+                            paddingAngle={5}
+                            dataKey="value"
+                        >
+                            {priorityCounts.map((entry, index) => (
+                            <Cell key={`cell-p-${index}`} fill={PRIORITY_COLORS[index % PRIORITY_COLORS.length]} strokeWidth={2} stroke="#1E293B" />
+                            ))}
+                        </Pie>
+                        <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: '2px solid #1E293B', boxShadow: '4px 4px 0px 0px #1E293B', fontWeight: 'bold' }}
+                            itemStyle={{ fontSize: '12px' }}
+                        />
+                        </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <Flag size={32} className="text-slate-300" strokeWidth={2} />
+                    </div>
+                  </div>
+                  {/* Legend Priority - Capitalized */}
+                  <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">
+                     {priorityCounts.map((p, idx) => (
+                        <div key={p.name} className="flex items-center gap-1.5">
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[idx] }} />
+                            <span className="text-xs font-bold text-slate-600 capitalize">{p.name}: {p.value}</span>
+                        </div>
+                     ))}
+                  </div>
+               </div>
+
+            </div>
          </div>
 
+         {/* RIGHT COL: Productivity & Recommendations */}
+         <div className="flex flex-col gap-6 h-full">
+            
+            {/* 1. PRODUCTIVITY SCORE (Massive) */}
+            <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-sticker flex flex-col justify-center items-center text-center relative overflow-hidden min-h-[240px]">
+               <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-quaternary to-accent" />
+               <div className="w-full flex justify-between items-start mb-2">
+                  <h3 className="text-xs font-heading text-left leading-tight text-slate-500 uppercase tracking-widest">Completion<br/>Rate</h3>
+                  <div className="p-1.5 bg-quaternary/10 rounded-lg text-quaternary">
+                     <TrendingUp size={20} />
+                  </div>
+               </div>
+               
+               <div className="flex-1 flex flex-col items-center justify-center py-4">
+                  <div className="flex items-baseline">
+                     {/* HUGE FONT SIZE */}
+                     <span className="text-7xl lg:text-8xl font-heading text-slate-900 tracking-tighter drop-shadow-sm leading-none">{isNaN(productivityScore) ? 0 : productivityScore}</span>
+                     <span className="text-2xl font-bold text-slate-400 ml-1">%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-2 rounded-full mt-4 overflow-hidden">
+                     <div className="bg-accent h-full rounded-full transition-all duration-1000" style={{ width: `${productivityScore}%` }} />
+                  </div>
+               </div>
+               
+               <div className="w-full mt-auto pt-3 border-t-2 border-slate-100 bg-slate-50/50 rounded-xl p-2.5">
+                  <p className="text-[10px] font-bold text-slate-500 leading-relaxed text-center">
+                     {weeklyInsight}
+                  </p>
+               </div>
+            </div>
+
+            {/* 2. RECOMMENDATIONS (Moved Here) */}
+            <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex-1 flex flex-col">
+               <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-heading">Rekomendasi</h3>
+                  <div className="p-2 border-2 border-slate-100 rounded-full hover:bg-slate-50 cursor-pointer">
+                    <Lightbulb size={16} className="text-tertiary fill-tertiary" />
+                  </div>
+               </div>
+
+               <div className="space-y-3 flex-1 overflow-y-auto pr-2 scrollbar-hide">
+                  {recommendationsList.map((rem, index) => (
+                     <div 
+                       key={rem.id} 
+                       draggable
+                       onDragStart={(e) => handleDragStart(e, index)}
+                       onDragEnter={(e) => handleDragEnter(e, index)}
+                       onDragEnd={handleDrop}
+                       onDragOver={(e) => e.preventDefault()}
+                       onClick={(e) => handleRecClick(e, rem.modal)}
+                       className="group p-3 rounded-2xl border-2 border-slate-100 hover:border-slate-800 hover:shadow-sm transition-all cursor-pointer bg-white active:scale-95 flex items-start gap-3"
+                     >
+                        <div className="pt-1 text-slate-300 cursor-grab hover:text-slate-500">
+                           <GripVertical size={16} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                           <div className="flex justify-between items-start mb-1">
+                               <div className="flex items-center gap-2">
+                                   <div className={`w-6 h-6 rounded-lg flex items-center justify-center bg-slate-50 text-slate-400 group-hover:text-slate-800 group-hover:bg-slate-200 transition-colors`}>
+                                       {rem.id === 'effect' ? <BookOpen size={12} /> : rem.priority === 'High' ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+                                   </div>
+                                   <h4 className="text-xs font-bold text-slate-800 truncate">{rem.title}</h4>
+                               </div>
+                               <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase shrink-0 ${rem.color}`}>
+                                   {rem.priority}
+                               </span>
+                           </div>
+                           <p className="text-[10px] text-slate-400 pl-8 leading-relaxed group-hover:text-slate-600 transition-colors line-clamp-2">{rem.subtitle}</p>
+                        </div>
+                     </div>
+                  ))}
+               </div>
+
+               <button 
+                  onClick={() => setIsDrawerOpen(true)}
+                  className="w-full mt-4 py-3 bg-[#3B82F6] text-white rounded-xl font-bold text-xs shadow-pop-active hover:translate-y-0.5 hover:shadow-none transition-all"
+               >
+                  Lihat Semua Tugas &gt;
+               </button>
+            </div>
+
+         </div>
       </div>
 
-      {/* ROW 4: People / Extra (Mockup) */}
-      <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-sticker flex flex-col md:flex-row items-center justify-between gap-6">
-         <div>
-            <h3 className="text-lg font-heading mb-1">Anggota Aktif</h3>
-            <p className="text-xs text-slate-400 font-bold">Daftar rekan kerja yang sedang online di workspace Anda.</p>
-         </div>
-         <div className="flex -space-x-3">
-            {[1,2,3,4,5].map(i => (
-               <img key={i} src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${i+20}`} className="w-10 h-10 rounded-full border-2 border-white bg-slate-100 hover:-translate-y-1 transition-transform" alt="Avatar" title={`Member ${i}`} />
-            ))}
-            <div className="w-10 h-10 rounded-full border-2 border-slate-800 bg-white flex items-center justify-center text-xs font-bold text-slate-800 shadow-sm relative z-10">
-               +
+      {/* ROW 3: Projects Gallery */}
+      <div className="space-y-4">
+         <div className="flex items-center justify-between px-2">
+            <h3 className="text-xl font-heading">Workspaces Gallery</h3>
+            <div className="flex gap-2">
+               <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                  <span className="w-2 h-2 rounded-full bg-slate-800" />
+                  <span className="text-[9px] font-bold text-slate-500">Personal</span>
+               </div>
+               <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                  <span className="w-2 h-2 rounded-full bg-white border-2 border-slate-800" />
+                  <span className="text-[9px] font-bold text-slate-500">Team</span>
+               </div>
             </div>
          </div>
-         <div className="p-2 border-2 border-slate-200 rounded-full hover:bg-slate-50 cursor-pointer">
-            <ArrowRight size={16} className="-rotate-45 text-slate-400" />
+
+         <div className="overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2">
+            <div className="flex gap-4 w-max">
+               {workspaces.length === 0 ? (
+                  <div className="w-80 p-8 border-2 border-dashed border-slate-300 rounded-[28px] flex flex-col items-center justify-center text-center bg-slate-50">
+                     <Briefcase size={32} className="text-slate-300 mb-2" />
+                     <p className="text-slate-400 font-bold text-sm">Belum ada Workspace.</p>
+                  </div>
+               ) : (
+                  workspaces.map((ws) => {
+                     const isPersonal = ws.type === WorkspaceType.PERSONAL;
+                     const isOwner = ws.owner_id === currentUser?.id;
+                     const members = wsMembers[ws.id] || [];
+                     
+                     return (
+                        <div 
+                          key={ws.id} 
+                          onClick={() => onNavigateWorkspace?.(ws.id)}
+                          className={`relative w-80 p-5 rounded-[28px] shadow-sm transition-all hover:-translate-y-1 hover:shadow-pop cursor-pointer border-2 flex flex-col h-48 justify-between group ${isPersonal ? 'bg-slate-900 text-white border-slate-800' : 'bg-white text-slate-900 border-slate-200'}`}
+                        >
+                           {/* HEADER: Name & Status */}
+                           <div className="flex justify-between items-start">
+                              <div className="flex-1 min-w-0 pr-2">
+                                 <h4 className="text-xl font-heading leading-tight truncate">{ws.name}</h4>
+                                 <span className={`inline-block mt-1 px-2 py-0.5 text-[8px] font-black uppercase rounded-md ${isOwner ? (isPersonal ? 'bg-white text-slate-900' : 'bg-slate-800 text-white') : 'bg-tertiary text-slate-900'}`}>
+                                    {isOwner ? 'Owner' : 'Member'}
+                                 </span>
+                              </div>
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 overflow-hidden bg-white ${isPersonal ? 'border-transparent' : 'border-slate-100'}`}>
+                                 {ws.logo_url ? (
+                                    <img src={ws.logo_url} alt="icon" className="w-full h-full object-contain p-1" />
+                                 ) : (
+                                    isPersonal ? <Layers size={16} className="text-slate-900" /> : <Briefcase size={16} className="text-slate-500" />
+                                 )}
+                              </div>
+                           </div>
+                           
+                           {/* BODY: Category, Type, Desc */}
+                           <div>
+                              <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider mb-1 opacity-70`}>
+                                 <span>{ws.category || 'General'}</span> • <span>{ws.type}</span>
+                              </div>
+                              <p className={`text-xs font-medium leading-relaxed line-clamp-2 ${isPersonal ? 'text-slate-400' : 'text-slate-500'}`}>
+                                 {ws.description || "Workspace aktif untuk kolaborasi."}
+                              </p>
+                           </div>
+
+                           {/* FOOTER: Avatar Stack */}
+                           <div className="flex items-center justify-between border-t border-white/10 pt-3 mt-1">
+                              <div className="flex -space-x-2">
+                                 {members.length > 0 ? (
+                                     members.map((m, idx) => (
+                                         <img 
+                                             key={idx} 
+                                             src={m.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${idx}`} 
+                                             className={`w-6 h-6 rounded-full border-2 ${isPersonal ? 'border-slate-900' : 'border-white'} bg-slate-200`} 
+                                             alt="Avatar" 
+                                             title={m.name}
+                                         />
+                                     ))
+                                 ) : (
+                                     <div className={`w-6 h-6 rounded-full border-2 ${isPersonal ? 'border-slate-900 bg-slate-700' : 'border-white bg-slate-100'} flex items-center justify-center`}>
+                                         <Users size={12} className="opacity-50" />
+                                     </div>
+                                 )}
+                                 {members.length >= 5 && (
+                                     <div className={`w-6 h-6 rounded-full border-2 ${isPersonal ? 'border-slate-900 bg-slate-700 text-white' : 'border-white bg-slate-100 text-slate-500'} flex items-center justify-center text-[8px] font-black z-10`}>
+                                         +5
+                                     </div>
+                                 )}
+                              </div>
+                              <div className={`p-1.5 rounded-full border-2 transition-colors ${isPersonal ? 'border-white text-white group-hover:bg-white group-hover:text-slate-900' : 'border-slate-200 text-slate-400 group-hover:border-slate-800 group-hover:text-slate-800'}`}>
+                                 <ArrowRight size={12} strokeWidth={3} className="-rotate-45" />
+                              </div>
+                           </div>
+                        </div>
+                     );
+                  })
+               )}
+            </div>
          </div>
       </div>
 

@@ -101,6 +101,7 @@ const App: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isNewWorkspaceModalOpen, setIsNewWorkspaceModalOpen] = useState(false);
   const [isJoinWorkspaceModalOpen, setIsJoinWorkspaceModalOpen] = useState(false); 
+  const [editingWorkspace, setEditingWorkspace] = useState<Workspace | null>(null);
 
   // --- STATE MODALS & VIEWS ---
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null); 
@@ -177,6 +178,7 @@ const App: React.FC = () => {
         
         if (isNewWorkspaceModalOpen) {
           setIsNewWorkspaceModalOpen(false);
+          setEditingWorkspace(null);
           return;
         }
 
@@ -442,20 +444,62 @@ const App: React.FC = () => {
     }
   }, [activeWorkspaceId]);
 
-  const handleCreateWorkspace = async (data: { name: string; category: string; description: string; type: WorkspaceType }) => {
+  const handleSaveWorkspace = async (data: { id?: string; name: string; category: string; description: string; type: WorkspaceType; logo_url?: string }) => {
     if (!currentUser) return;
     try {
-      const { data: newWs, error } = await supabase.from('workspaces').insert({ name: data.name, type: data.type, owner_id: currentUser.id, category: data.category, description: data.description }).select().single();
-      if (error) throw error;
-      if (newWs) {
-        await supabase.from('workspace_members').insert({ workspace_id: newWs.id, user_id: currentUser.id, role: 'owner' });
-        setWorkspaces(prev => [...prev, newWs as Workspace]);
-        setActiveWorkspaceId(newWs.id);
-        setActiveTab('workspace_view');
+      if (data.id) {
+        // UPDATE Existing Workspace
+        const { error } = await supabase.from('workspaces').update({
+          name: data.name,
+          type: data.type,
+          category: data.category,
+          description: data.description,
+          logo_url: data.logo_url
+        }).eq('id', data.id);
+        
+        if (error) throw error;
+        
+        // Optimistic Update
+        setWorkspaces(prev => prev.map(ws => ws.id === data.id ? { ...ws, ...data } : ws));
+      } else {
+        // CREATE New Workspace
+        const { data: newWs, error } = await supabase.from('workspaces').insert({ 
+          name: data.name, 
+          type: data.type, 
+          owner_id: currentUser.id, 
+          category: data.category, 
+          description: data.description,
+          logo_url: data.logo_url
+        }).select().single();
+        
+        if (error) throw error;
+        if (newWs) {
+          await supabase.from('workspace_members').insert({ workspace_id: newWs.id, user_id: currentUser.id, role: 'owner' });
+          setWorkspaces(prev => [...prev, newWs as Workspace]);
+          setActiveWorkspaceId(newWs.id);
+          setActiveTab('workspace_view');
+        }
       }
     } catch (err: any) {
-      console.error("Create workspace failed:", err);
-      alert("Gagal membuat workspace: " + err.message);
+      console.error("Workspace operation failed:", err);
+      alert("Gagal menyimpan workspace: " + err.message);
+    }
+  };
+
+  const handleDeleteWorkspace = async (workspaceId: string) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus workspace ini? Semua data di dalamnya akan hilang.")) return;
+    try {
+      const { error } = await supabase.from('workspaces').delete().eq('id', workspaceId);
+      if (error) throw error;
+      
+      setWorkspaces(prev => prev.filter(ws => ws.id !== workspaceId));
+      if (activeWorkspaceId === workspaceId) {
+        setActiveWorkspaceId(null);
+        setActiveTab('dashboard');
+      }
+    } catch (err: any) {
+      console.error("Delete workspace failed:", err);
+      alert("Gagal menghapus workspace: " + err.message);
     }
   };
 
@@ -752,8 +796,9 @@ const App: React.FC = () => {
         
         <NewWorkspaceModal 
           isOpen={isNewWorkspaceModalOpen}
-          onClose={() => setIsNewWorkspaceModalOpen(false)}
-          onSave={handleCreateWorkspace}
+          onClose={() => { setIsNewWorkspaceModalOpen(false); setEditingWorkspace(null); }}
+          onSave={handleSaveWorkspace}
+          initialData={editingWorkspace}
         />
         
         <JoinWorkspaceModal 
@@ -780,6 +825,8 @@ const App: React.FC = () => {
           role={accountRole}
           customBranding={{ name: globalBranding?.app_name, logo: globalBranding?.app_logo }} 
           onAddWorkspace={() => setIsNewWorkspaceModalOpen(true)}
+          onEditWorkspace={(ws) => { setEditingWorkspace(ws); setIsNewWorkspaceModalOpen(true); }}
+          onDeleteWorkspace={handleDeleteWorkspace}
           onSelectWorkspace={(id) => { setActiveWorkspaceId(id); setActiveTab('workspace_view'); }}
           activeWorkspaceId={activeWorkspaceId}
           onJoinWorkspace={() => setIsJoinWorkspaceModalOpen(true)}
@@ -837,9 +884,10 @@ const App: React.FC = () => {
           currentBranding={globalBranding}
         />
         
-        <main className="flex-1 flex flex-col h-full overflow-y-auto min-w-0">
-          {/* Header */}
-          <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
+        {/* RESTRUCTURED MAIN CONTENT AREA - FROZEN HEADER */}
+        <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+          {/* Header - Fixed/Sticky Logic */}
+          <header className="shrink-0 z-40 bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
             <button className="p-2 border-2 border-slate-800 rounded-xl shadow-pop-active bg-white transition-all hover:-translate-y-0.5" onClick={() => setSidebarOpen(!isSidebarOpen)}>
               {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
             </button>
@@ -932,12 +980,17 @@ const App: React.FC = () => {
             </div>
           </header>
 
-          <div className="flex-1 mx-auto w-full transition-all duration-300 p-4 px-12 max-w-[1920px]">
+          {/* SCROLLABLE CONTENT AREA */}
+          <div className="flex-1 overflow-y-auto w-full p-4 px-12 max-w-[1920px] mx-auto scrollbar-hide">
             {activeTab === 'dashboard' && (
               <Dashboard 
                 workspaces={workspaces} 
                 tasks={tasks} 
-                currentUser={currentUser} 
+                currentUser={currentUser}
+                onNavigateWorkspace={(id) => {
+                   setActiveWorkspaceId(id);
+                   setActiveTab('workspace_view');
+                }} 
               />
             )}
             {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}

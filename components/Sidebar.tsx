@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   LayoutGrid, 
   CheckSquare, 
@@ -10,7 +10,10 @@ import {
   X, 
   FolderArchive, 
   Briefcase,
-  QrCode
+  QrCode,
+  MoreVertical,
+  Edit,
+  Trash2
 } from 'lucide-react';
 import { Task, Workspace, User } from '../types';
 
@@ -35,6 +38,8 @@ interface SidebarProps {
     logo?: string;
   };
   onAddWorkspace?: () => void;
+  onEditWorkspace?: (workspace: Workspace) => void;
+  onDeleteWorkspace?: (workspaceId: string) => void;
   onSelectWorkspace?: (workspaceId: string) => void;
   activeWorkspaceId?: string | null;
   onJoinWorkspace?: () => void; 
@@ -54,14 +59,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
   role = 'Owner',
   customBranding,
   onAddWorkspace,
+  onEditWorkspace,
+  onDeleteWorkspace,
   onSelectWorkspace,
   activeWorkspaceId,
   onJoinWorkspace
 }) => {
   const appName = customBranding?.name || 'TaskPlay Management';
   const appLogo = customBranding?.logo;
-
   const isMember = role === 'Member';
+  
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <aside className={`
@@ -144,17 +163,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               )}
 
-              <div className="space-y-1">
+              <div className="space-y-1 pb-10" ref={menuRef}>
                 {workspaces.map(ws => (
-                   <button 
-                    key={ws.id}
-                    onClick={() => onSelectWorkspace?.(ws.id)}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-bold transition-all text-sm group ${activeWorkspaceId === ws.id && activeTab === 'workspace_view' ? 'bg-secondary text-white shadow-pop border-2 border-slate-800' : 'text-mutedForeground hover:bg-muted'}`}
-                   >
-                     <Briefcase size={16} className={activeWorkspaceId === ws.id && activeTab === 'workspace_view' ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'} />
-                     <span className="truncate flex-1 text-left">{ws.name}</span>
-                     {activeWorkspaceId === ws.id && activeTab === 'workspace_view' && <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
-                   </button>
+                   <div key={ws.id} className="relative group">
+                     <button 
+                      onClick={() => onSelectWorkspace?.(ws.id)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-bold transition-all text-sm group ${activeWorkspaceId === ws.id && activeTab === 'workspace_view' ? 'bg-secondary text-white shadow-pop border-2 border-slate-800' : 'text-mutedForeground hover:bg-muted'}`}
+                     >
+                       {ws.logo_url ? (
+                          <div className="w-4 h-4 shrink-0 overflow-hidden rounded">
+                             <img src={ws.logo_url} alt="icon" className="w-full h-full object-contain" />
+                          </div>
+                       ) : (
+                          <Briefcase size={16} className={activeWorkspaceId === ws.id && activeTab === 'workspace_view' ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'} />
+                       )}
+                       <span className="truncate flex-1 text-left">{ws.name}</span>
+                       {activeWorkspaceId === ws.id && activeTab === 'workspace_view' && <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
+                     </button>
+                     
+                     {/* More Option Button (Only if Owner/Admin theoretically, but here visible) */}
+                     {ws.owner_id === currentUser?.id && (
+                       <button 
+                         onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === ws.id ? null : ws.id); }}
+                         className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-white/20 text-slate-400 hover:text-slate-800 transition-colors ${activeWorkspaceId === ws.id && activeTab === 'workspace_view' ? 'text-white/80 hover:text-white' : ''}`}
+                       >
+                         <MoreVertical size={14} />
+                       </button>
+                     )}
+
+                     {/* Dropdown Menu */}
+                     {openMenuId === ws.id && (
+                       <div className="absolute right-0 top-full mt-1 w-40 bg-white border-2 border-slate-800 rounded-xl shadow-pop z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                          <button 
+                            onClick={() => { setOpenMenuId(null); onEditWorkspace?.(ws); }}
+                            className="w-full text-left px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                          >
+                            <Edit size={12} /> Edit Workspace
+                          </button>
+                          <button 
+                            onClick={() => { setOpenMenuId(null); onDeleteWorkspace?.(ws.id); }}
+                            className="w-full text-left px-4 py-2 text-xs font-bold text-red-500 hover:bg-red-50 flex items-center gap-2"
+                          >
+                            <Trash2 size={12} /> Hapus Workspace
+                          </button>
+                       </div>
+                     )}
+                   </div>
                 ))}
                 {workspaces.length === 0 && (
                   <div className="px-3 py-4 text-center border-2 border-dashed border-slate-200 rounded-xl">

@@ -70,6 +70,7 @@ export interface Workspace {
   join_code?: string;
   notepad?: string; // New: Persisted Notepad Content
   assets?: WorkspaceAsset[]; // New: Persisted Assets List
+  logo_url?: string; // NEW: Custom Workspace Icon (Base64 or URL)
 }
 
 export interface Task {

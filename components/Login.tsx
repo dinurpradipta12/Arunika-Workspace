@@ -40,7 +40,8 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
 
       if (!isEmail) {
         // LOGIKA HYBRID:
-        const cleanUsername = identifier.trim().toLowerCase();
+        // FIX: Match registration logic (remove spaces)
+        const cleanUsername = identifier.trim().toLowerCase().replace(/\s+/g, '');
         
         const { data: userData, error: fetchError } = await supabase
           .from('users')
@@ -52,7 +53,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
            loginEmail = userData.email;
         } else {
            // Fallback Legacy
-           console.warn("Username tidak ditemukan di public DB, mencoba format legacy...");
+           console.warn(`Username '${cleanUsername}' tidak ditemukan di public DB atau RLS memblokir. Mencoba format legacy...`);
            loginEmail = `${cleanUsername}@taskplay.com`;
         }
       } else {
@@ -99,7 +100,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
          });
       } else if (msg.includes("invalid login credentials")) {
          setErrorState({
-           message: "Username atau Password salah.",
+           message: "Username, Email, atau Password salah.",
            isConfirmationError: false
          });
       } else if (msg.includes("dinonaktifkan")) {

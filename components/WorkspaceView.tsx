@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Plus, 
@@ -63,7 +64,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [assets, setAssets] = useState<WorkspaceAsset[]>(workspace.assets || []);
   
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
-  const typingTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const channelRef = useRef<any>(null); 
   const lastTypingSentRef = useRef<number>(0); 
 
@@ -75,7 +76,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [isSavingAssets, setIsSavingAssets] = useState(false);
   const [isCodeCopied, setIsCodeCopied] = useState(false);
 
-  const notepadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const notepadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notepadRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -225,13 +226,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     await saveAssetsToDB(updatedAssets);
   };
 
-  const handleRemoveMember = async (memberId: string) => {
-    if(confirm("Apakah Anda yakin ingin menghapus anggota ini dari workspace?")) {
-      await supabase.from('workspace_members').delete().eq('id', memberId);
-      fetchMembers();
-    }
-  };
-
   const handleCopyCode = () => {
     if (workspace.join_code) {
       navigator.clipboard.writeText(workspace.join_code);
@@ -242,17 +236,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
   const totalTasks = tasks.filter(t => !t.parent_id && !t.is_archived).length;
   const subTasksCount = tasks.filter(t => t.parent_id && !t.is_archived).length;
-  const allSubtasks = tasks.filter(t => t.parent_id);
   const completedTasksList = tasks.filter(t => t.status === TaskStatus.DONE);
   const completedTasks = completedTasksList.length;
   const overdueTasksList = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE);
   const overdueTasks = overdueTasksList.length;
   const activeTasks = tasks.filter(t => !t.is_archived && !t.parent_id);
-
-  const getParentTitle = (parentId: string) => {
-    const parent = tasks.find(t => t.id === parentId);
-    return parent ? parent.title : 'Unknown Parent Task';
-  };
 
   const renderModalContent = () => {
     if (!activeModal) return null;
@@ -296,7 +284,28 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             <span className="px-3 py-1 bg-white text-slate-500 text-[10px] font-black uppercase rounded-full tracking-widest border-2 border-slate-200">{workspace.category || 'General'}</span>
           </div>
           <h2 className="text-5xl font-heading text-slate-900 tracking-tight">{workspace.name}</h2>
-          <p className="text-slate-400 font-medium text-sm mt-2 max-w-xl">{workspace.description || 'Ruang kerja kolaboratif untuk mengelola proyek dan tugas tim.'}</p>
+          <p className="text-slate-400 font-medium text-sm mt-2 max-w-xl leading-relaxed">{workspace.description || 'Ruang kerja kolaboratif untuk mengelola proyek dan tugas tim.'}</p>
+          
+          {/* AVATAR STACK (MEMBER JOINED) */}
+          <div className="mt-4 flex items-center gap-2">
+             <div className="flex -space-x-3">
+               {members.slice(0, 5).map((m, i) => (
+                 <img 
+                   key={m.id} 
+                   src={m.users?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${i}`} 
+                   className="w-10 h-10 rounded-full border-2 border-white shadow-sm bg-slate-100 object-cover" 
+                   title={m.users?.name} 
+                   alt={m.users?.name}
+                 />
+               ))}
+               {members.length > 5 && (
+                 <div className="w-10 h-10 rounded-full border-2 border-white bg-slate-800 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                   +{members.length - 5}
+                 </div>
+               )}
+             </div>
+             {members.length > 0 && <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">{memberCount} Member Bergabung</span>}
+          </div>
         </div>
 
         {/* Right Side: Button & Copy Code */}
@@ -418,7 +427,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         {/* RIGHT COLUMN: WIDGETS (1/3 width) */}
         <div className="space-y-6">
           
-          {/* Notepad Card (Restored Here) */}
+          {/* Notepad Card */}
           <Card 
              title="Workspace Notepad" 
              icon={<FileText size={18} />} 
