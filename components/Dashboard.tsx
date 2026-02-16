@@ -536,6 +536,104 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             </div>
 
+            {/* --- WORKSPACES GALLERY (MOVED HERE) --- */}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between px-2">
+                    <h3 className="text-xl font-heading">Workspaces Gallery</h3>
+                    <div className="flex gap-2">
+                    <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                        <span className="w-2 h-2 rounded-full bg-slate-800" />
+                        <span className="text-[9px] font-bold text-slate-500">Personal</span>
+                    </div>
+                    <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                        <span className="w-2 h-2 rounded-full bg-white border-2 border-slate-800" />
+                        <span className="text-[9px] font-bold text-slate-500">Team</span>
+                    </div>
+                    </div>
+                </div>
+
+                <div className="overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2">
+                    <div className="flex gap-4 w-max">
+                    {workspaces.length === 0 ? (
+                        <div className="w-80 p-8 border-2 border-dashed border-slate-300 rounded-[28px] flex flex-col items-center justify-center text-center bg-slate-50">
+                            <Briefcase size={32} className="text-slate-300 mb-2" />
+                            <p className="text-slate-400 font-bold text-sm">Belum ada Workspace.</p>
+                        </div>
+                    ) : (
+                        workspaces.map((ws) => {
+                            const isPersonal = ws.type === WorkspaceType.PERSONAL;
+                            const isOwner = ws.owner_id === currentUser?.id;
+                            const members = wsMembers[ws.id] || [];
+                            
+                            return (
+                                <div 
+                                key={ws.id} 
+                                onClick={() => onNavigateWorkspace?.(ws.id)}
+                                className={`relative w-80 p-5 rounded-[28px] shadow-sm transition-all hover:-translate-y-1 hover:shadow-pop cursor-pointer border-2 flex flex-col h-48 justify-between group ${isPersonal ? 'bg-slate-900 text-white border-slate-800' : 'bg-white text-slate-900 border-slate-200'}`}
+                                >
+                                {/* HEADER: Name & Status */}
+                                <div className="flex justify-between items-start">
+                                    <div className="flex-1 min-w-0 pr-2">
+                                        <h4 className="text-xl font-heading leading-tight truncate">{ws.name}</h4>
+                                        <span className={`inline-block mt-1 px-2 py-0.5 text-[8px] font-black uppercase rounded-md ${isOwner ? (isPersonal ? 'bg-white text-slate-900' : 'bg-slate-800 text-white') : 'bg-tertiary text-slate-900'}`}>
+                                            {isOwner ? 'Owner' : 'Member'}
+                                        </span>
+                                    </div>
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 overflow-hidden bg-white ${isPersonal ? 'border-transparent' : 'border-slate-100'}`}>
+                                        {ws.logo_url ? (
+                                            <img src={ws.logo_url} alt="icon" className="w-full h-full object-contain p-1" />
+                                        ) : (
+                                            isPersonal ? <Layers size={16} className="text-slate-900" /> : <Briefcase size={16} className="text-slate-500" />
+                                        )}
+                                    </div>
+                                </div>
+                                
+                                {/* BODY: Category, Type, Desc */}
+                                <div>
+                                    <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider mb-1 opacity-70`}>
+                                        <span>{ws.category || 'General'}</span> • <span>{ws.type}</span>
+                                    </div>
+                                    <p className={`text-xs font-medium leading-relaxed line-clamp-2 ${isPersonal ? 'text-slate-400' : 'text-slate-500'}`}>
+                                        {ws.description || "Workspace aktif untuk kolaborasi."}
+                                    </p>
+                                </div>
+
+                                {/* FOOTER: Avatar Stack */}
+                                <div className="flex items-center justify-between border-t border-white/10 pt-3 mt-1">
+                                    <div className="flex -space-x-2">
+                                        {members.length > 0 ? (
+                                            members.map((m, idx) => (
+                                                <img 
+                                                    key={idx} 
+                                                    src={m.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${idx}`} 
+                                                    className={`w-6 h-6 rounded-full border-2 ${isPersonal ? 'border-slate-900' : 'border-white'} bg-slate-200`} 
+                                                    alt="Avatar" 
+                                                    title={m.name}
+                                                />
+                                            ))
+                                        ) : (
+                                            <div className={`w-6 h-6 rounded-full border-2 ${isPersonal ? 'border-slate-900 bg-slate-700' : 'border-white bg-slate-100'} flex items-center justify-center`}>
+                                                <Users size={12} className="opacity-50" />
+                                            </div>
+                                        )}
+                                        {members.length >= 5 && (
+                                            <div className={`w-6 h-6 rounded-full border-2 ${isPersonal ? 'border-slate-900 bg-slate-700 text-white' : 'border-white bg-slate-100 text-slate-500'} flex items-center justify-center text-[8px] font-black z-10`}>
+                                                +5
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className={`p-1.5 rounded-full border-2 transition-colors ${isPersonal ? 'border-white text-white group-hover:bg-white group-hover:text-slate-900' : 'border-slate-200 text-slate-400 group-hover:border-slate-800 group-hover:text-slate-800'}`}>
+                                        <ArrowRight size={12} strokeWidth={3} className="-rotate-45" />
+                                    </div>
+                                </div>
+                                </div>
+                            );
+                        })
+                    )}
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         {/* RIGHT COLUMN (1/3 width) - Stacked Widgets */}
@@ -784,104 +882,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
         </div>
-      </div>
-
-      {/* ROW 3: Projects Gallery */}
-      <div className="space-y-4">
-         <div className="flex items-center justify-between px-2">
-            <h3 className="text-xl font-heading">Workspaces Gallery</h3>
-            <div className="flex gap-2">
-               <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
-                  <span className="w-2 h-2 rounded-full bg-slate-800" />
-                  <span className="text-[9px] font-bold text-slate-500">Personal</span>
-               </div>
-               <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-200">
-                  <span className="w-2 h-2 rounded-full bg-white border-2 border-slate-800" />
-                  <span className="text-[9px] font-bold text-slate-500">Team</span>
-               </div>
-            </div>
-         </div>
-
-         <div className="overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2">
-            <div className="flex gap-4 w-max">
-               {workspaces.length === 0 ? (
-                  <div className="w-80 p-8 border-2 border-dashed border-slate-300 rounded-[28px] flex flex-col items-center justify-center text-center bg-slate-50">
-                     <Briefcase size={32} className="text-slate-300 mb-2" />
-                     <p className="text-slate-400 font-bold text-sm">Belum ada Workspace.</p>
-                  </div>
-               ) : (
-                  workspaces.map((ws) => {
-                     const isPersonal = ws.type === WorkspaceType.PERSONAL;
-                     const isOwner = ws.owner_id === currentUser?.id;
-                     const members = wsMembers[ws.id] || [];
-                     
-                     return (
-                        <div 
-                          key={ws.id} 
-                          onClick={() => onNavigateWorkspace?.(ws.id)}
-                          className={`relative w-80 p-5 rounded-[28px] shadow-sm transition-all hover:-translate-y-1 hover:shadow-pop cursor-pointer border-2 flex flex-col h-48 justify-between group ${isPersonal ? 'bg-slate-900 text-white border-slate-800' : 'bg-white text-slate-900 border-slate-200'}`}
-                        >
-                           {/* HEADER: Name & Status */}
-                           <div className="flex justify-between items-start">
-                              <div className="flex-1 min-w-0 pr-2">
-                                 <h4 className="text-xl font-heading leading-tight truncate">{ws.name}</h4>
-                                 <span className={`inline-block mt-1 px-2 py-0.5 text-[8px] font-black uppercase rounded-md ${isOwner ? (isPersonal ? 'bg-white text-slate-900' : 'bg-slate-800 text-white') : 'bg-tertiary text-slate-900'}`}>
-                                    {isOwner ? 'Owner' : 'Member'}
-                                 </span>
-                              </div>
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 overflow-hidden bg-white ${isPersonal ? 'border-transparent' : 'border-slate-100'}`}>
-                                 {ws.logo_url ? (
-                                    <img src={ws.logo_url} alt="icon" className="w-full h-full object-contain p-1" />
-                                 ) : (
-                                    isPersonal ? <Layers size={16} className="text-slate-900" /> : <Briefcase size={16} className="text-slate-500" />
-                                 )}
-                              </div>
-                           </div>
-                           
-                           {/* BODY: Category, Type, Desc */}
-                           <div>
-                              <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider mb-1 opacity-70`}>
-                                 <span>{ws.category || 'General'}</span> • <span>{ws.type}</span>
-                              </div>
-                              <p className={`text-xs font-medium leading-relaxed line-clamp-2 ${isPersonal ? 'text-slate-400' : 'text-slate-500'}`}>
-                                 {ws.description || "Workspace aktif untuk kolaborasi."}
-                              </p>
-                           </div>
-
-                           {/* FOOTER: Avatar Stack */}
-                           <div className="flex items-center justify-between border-t border-white/10 pt-3 mt-1">
-                              <div className="flex -space-x-2">
-                                 {members.length > 0 ? (
-                                     members.map((m, idx) => (
-                                         <img 
-                                             key={idx} 
-                                             src={m.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${idx}`} 
-                                             className={`w-6 h-6 rounded-full border-2 ${isPersonal ? 'border-slate-900' : 'border-white'} bg-slate-200`} 
-                                             alt="Avatar" 
-                                             title={m.name}
-                                         />
-                                     ))
-                                 ) : (
-                                     <div className={`w-6 h-6 rounded-full border-2 ${isPersonal ? 'border-slate-900 bg-slate-700' : 'border-white bg-slate-100'} flex items-center justify-center`}>
-                                         <Users size={12} className="opacity-50" />
-                                     </div>
-                                 )}
-                                 {members.length >= 5 && (
-                                     <div className={`w-6 h-6 rounded-full border-2 ${isPersonal ? 'border-slate-900 bg-slate-700 text-white' : 'border-white bg-slate-100 text-slate-500'} flex items-center justify-center text-[8px] font-black z-10`}>
-                                         +5
-                                     </div>
-                                 )}
-                              </div>
-                              <div className={`p-1.5 rounded-full border-2 transition-colors ${isPersonal ? 'border-white text-white group-hover:bg-white group-hover:text-slate-900' : 'border-slate-200 text-slate-400 group-hover:border-slate-800 group-hover:text-slate-800'}`}>
-                                 <ArrowRight size={12} strokeWidth={3} className="-rotate-45" />
-                              </div>
-                           </div>
-                        </div>
-                     );
-                  })
-               )}
-            </div>
-         </div>
       </div>
 
     </div>

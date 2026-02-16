@@ -147,6 +147,7 @@ const App: React.FC = () => {
   const workspaceChannelRef = useRef<any>(null);
   const userStatusChannelRef = useRef<any>(null);
   const configChannelRef = useRef<any>(null);
+  const membersChannelRef = useRef<any>(null); // NEW: Members Channel
 
   // Sync ref with state
   useEffect(() => {
@@ -433,15 +434,40 @@ const App: React.FC = () => {
   }, [currentUser?.id, isAuthenticated, fetchData]);
 
   useEffect(() => {
-    if (activeWorkspaceId) {
-      const fetchMembers = async () => {
-        const { data } = await supabase.from('workspace_members').select(`id, role, user_id, users:user_id (id, name, email, avatar_url)`).eq('workspace_id', activeWorkspaceId);
+    // FUNCTION: Fetch active workspace members
+    const fetchMembers = async () => {
+        if (!activeWorkspaceId) {
+            setActiveWorkspaceMembers([]);
+            return;
+        }
+        const { data } = await supabase
+            .from('workspace_members')
+            .select(`id, role, user_id, users:user_id (id, name, email, avatar_url)`)
+            .eq('workspace_id', activeWorkspaceId);
         setActiveWorkspaceMembers(data || []);
-      };
-      fetchMembers();
-    } else {
-      setActiveWorkspaceMembers([]);
+    };
+
+    fetchMembers();
+
+    // SETUP REALTIME SUBSCRIPTION FOR MEMBERS
+    if (membersChannelRef.current) supabase.removeChannel(membersChannelRef.current);
+    
+    if (activeWorkspaceId) {
+        membersChannelRef.current = supabase.channel(`members-sync-${activeWorkspaceId}`)
+            .on('postgres_changes', { 
+                event: '*', 
+                schema: 'public', 
+                table: 'workspace_members', 
+                filter: `workspace_id=eq.${activeWorkspaceId}` 
+            }, () => {
+                fetchMembers(); // Re-fetch when members table changes for this workspace
+            })
+            .subscribe();
     }
+
+    return () => {
+        if (membersChannelRef.current) supabase.removeChannel(membersChannelRef.current);
+    };
   }, [activeWorkspaceId]);
 
   const handleSaveWorkspace = async (data: { id?: string; name: string; category: string; description: string; type: WorkspaceType; logo_url?: string }) => {

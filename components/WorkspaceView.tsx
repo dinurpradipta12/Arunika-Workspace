@@ -57,6 +57,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   onTaskClick
 }) => {
   const [activeModal, setActiveModal] = useState<ModalType>(null);
+  const [modalAnchor, setModalAnchor] = useState<{ top: number, left: number } | null>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [memberCount, setMemberCount] = useState(1);
@@ -235,46 +236,141 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     }
   };
 
-  const totalTasks = tasks.filter(t => !t.parent_id && !t.is_archived).length;
-  const subTasksCount = tasks.filter(t => t.parent_id && !t.is_archived).length;
-  const completedTasksList = tasks.filter(t => t.status === TaskStatus.DONE);
-  const completedTasks = completedTasksList.length;
-  const overdueTasksList = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE);
-  const overdueTasks = overdueTasksList.length;
+  // --- STAT CALCULATIONS ---
   const activeTasks = tasks.filter(t => !t.is_archived && !t.parent_id);
+  const totalTasksCount = tasks.filter(t => !t.parent_id && !t.is_archived).length;
+  
+  const subTasksList = tasks.filter(t => t.parent_id && !t.is_archived);
+  const subTasksCount = subTasksList.length;
+  
+  const completedTasksList = tasks.filter(t => t.status === TaskStatus.DONE && !t.is_archived);
+  const completedTasksCount = completedTasksList.length;
+  
+  const overdueTasksList = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== TaskStatus.DONE && !t.is_archived);
+  const overdueTasksCount = overdueTasksList.length;
 
-  const renderModalContent = () => {
-    if (!activeModal) return null;
-    const ModalWrapper = ({ title, children, icon }: any) => (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-        <div className="bg-white border-4 border-slate-800 rounded-3xl shadow-[12px_12px_0px_0px_#1E293B] w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-300">
-          <div className="p-6 bg-slate-800 flex items-center justify-between text-white shrink-0">
-            <div className="flex items-center gap-3">
-              {icon}
-              <h2 className="text-2xl font-heading">{title}</h2>
-            </div>
-            <button onClick={() => setActiveModal(null)} className="p-2 hover:bg-white/20 rounded-xl transition-colors"><X size={24} strokeWidth={3} /></button>
-          </div>
-          <div className="p-6 overflow-y-auto flex-1">{children}</div>
-          <div className="p-4 bg-slate-50 border-t-2 border-slate-100 shrink-0 text-right"><Button variant="secondary" onClick={() => setActiveModal(null)}>Tutup</Button></div>
-        </div>
-      </div>
-    );
+  const handleCardClick = (e: React.MouseEvent, type: ModalType) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Center logic can be adjusted, here we align roughly
+    setModalAnchor({ 
+        top: rect.bottom + window.scrollY, // Position below card
+        left: rect.left + window.scrollX
+    });
+    setActiveModal(type);
+  };
+
+  const renderContextualModal = () => {
+    if (!activeModal || !modalAnchor) return null;
+
+    let title = "";
+    let icon = null;
+    let content = null;
 
     switch (activeModal) {
-      case 'members': return <ModalWrapper title="Anggota Workspace" icon={<Users size={24} />}>{/* Content */}</ModalWrapper>;
-      case 'all_tasks': return <ModalWrapper title="Daftar Semua Task" icon={<Layout size={24} />}>{/* Content */}</ModalWrapper>;
-      case 'subtasks': return <ModalWrapper title="Daftar Sub-Tasks" icon={<Layers size={24} />}>{/* Content */}</ModalWrapper>;
-      case 'completed': return <ModalWrapper title="Task Selesai" icon={<CheckCircle2 size={24} />}>{/* Content */}</ModalWrapper>;
-      case 'overdue': return <ModalWrapper title="Task Terlambat" icon={<AlertTriangle size={24} />}>{/* Content */}</ModalWrapper>;
-      default: return null;
+      case 'all_tasks':
+        title = "Daftar Semua Task";
+        icon = <Layout size={18} />;
+        content = activeTasks.length === 0 ? <p className="text-xs text-slate-400 italic">Kosong</p> : (
+            <div className="space-y-2">
+                {activeTasks.map(t => (
+                    <div key={t.id} className="p-2 border rounded-lg text-xs font-bold text-slate-700 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={() => onTaskClick?.(t)}>
+                        <span>{t.title}</span>
+                        <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500">{t.status.replace('_', ' ')}</span>
+                    </div>
+                ))}
+            </div>
+        );
+        break;
+      case 'subtasks':
+        title = "Sub-Tasks Detail";
+        icon = <Layers size={18} />;
+        content = subTasksList.length === 0 ? <p className="text-xs text-slate-400 italic">Tidak ada sub-task</p> : (
+            <div className="space-y-2">
+                {subTasksList.map(t => (
+                    <div key={t.id} className="p-2 border border-dashed rounded-lg text-xs font-bold text-slate-600 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={() => onTaskClick?.(t)}>
+                        <span>{t.title}</span>
+                        <span className="text-[10px] bg-blue-50 text-blue-500 px-2 py-0.5 rounded">Sub</span>
+                    </div>
+                ))}
+            </div>
+        );
+        break;
+      case 'completed':
+        title = "Task Selesai";
+        icon = <CheckCircle2 size={18} />;
+        content = completedTasksList.length === 0 ? <p className="text-xs text-slate-400 italic">Belum ada task selesai</p> : (
+            <div className="space-y-2">
+                {completedTasksList.map(t => (
+                    <div key={t.id} className="p-2 bg-emerald-50 border border-emerald-100 rounded-lg text-xs font-bold text-emerald-800 flex justify-between items-center cursor-pointer" onClick={() => onTaskClick?.(t)}>
+                        <span className="line-through opacity-70">{t.title}</span>
+                        <CheckCircle2 size={12} />
+                    </div>
+                ))}
+            </div>
+        );
+        break;
+      case 'overdue':
+        title = "Terlambat / Overdue";
+        icon = <AlertTriangle size={18} />;
+        content = overdueTasksList.length === 0 ? <p className="text-xs text-slate-400 italic">Aman, tidak ada keterlambatan.</p> : (
+            <div className="space-y-2">
+                {overdueTasksList.map(t => (
+                    <div key={t.id} className="p-2 bg-red-50 border border-red-100 rounded-lg text-xs font-bold text-red-700 flex justify-between items-center cursor-pointer hover:bg-red-100" onClick={() => onTaskClick?.(t)}>
+                        <span>{t.title}</span>
+                        <span className="text-[9px]">{new Date(t.due_date!).toLocaleDateString()}</span>
+                    </div>
+                ))}
+            </div>
+        );
+        break;
+      case 'members':
+        title = "Anggota Workspace";
+        icon = <Users size={18} />;
+        content = (
+            <div className="space-y-2">
+                {members.map(m => (
+                    <div key={m.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100">
+                        <img src={m.users?.avatar_url} className="w-8 h-8 rounded-full bg-slate-200" alt="avatar" />
+                        <div>
+                            <p className="text-xs font-bold text-slate-800">{m.users?.name}</p>
+                            <p className="text-[10px] text-slate-400">{m.role}</p>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+        break;
     }
+
+    return (
+        <div className="fixed inset-0 z-[100] bg-slate-900/10 backdrop-blur-[2px]" onClick={() => setActiveModal(null)}>
+            <div 
+                className="absolute bg-white border-4 border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 w-72 max-h-[400px] flex flex-col"
+                style={{ 
+                    top: modalAnchor.top + 10, 
+                    left: Math.min(modalAnchor.left, window.innerWidth - 320) // Prevent overflow right
+                }}
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="p-3 bg-slate-50 border-b-2 border-slate-100 flex justify-between items-center shrink-0">
+                    <div className="flex items-center gap-2 text-slate-700">
+                        {icon}
+                        <h3 className="text-xs font-black uppercase tracking-wide">{title}</h3>
+                    </div>
+                    <button onClick={() => setActiveModal(null)} className="hover:bg-slate-200 rounded p-1"><X size={14}/></button>
+                </div>
+                <div className="p-3 overflow-y-auto flex-1 scrollbar-hide">
+                    {content}
+                </div>
+            </div>
+        </div>
+    );
   };
 
   return (
     <div className="space-y-8 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
       
-      {renderModalContent()}
+      {renderContextualModal()}
 
       {/* --- HEADER --- */}
       <div className="flex flex-col md:flex-row justify-between items-start gap-4 border-b-2 border-slate-100 pb-6">
@@ -345,38 +441,41 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         </div>
       </div>
 
-      {/* --- STATS GRID --- */}
+      {/* --- STATS GRID (NOW CLICKABLE FOR CONTEXTUAL MODAL) --- */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-        {/* Stats cards remain same */}
-        <div onClick={() => setActiveModal('all_tasks')} className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none">
+        <div onClick={(e) => handleCardClick(e, 'all_tasks')} className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none">
           <div className="flex items-center justify-between mb-2 text-slate-400">
             <div className="flex items-center gap-2"><Layout size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Total Task</span></div>
             <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />
           </div>
-          <p className="text-4xl font-heading text-slate-900">{totalTasks}</p>
+          <p className="text-4xl font-heading text-slate-900">{totalTasksCount}</p>
         </div>
-        <div onClick={() => setActiveModal('subtasks')} className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none">
+        
+        <div onClick={(e) => handleCardClick(e, 'subtasks')} className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none">
           <div className="flex items-center justify-between mb-2 text-accent">
             <div className="flex items-center gap-2"><Layers size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Sub-Tasks</span></div>
             <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />
           </div>
           <p className="text-4xl font-heading text-accent">{subTasksCount}</p>
         </div>
-        <div onClick={() => setActiveModal('completed')} className="bg-quaternary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none text-slate-900">
+        
+        <div onClick={(e) => handleCardClick(e, 'completed')} className="bg-quaternary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none text-slate-900">
           <div className="flex items-center justify-between mb-2 opacity-70">
             <div className="flex items-center gap-2"><CheckCircle2 size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Selesai</span></div>
             <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />
           </div>
-          <p className="text-4xl font-heading">{completedTasks}</p>
+          <p className="text-4xl font-heading">{completedTasksCount}</p>
         </div>
-        <div onClick={() => setActiveModal('overdue')} className="bg-secondary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none text-white">
+        
+        <div onClick={(e) => handleCardClick(e, 'overdue')} className="bg-secondary p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none text-white">
           <div className="flex items-center justify-between mb-2 opacity-80">
             <div className="flex items-center gap-2"><AlertTriangle size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Terlambat</span></div>
              <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />
           </div>
-          <p className="text-4xl font-heading">{overdueTasks}</p>
+          <p className="text-4xl font-heading">{overdueTasksCount}</p>
         </div>
-        <div onClick={() => setActiveModal('members')} className="bg-slate-800 p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer active:translate-y-0 active:shadow-none text-white group">
+        
+        <div onClick={(e) => handleCardClick(e, 'members')} className="bg-slate-800 p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer active:translate-y-0 active:shadow-none text-white group">
           <div className="flex items-center justify-between mb-2 text-tertiary group-hover:text-white transition-colors">
             <div className="flex items-center gap-2"><Users size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Anggota</span></div>
             <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0" />

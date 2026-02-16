@@ -249,7 +249,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         
         return dStr >= startStr && dStr <= endStr;
       })
-      .sort((a, b) => a.id.localeCompare(b.id));
+      .sort((a, b) => a.id.localeCompare(b.id)); // Ensures consistent sorting
   };
 
   const toggleVisibility = (id: string) => {
@@ -590,7 +590,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             border-y border-slate-800/20 transition-all 
                             hover:scale-[1.01] hover:z-[70] hover:border-slate-800
                             shrink-0 flex items-center justify-center relative shadow-none
-                            w-[101%] -ml-[0.5%]
+                            w-[98%] mx-auto
                             ${roundedClasses}
                             ${isTaskStart ? 'border-l border-l-slate-800/40' : ''}
                             ${isTaskEnd ? 'border-r border-r-slate-800/40' : ''}
