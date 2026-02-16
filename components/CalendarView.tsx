@@ -222,7 +222,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     return days;
   }, [currentDate]);
 
-  // Sorting Logic: Priority to Multi-day (Start earlier, then Duration longer) to prevent jagged stacking
+  // Sorting Logic
   const getTasksForDate = (date: Date) => {
     const dStr = formatDate(date);
     if (!dStr) return [];
@@ -248,19 +248,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         return dStr >= startStr && dStr <= endStr;
       })
       .sort((a, b) => {
-        // 1. Sort by Start Date (Earliest first)
+        // 1. Sort by Start Date
         const startA = new Date(a.start_date || a.due_date!).getTime();
         const startB = new Date(b.start_date || b.due_date!).getTime();
         if (startA !== startB) return startA - startB;
 
-        // 2. Sort by Duration (Longer duration first) - This keeps multi-day tasks at the top
+        // 2. Sort by Duration
         const endA = new Date(a.due_date!).getTime();
         const endB = new Date(b.due_date!).getTime();
         const durA = endA - startA;
         const durB = endB - startB;
         if (durA !== durB) return durB - durA;
 
-        // 3. Sort by Title/ID as fallback
         return (a.title || '').localeCompare(b.title || '');
       });
   };
@@ -521,8 +520,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               const dStr = formatDate(date);
               const isToday = formatDate(new Date()) === dStr;
               const dayTasks = getTasksForDate(date);
-              const isSunday = date.getDay() === 0;
-              const isSaturday = date.getDay() === 6;
 
               return (
                 <div 
@@ -541,66 +538,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     </span>
                   </div>
                   
-                  {/* Changed from absolute stacking or negative margins to standard flex column layout */}
+                  {/* CHANGED: Independent tasks for every day, simple stacking, standard rounded chips */}
                   <div className="flex-1 flex flex-col gap-1 pb-2 w-full">
                     {dayTasks.map(task => {
-                      const startStr = formatDate(task.start_date || task.due_date);
-                      const endStr = formatDate(task.due_date);
-                      const isTaskStart = dStr === startStr;
-                      const isTaskEnd = dStr === endStr;
-                      const isSingleDay = isTaskStart && isTaskEnd;
-                      
-                      // Calculate segments to style middle parts
-                      const segmentDays: string[] = [];
-                      let tempDate = new Date(date);
-                      while (tempDate.getDay() !== 0 && formatDate(tempDate) !== startStr) {
-                        tempDate.setDate(tempDate.getDate() - 1);
-                      }
-                      const segmentStart = new Date(tempDate);
-                      tempDate = new Date(date);
-                      while (tempDate.getDay() !== 6 && formatDate(tempDate) !== endStr) {
-                        tempDate.setDate(tempDate.getDate() + 1);
-                      }
-                      const segmentEnd = new Date(tempDate);
-                      
-                      const segmentLen = Math.ceil((segmentEnd.getTime() - segmentStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                      const dayInSegment = Math.ceil((date.getTime() - segmentStart.getTime()) / (1000 * 60 * 60 * 24));
-                      const isMiddle = dayInSegment === Math.floor(segmentLen / 2);
-
-                      // Improved Visual Logic for Connected Shapes
-                      let roundedClasses = '';
-                      let marginClasses = 'mx-0';
-                      let widthClasses = 'w-full';
-
-                      if (isSingleDay) {
-                         roundedClasses = 'rounded-md';
-                         marginClasses = 'mx-1'; // Give it breathing room
-                         widthClasses = 'w-[calc(100%-8px)] mx-auto'; // Center small items
-                      } else {
-                         if (isTaskStart) {
-                            roundedClasses = 'rounded-l-md rounded-r-none';
-                            marginClasses = 'ml-1 mr-0';
-                         } else if (isTaskEnd) {
-                            roundedClasses = 'rounded-r-md rounded-l-none';
-                            marginClasses = 'mr-1 ml-0';
-                         } else {
-                            roundedClasses = 'rounded-none';
-                            marginClasses = 'mx-[-1px]'; // Slight negative margin to cover grid lines
-                            widthClasses = 'w-[calc(100%+2px)]'; // Slight overlap
-                         }
-                         
-                         // Edge case: Week boundaries (Sun/Sat) need rounding if task continues off-screen? 
-                         // For now, let's keep it simple or follow the grid.
-                         // If we want week boundaries to look cut off but tidy:
-                         if (!isTaskStart && isSunday) {
-                            roundedClasses = 'rounded-l-md ' + roundedClasses;
-                            marginClasses = 'ml-0.5 ' + marginClasses;
-                         }
-                         if (!isTaskEnd && isSaturday) {
-                            roundedClasses = 'rounded-r-md ' + roundedClasses;
-                            marginClasses = 'mr-0.5 ' + marginClasses;
-                         }
-                      }
+                      // Determine if we should show the time: Only on the start day of the task
+                      const isStartDay = formatDate(task.start_date || task.due_date) === dStr;
+                      const timeLabel = (!task.is_all_day && task.start_date) ? getTimeString(task.start_date) : '';
+                      const displayLabel = (isStartDay && timeLabel) ? `${timeLabel} ${task.title}` : task.title;
                       
                       // LOGIKA WARNA
                       let taskColor = UI_PALETTE[0];
@@ -612,12 +556,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         taskColor = categoryColors[task.category || 'General'] || sourceColors[task.workspace_id] || UI_PALETTE[0];
                       }
 
-                      const startTimeDisplay = (!task.is_all_day && task.start_date) ? getTimeString(task.start_date) : '';
-                      const eventLabel = startTimeDisplay ? `${startTimeDisplay} ${task.title}` : task.title;
-
-                      // Only show text if it's start or Sunday, or if it's a single day task
-                      const showLabel = isTaskStart || isSunday || isSingleDay;
-
                       return (
                         <button
                           key={task.id}
@@ -628,13 +566,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           }}
                           onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
                           className={`
-                            text-[9px] font-black py-1 
-                            border-y border-transparent transition-all 
-                            hover:brightness-110 hover:z-[70] hover:scale-[1.01]
+                            text-[9px] font-black py-1 px-1.5
+                            border-2 border-transparent transition-all 
+                            hover:brightness-110 hover:z-[70] hover:scale-[1.02] hover:border-slate-800
                             shrink-0 flex items-center relative shadow-sm
-                            ${roundedClasses}
-                            ${marginClasses}
-                            ${widthClasses}
+                            rounded-md mx-1 w-[calc(100%-8px)]
                           `}
                           style={{ 
                             backgroundColor: taskColor,
@@ -642,8 +578,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             zIndex: 50
                           }}
                         >
-                          <span className={`truncate px-1.5 block w-full text-left ${!showLabel ? 'opacity-0 hover:opacity-100 transition-opacity' : ''}`}>
-                            {eventLabel}
+                          <span className="truncate w-full text-left">
+                            {displayLabel}
                           </span>
                         </button>
                       );
