@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
@@ -39,7 +40,6 @@ import { CalendarView } from './components/CalendarView';
 import { NewWorkspaceModal } from './components/NewWorkspaceModal';
 import { JoinWorkspaceModal } from './components/JoinWorkspaceModal'; 
 import { WorkspaceView } from './components/WorkspaceView';
-import { TimeTrackingView } from './components/TimeTrackingView'; // Import the new view
 import { supabase } from './lib/supabase';
 import { Task, TaskStatus, TaskPriority, Workspace, User, Notification, WorkspaceType, AppConfig } from './types';
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
@@ -64,7 +64,7 @@ const App: React.FC = () => {
   const [globalBranding, setGlobalBranding] = useState<AppConfig | null>(null);
 
   // NAVIGATION PERSISTENCE
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'time_tracking' | 'team' | 'profile' | 'archive' | 'workspace_view'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'calendar' | 'team' | 'profile' | 'archive' | 'workspace_view'>(() => {
     const saved = localStorage.getItem('taskplay_activeTab');
     return (saved as any) || 'dashboard';
   });
@@ -241,7 +241,6 @@ const App: React.FC = () => {
     }
   };
   
-  // ... (rest of the code same as original App.tsx until render) ...
   useEffect(() => {
     const appName = globalBranding?.app_name || 'TaskPlay';
     const appFavicon = globalBranding?.app_favicon;
@@ -323,6 +322,7 @@ const App: React.FC = () => {
   }, [currentUser?.id, visibleSources.length]);
 
   const fetchOrCreateUser = useCallback(async (sessionUser: any) => {
+    // Prevent dependency loop by checking ref instead of state
     if (!currentUserRef.current) {
       setIsProfileLoading(true);
     }
@@ -363,7 +363,7 @@ const App: React.FC = () => {
     } finally {
       setIsProfileLoading(false);
     }
-  }, []);
+  }, []); // REMOVED currentUser DEPENDENCY TO FIX LOOP
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -434,6 +434,7 @@ const App: React.FC = () => {
   }, [currentUser?.id, isAuthenticated, fetchData]);
 
   useEffect(() => {
+    // FUNCTION: Fetch active workspace members
     const fetchMembers = async () => {
         if (!activeWorkspaceId) {
             setActiveWorkspaceMembers([]);
@@ -448,6 +449,7 @@ const App: React.FC = () => {
 
     fetchMembers();
 
+    // SETUP REALTIME SUBSCRIPTION FOR MEMBERS
     if (membersChannelRef.current) supabase.removeChannel(membersChannelRef.current);
     
     if (activeWorkspaceId) {
@@ -458,7 +460,7 @@ const App: React.FC = () => {
                 table: 'workspace_members', 
                 filter: `workspace_id=eq.${activeWorkspaceId}` 
             }, () => {
-                fetchMembers(); 
+                fetchMembers(); // Re-fetch when members table changes for this workspace
             })
             .subscribe();
     }
@@ -472,6 +474,7 @@ const App: React.FC = () => {
     if (!currentUser) return;
     try {
       if (data.id) {
+        // UPDATE Existing Workspace
         const { error } = await supabase.from('workspaces').update({
           name: data.name,
           type: data.type,
@@ -481,8 +484,11 @@ const App: React.FC = () => {
         }).eq('id', data.id);
         
         if (error) throw error;
+        
+        // Optimistic Update
         setWorkspaces(prev => prev.map(ws => ws.id === data.id ? { ...ws, ...data } : ws));
       } else {
+        // CREATE New Workspace
         const { data: newWs, error } = await supabase.from('workspaces').insert({ 
           name: data.name, 
           type: data.type, 
@@ -525,6 +531,8 @@ const App: React.FC = () => {
 
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
+    // Set fetching false here to prevent spinner if we want seamless update, or true if we want indicator.
+    // For this fix, let's rely on local optimistic update first.
     setIsFetching(true); 
     
     try {
@@ -540,16 +548,19 @@ const App: React.FC = () => {
       const payload: any = { title: taskData.title, description: taskData.description || null, status: taskData.status || TaskStatus.TODO, priority: taskData.priority || TaskPriority.MEDIUM, workspace_id: targetWorkspaceId, parent_id: taskData.parent_id || null, due_date: taskData.due_date || null, start_date: taskData.start_date || null, is_all_day: taskData.is_all_day ?? true, is_archived: taskData.is_archived ?? false, category: taskData.category || 'General', created_by: currentUser.id, assigned_to: taskData.assigned_to || null };
       
       if (editingTask && editingTask.id) {
+        // --- OPTIMISTIC UPDATE FOR INSTANT UI FEEDBACK ---
         setTasks(prevTasks => prevTasks.map(t => 
             t.id === editingTask.id ? { ...t, ...payload } : t
         ));
 
+        // Update Modals Immediately
         if (detailTask && detailTask.id === editingTask.id) {
             setDetailTask(prev => prev ? ({ ...prev, ...payload }) : null);
         }
         if (inspectedTask && inspectedTask.id === editingTask.id) {
             setInspectedTask(prev => prev ? ({ ...prev, ...payload }) : null);
         }
+        // ------------------------------------------------
 
         const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
         if (error) throw error;
@@ -559,6 +570,7 @@ const App: React.FC = () => {
         const { data: newTaskData, error } = await supabase.from('tasks').insert(payload).select().single();
         if (error) throw error;
         
+        // Optimistic add
         if (newTaskData) {
             setTasks(prev => [newTaskData as Task, ...prev]);
         }
@@ -566,10 +578,13 @@ const App: React.FC = () => {
       
       setIsNewTaskModalOpen(false);
       setEditingTask(null);
+      // fetchData() is triggered by realtime subscription usually, but we can call it to be sure
+      // Reducing frequent full fetches helps with resource errors
+      // fetchData(); 
     } catch (err: any) {
       console.error("Save task failure:", err);
       alert("Gagal menyimpan agenda.");
-      fetchData(); 
+      fetchData(); // Revert on error
     } finally {
       setIsFetching(false);
     }
@@ -581,6 +596,8 @@ const App: React.FC = () => {
         const personalSettings = { notificationsEnabled: settingsUpdate.notificationsEnabled, googleConnected: settingsUpdate.googleConnected, sourceColors: currentUser.app_settings?.sourceColors, visibleSources: currentUser.app_settings?.visibleSources, googleAccessToken: settingsUpdate.googleAccessToken || currentUser.app_settings?.googleAccessToken };
         const updates = { ...profileData, status: newRole, app_settings: personalSettings };
         
+        // --- CRITICAL FIX: OPTIMISTIC UPDATE LOCAL STATE IMMEDIATELY ---
+        // This prevents the "glitch" where data reverts to old state before the DB confirms.
         setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
         
         const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
@@ -604,6 +621,7 @@ const App: React.FC = () => {
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+    // If detail modal is open, update its status too
     if (detailTask && detailTask.id === id) {
         setDetailTask(prev => prev ? ({ ...prev, status }) : null);
     }
@@ -694,11 +712,14 @@ const App: React.FC = () => {
      }
   };
 
+  // Helper to find Assignee User for a task
   const getAssigneeUser = (userId?: string) => {
     if (!userId) return undefined;
     if (userId === currentUser?.id) return { name: currentUser.name, avatar_url: currentUser.avatar_url };
+    // Try to find in active workspace members if available (imperfect fallback for My Tasks view)
     const member = activeWorkspaceMembers.find(m => m.user_id === userId);
     if (member?.users) return { name: member.users.name, avatar_url: member.users.avatar_url };
+    // Fallback placeholder
     return { name: 'User', avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}` };
   };
 
@@ -706,31 +727,6 @@ const App: React.FC = () => {
   const parentTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
   const currentWorkspaceTasks = activeWorkspaceId ? tasks.filter(t => t.workspace_id === activeWorkspaceId) : [];
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
-
-  // TimeTracking DB Handlers
-  const handleTimeTrackingDelete = async (id: string) => {
-    if(!confirm("Yakin ingin menghapus event ini?")) return;
-    try {
-      const { error } = await supabase.from('tasks').delete().eq('id', id);
-      if(error) throw error;
-      // fetchData() is triggered by realtime subscription in App.tsx
-    } catch(err: any) {
-      alert("Gagal menghapus: " + err.message);
-    }
-  };
-
-  const handleTimeTrackingUpdate = async (task: Task) => {
-    try {
-      const { error } = await supabase.from('tasks').update({
-        start_date: task.start_date,
-        due_date: task.due_date
-      }).eq('id', task.id);
-      
-      if(error) throw error;
-    } catch(err: any) {
-      console.error("Gagal update time tracking:", err);
-    }
-  };
 
   if (isAuthLoading || (isAuthenticated && isProfileLoading)) {
     return (
@@ -777,6 +773,7 @@ const App: React.FC = () => {
   const connStatus = getConnectionStatus();
 
   return (
+    // CHANGED: h-full to h-screen to force viewport height and fix sticky scrolling issues
     <div className="h-screen w-full bg-background overflow-hidden flex justify-center">
       
       {/* --- TOAST NOTIFICATION POPUP --- */}
@@ -862,6 +859,7 @@ const App: React.FC = () => {
           onJoinWorkspace={() => setIsJoinWorkspaceModalOpen(true)}
         />
 
+        {/* TASK INSPECT MODAL (SIMPLE) - For Subtasks */}
         <TaskInspectModal 
           task={inspectedTask} 
           isOpen={!!inspectedTask} 
@@ -873,6 +871,7 @@ const App: React.FC = () => {
           onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }} 
         />
 
+        {/* TASK DETAIL MODAL (LARGE) - For Main Tasks */}
         <TaskDetailModal 
           isOpen={!!detailTask}
           parentTask={detailTask}
@@ -886,7 +885,10 @@ const App: React.FC = () => {
           onEditTask={openEditModal}
           onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); setDetailTask(null); }} 
           onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); setDetailTask(null); }} 
-          onInspectTask={(t) => {}}
+          onInspectTask={(t) => {
+             // DO NOTHING HERE because TaskDetailModal handles subtask inspection internally now
+             // But we can trigger a refresh if needed
+          }}
           onRescheduleTask={(t) => setReschedulingTask(t)}
         />
 
@@ -909,7 +911,9 @@ const App: React.FC = () => {
           currentBranding={globalBranding}
         />
         
+        {/* RESTRUCTURED MAIN CONTENT AREA - FROZEN HEADER */}
         <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+          {/* Header - Fixed/Sticky Logic */}
           <header className="shrink-0 relative z-[65] bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
             <button className="p-2 border-2 border-slate-800 rounded-xl shadow-pop-active bg-white transition-all hover:-translate-y-0.5" onClick={() => setSidebarOpen(!isSidebarOpen)}>
               {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
@@ -924,6 +928,7 @@ const App: React.FC = () => {
                  <RefreshCw size={12} className={`text-slate-300 ${isFetching ? 'animate-spin text-accent' : ''}`} />
               </button>
 
+              {/* NOTIFICATION BELL */}
               <div className="relative" ref={notifDropdownRef}>
                  <Button 
                    variant="ghost" 
@@ -940,6 +945,7 @@ const App: React.FC = () => {
                    </div>
                  </Button>
 
+                 {/* NOTIFICATION DROPDOWN */}
                  {isNotifDropdownOpen && (
                    <div className="absolute top-full right-0 mt-3 w-80 sm:w-96 bg-white border-4 border-slate-800 rounded-2xl shadow-pop z-50 animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[500px]">
                       <div className="p-4 border-b-2 border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
@@ -1001,6 +1007,7 @@ const App: React.FC = () => {
             </div>
           </header>
 
+          {/* SCROLLABLE CONTENT AREA */}
           <div className="flex-1 overflow-y-auto w-full p-4 px-12 max-w-[1920px] mx-auto scrollbar-hide">
             {activeTab === 'dashboard' && (
               <Dashboard 
@@ -1019,7 +1026,7 @@ const App: React.FC = () => {
             {activeTab === 'workspace_view' && activeWorkspace && (
               <WorkspaceView 
                 workspace={activeWorkspace}
-                tasks={currentWorkspaceTasks}
+                tasks={currentWorkspaceTasks} // This prop is auto-updated by App's state
                 onAddTask={(initialData) => {
                   setEditingTask({ workspace_id: activeWorkspaceId, ...initialData } as Task);
                   setIsNewTaskModalOpen(true);
@@ -1027,7 +1034,7 @@ const App: React.FC = () => {
                 onStatusChange={handleStatusChange}
                 onEditTask={openEditModal}
                 onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
-                onTaskClick={handleGlobalTaskClick} 
+                onTaskClick={handleGlobalTaskClick} // Pass the global handler
               />
             )}
 
@@ -1035,7 +1042,7 @@ const App: React.FC = () => {
               <CalendarView 
                 tasks={tasks} 
                 workspaces={workspaces} 
-                onTaskClick={handleGlobalTaskClick}
+                onTaskClick={handleGlobalTaskClick} // Use global handler here too
                 userEmail={currentUser.email} 
                 googleAccessToken={googleAccessToken} 
                 onDayClick={(date) => {
@@ -1061,28 +1068,16 @@ const App: React.FC = () => {
                 setCategoryColors={setCategoryColors}
               />
             )}
-
-            {/* TIME TRACKING VIEW */}
-            {activeTab === 'time_tracking' && (
-              <TimeTrackingView 
-                tasks={tasks}
-                googleEvents={googleEvents}
-                currentUser={currentUser}
-                onEditTask={openEditModal}
-                onDeleteTask={handleTimeTrackingDelete}
-                onUpdateTask={handleTimeTrackingUpdate}
-              />
-            )}
             
             {activeTab === 'tasks' && (
               <div className="space-y-8 pb-20">
-                {/* ... Task Board/Table Content (unchanged) ... */}
                 <div className="flex justify-between items-end">
                   <div>
                     <h2 className="text-4xl font-heading tracking-tighter">My Board</h2>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola alur kerja personal Anda</p>
                   </div>
                   <div className="flex gap-3">
+                    {/* View Mode Toggles */}
                     <div className="flex bg-white rounded-full border-2 border-slate-800 p-1 shadow-sm gap-1">
                         <Button 
                           variant={viewMode === 'board' ? 'primary' : 'ghost'}
@@ -1103,7 +1098,9 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 
+                {/* CONTENT AREA: Board vs Table */}
                 {viewMode === 'board' ? (
+                  /* DRAGGABLE COLUMNS (KANBAN) */
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DONE].map(status => (
                       <div 
@@ -1125,11 +1122,11 @@ const App: React.FC = () => {
                               key={task.id} 
                               task={task} 
                               onStatusChange={handleStatusChange} 
-                              onClick={handleGlobalTaskClick}
+                              onClick={handleGlobalTaskClick} // Use Global Handler
                               onEdit={openEditModal}
                               onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
                               onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }}
-                              onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)}
+                              onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)} // Enable Drag
                               workspaceName={workspaces.find(ws => ws.id === task.workspace_id)?.name}
                               assigneeUser={getAssigneeUser(task.assigned_to)}
                             />
@@ -1144,6 +1141,7 @@ const App: React.FC = () => {
                     ))}
                   </div>
                 ) : (
+                  /* TABLE VIEW */
                   <div className="bg-white border-2 border-slate-800 rounded-3xl overflow-hidden shadow-pop">
                       <table className="w-full text-left">
                         <thead className="bg-slate-50 border-b-2 border-slate-100">
@@ -1196,6 +1194,7 @@ const App: React.FC = () => {
                   </div>
                 )}
 
+                {/* ARCHIVE SECTION - COLLAPSIBLE */}
                 <div className="mt-8 pt-4 border-t border-slate-200">
                   <button 
                     onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
@@ -1212,7 +1211,7 @@ const App: React.FC = () => {
                         <div key={task.id} className="relative group opacity-70 hover:opacity-100 transition-opacity">
                           <TaskItem 
                             task={task} 
-                            onStatusChange={() => {}} 
+                            onStatusChange={() => {}} // Disabled for archived
                             onClick={handleGlobalTaskClick}
                             onEdit={openEditModal}
                             onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}

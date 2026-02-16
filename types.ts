@@ -95,18 +95,6 @@ export interface Task {
   assets?: WorkspaceAsset[]; // NEW FIELD: Task specific assets
 }
 
-// MOVED HERE TO FIX CIRCULAR DEPENDENCY
-export interface CalendarEvent {
-  id: string;
-  title: string;
-  start: string; // ISO String
-  end: string;   // ISO String
-  color: string;
-  participants: User[];
-  notes?: string;
-  originalTaskId?: string; // Link back to main Task
-}
-
 export interface Notification {
   id: string;
   user_id: string;

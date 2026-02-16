@@ -13,8 +13,7 @@ import {
   QrCode,
   MoreVertical,
   Edit,
-  Trash2,
-  Clock // Added Clock icon
+  Trash2
 } from 'lucide-react';
 import { Task, Workspace, User } from '../types';
 
@@ -132,8 +131,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <NavItem icon={<CalendarIcon size={18} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
             
-            <NavItem icon={<Clock size={18} />} label="Time Tracking" active={activeTab === 'time_tracking'} onClick={() => setActiveTab('time_tracking')} />
-
             {!isMember && (
               <NavItem icon={<Users size={18} />} label="Team Space" active={activeTab === 'team'} onClick={() => setActiveTab('team')} />
             )}
@@ -184,7 +181,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                        {activeWorkspaceId === ws.id && activeTab === 'workspace_view' && <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
                      </button>
                      
-                     {/* More Option Button */}
+                     {/* More Option Button (Only if Owner/Admin theoretically, but here visible) */}
                      {ws.owner_id === currentUser?.id && (
                        <button 
                          onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === ws.id ? null : ws.id); }}

@@ -25,7 +25,6 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script>
       tailwind.config = {
-        darkMode: 'class', // Force manual dark mode to prevent system preference override
         theme: {
           extend: {
             colors: {
@@ -59,36 +58,55 @@
       }
     </script>
     <style>
+      html, body {
+        background-color: #FFFDF5;
+        color: #1E293B;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+
+      }
+      h1, h2, h3, h4, h5, h6 {
+        font-family: 'Outfit', sans-serif;
+      }
       .dot-grid {
-        background-size: 40px 40px;
-        background-image: radial-gradient(circle, #E2E8F0 1px, transparent 1px);
+        background-image: radial-gradient(#E2E8F0 1px, transparent 1px);
+        background-size: 20px 20px;
       }
-      .scrollbar-hide::-webkit-scrollbar {
-          display: none;
+      .bounce-hover:hover {
+        transform: translateY(-2px);
+        transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
       }
-      .scrollbar-hide {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
+      /* Scrollbar styling - Transparan Putih / Subtle */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(0, 0, 0, 0.1); /* Very subtle transparent grey/white look */
+        border-radius: 10px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(0, 0, 0, 0.2);
       }
     </style>
     <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@18.3.1",
-    "react/": "https://esm.sh/react@18.3.1/",
-    "react-dom": "https://esm.sh/react-dom@18.3.1",
-    "react-dom/": "https://esm.sh/react-dom@18.3.1/",
-    "@google/genai": "https://esm.sh/@google/genai",
-    "recharts": "https://esm.sh/recharts@2.12.7?deps=react@18.3.1,react-dom@18.3.1",
-    "lucide-react": "https://esm.sh/lucide-react@0.344.0?deps=react@18.3.1",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.8",
-    "framer-motion": "https://esm.sh/framer-motion@11.0.8?deps=react@18.3.1,react-dom@18.3.1"
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.41.0",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "recharts": "https://esm.sh/recharts@^3.7.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.564.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.95.3"
   }
 }
 </script>
   </head>
-  <body class="text-slate-900 antialiased bg-[#FFFDF5]">
-    <div id="root" class="text-slate-900"></div>
+  <body>
+    <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>
