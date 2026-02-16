@@ -29,7 +29,9 @@ import {
   ChevronRight,
   Plus,
   Trash2,
-  CheckSquare
+  CheckSquare,
+  Clock,
+  Layout
 } from 'lucide-react';
 import { Task, Workspace, User, TaskStatus, WorkspaceType, TaskPriority } from '../types';
 import { Button } from './ui/Button';
@@ -450,40 +452,96 @@ export const Dashboard: React.FC<DashboardProps> = ({
          </div>
       </div>
 
-      {/* ROW 1: Banner & Time Tracker & Checklist */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* NEW GRID LAYOUT */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* WELCOME BANNER - Height Reduced */}
-        <div className={`lg:col-span-2 relative overflow-hidden rounded-[32px] shadow-pop-active border-2 border-slate-800 flex flex-col justify-center min-h-[160px] transition-all duration-1000 ${getGradientClass()}`}>
-          <div className="relative z-10 p-8 flex flex-col h-full justify-center">
-            <div>
-              <h1 className="text-3xl md:text-4xl font-heading mb-2 text-white drop-shadow-md animate-in fade-in slide-in-from-left-2 duration-700">
-                 {greetingText.split('!')[0]}!
-              </h1>
-              <p className="text-white/90 text-sm max-w-lg font-medium leading-relaxed drop-shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-1000">
-                {greetingText.split('!')[1]}
-              </p>
+        {/* LEFT COLUMN (2/3 width) - Banner & Timeline */}
+        <div className="lg:col-span-2 space-y-8">
+            
+            {/* WELCOME BANNER - Height Reduced */}
+            <div className={`relative overflow-hidden rounded-[32px] shadow-pop-active border-2 border-slate-800 flex flex-col justify-center min-h-[160px] transition-all duration-1000 ${getGradientClass()}`}>
+            <div className="relative z-10 p-8 flex flex-col h-full justify-center">
+                <div>
+                <h1 className="text-3xl md:text-4xl font-heading mb-2 text-white drop-shadow-md animate-in fade-in slide-in-from-left-2 duration-700">
+                    {greetingText.split('!')[0]}!
+                </h1>
+                <p className="text-white/90 text-sm max-w-lg font-medium leading-relaxed drop-shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-1000">
+                    {greetingText.split('!')[1]}
+                </p>
+                </div>
+                {/* Quick Action in Banner */}
+                <div className="absolute right-8 bottom-8 hidden md:block">
+                <button 
+                    onClick={() => setActiveModal('progress')}
+                    className="bg-white/20 backdrop-blur-md border border-white/30 rounded-full px-4 py-2 flex items-center gap-2 shadow-lg hover:bg-white/30 transition-all active:scale-95 group"
+                >
+                    <span className="font-bold text-xs text-white">
+                        {tasksInProgressList.length} Task On Progress
+                    </span>
+                    <div className="w-6 h-6 bg-white text-slate-900 rounded-full flex items-center justify-center">
+                        <ArrowRight size={12} strokeWidth={3} />
+                    </div>
+                </button>
+                </div>
             </div>
-            {/* Quick Action in Banner */}
-            <div className="absolute right-8 bottom-8 hidden md:block">
-               <button 
-                 onClick={() => setActiveModal('progress')}
-                 className="bg-white/20 backdrop-blur-md border border-white/30 rounded-full px-4 py-2 flex items-center gap-2 shadow-lg hover:bg-white/30 transition-all active:scale-95 group"
-               >
-                  <span className="font-bold text-xs text-white">
-                    {tasksInProgressList.length} Task On Progress
-                  </span>
-                  <div className="w-6 h-6 bg-white text-slate-900 rounded-full flex items-center justify-center">
-                    <ArrowRight size={12} strokeWidth={3} />
-                  </div>
-               </button>
             </div>
-          </div>
+
+            {/* TIMELINE VIEW (New Card) */}
+            <div className="bg-white border-2 border-slate-800 rounded-[32px] p-8 shadow-pop min-h-[500px]">
+                <div className="flex items-center gap-4 mb-8 border-b border-slate-100 pb-4">
+                    <div className="w-12 h-12 bg-indigo-50 border-2 border-indigo-100 rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">
+                        <Layout size={24} strokeWidth={2.5} />
+                    </div>
+                    <div>
+                        <h3 className="text-2xl font-heading text-slate-900">Active Timeline</h3>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Urutan tugas yang harus diselesaikan</p>
+                    </div>
+                </div>
+
+                <div className="relative pl-6 border-l-2 border-slate-100 ml-4 space-y-8">
+                    {activeTasksList.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400 text-sm font-bold italic">Tidak ada task aktif.</div>
+                    ) : (
+                        activeTasksList
+                            .sort((a, b) => new Date(a.due_date || '9999-12-31').getTime() - new Date(b.due_date || '9999-12-31').getTime())
+                            .map((task, i) => (
+                            <div key={task.id} className="relative group">
+                                {/* Timeline Dot */}
+                                <div className={`absolute -left-[33px] top-4 w-4 h-4 rounded-full border-2 border-white ring-2 ring-slate-100 ${task.priority === 'high' ? 'bg-secondary' : task.priority === 'medium' ? 'bg-tertiary' : 'bg-quaternary'}`} />
+                                
+                                <div className="text-[10px] font-black uppercase text-slate-400 mb-2 flex items-center gap-2 pl-2">
+                                    <Clock size={12} />
+                                    {task.due_date ? new Date(task.due_date).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' }) : 'No Deadline'}
+                                </div>
+                                
+                                <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-5 hover:border-slate-800 hover:bg-white hover:shadow-sm transition-all cursor-default relative">
+                                    <div className="flex justify-between items-start">
+                                        <div className="pr-4">
+                                            <h4 className="font-bold text-slate-800 text-sm leading-tight">{task.title}</h4>
+                                            {task.description && <p className="text-xs text-slate-500 mt-2 line-clamp-2 leading-relaxed">{task.description}</p>}
+                                        </div>
+                                        <span className={`px-2 py-1 rounded text-[9px] font-black uppercase shrink-0 border ${task.status === TaskStatus.IN_PROGRESS ? 'bg-blue-100 text-blue-600 border-blue-200' : 'bg-white text-slate-600 border-slate-200'}`}>
+                                            {task.status.replace('_', ' ')}
+                                        </span>
+                                    </div>
+                                    <div className="mt-3 flex items-center gap-2">
+                                        {task.priority === 'high' && <span className="text-[9px] font-black text-secondary flex items-center gap-1"><AlertTriangle size={10} /> High Priority</span>}
+                                        <div className="h-px bg-slate-200 flex-1" />
+                                        <span className="text-[9px] font-bold text-slate-400">{task.category || 'General'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            ))
+                    )}
+                </div>
+            </div>
+
         </div>
 
-        {/* RIGHT COL: TIMER & CHECKLIST */}
+        {/* RIGHT COLUMN (1/3 width) - Stacked Widgets */}
         <div className="flex flex-col gap-6">
-            {/* TIME TRACKER */}
+            
+            {/* 1. Timer */}
             <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-sticker flex flex-col items-center justify-center text-center relative overflow-hidden">
                 <div className="flex items-center gap-2 mb-4 bg-slate-50 px-4 py-1.5 rounded-xl border border-slate-100">
                     <Calendar size={14} className="text-slate-400" />
@@ -511,7 +569,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             </div>
 
-            {/* DAILY CHECKLIST (NEW) */}
+            {/* 2. Checklist */}
             <div className="bg-white border-2 border-slate-800 rounded-[32px] p-5 shadow-pop flex flex-col max-h-[300px]">
                 <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
                     <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide flex items-center gap-2">
@@ -557,26 +615,45 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </button>
                 </div>
             </div>
-        </div>
-      </div>
 
-      {/* ROW 2: SPLIT ANALYTICS & PRODUCTIVITY */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-         
-         {/* LEFT COL: Analytics Charts (Split into 2 Cards) */}
-         <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* CARD 1: Status Distribution */}
-            <div className="bg-white border-2 border-slate-800 rounded-[32px] p-5 shadow-pop flex flex-row items-center justify-between min-h-[200px]">
-                <div className="h-40 w-40 relative shrink-0">
+            {/* 3. Productivity Score */}
+            <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-sticker flex flex-col justify-center items-center text-center relative overflow-hidden min-h-[200px]">
+               <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-quaternary to-accent" />
+               <div className="w-full flex justify-between items-start mb-2">
+                  <h3 className="text-xs font-heading text-left leading-tight text-slate-500 uppercase tracking-widest">Completion<br/>Rate</h3>
+                  <div className="p-1.5 bg-quaternary/10 rounded-lg text-quaternary">
+                     <TrendingUp size={20} />
+                  </div>
+               </div>
+               
+               <div className="flex-1 flex flex-col items-center justify-center py-4">
+                  <div className="flex items-baseline">
+                     <span className="text-7xl font-heading text-slate-900 tracking-tighter drop-shadow-sm leading-none">{isNaN(productivityScore) ? 0 : productivityScore}</span>
+                     <span className="text-2xl font-bold text-slate-400 ml-1">%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-2 rounded-full mt-4 overflow-hidden">
+                     <div className="bg-accent h-full rounded-full transition-all duration-1000" style={{ width: `${productivityScore}%` }} />
+                  </div>
+               </div>
+               
+               <div className="w-full mt-auto pt-3 border-t-2 border-slate-100 bg-slate-50/50 rounded-xl p-2.5">
+                  <p className="text-[10px] font-bold text-slate-500 leading-relaxed text-center">
+                     {weeklyInsight}
+                  </p>
+               </div>
+            </div>
+
+            {/* 4. Chart: Status (Moved Here) */}
+            <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-row items-center gap-6 min-h-[180px]">
+                <div className="h-36 w-36 relative shrink-0">
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                             <Pie
                                 data={statusCounts}
                                 cx="50%"
                                 cy="50%"
-                                innerRadius={40} 
-                                outerRadius={70} 
+                                innerRadius={35} 
+                                outerRadius={65} 
                                 paddingAngle={5}
                                 dataKey="value"
                             >
@@ -595,32 +672,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                 </div>
                 
-                {/* Legend Right Side */}
-                <div className="flex-1 pl-4 flex flex-col justify-center gap-2">
-                    <h4 className="text-sm font-heading text-slate-800 border-b border-slate-100 pb-1 mb-1">Status Task</h4>
-                    {statusCounts.map((s, idx) => (
-                        <div key={s.name} className="flex items-center justify-between group">
-                            <div className="flex items-center gap-2">
-                                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[idx] }} />
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">{s.name}</span>
+                <div className="flex-1 flex flex-col justify-center gap-3">
+                    <h4 className="text-sm font-heading font-bold text-slate-800 border-b-2 border-slate-100 pb-2">Status</h4>
+                    <div className="space-y-2">
+                        {statusCounts.map((s, idx) => (
+                            <div key={s.name} className="flex items-center justify-between group">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[idx] }} />
+                                    <span className="text-xs font-bold text-slate-500 uppercase">{s.name}</span>
+                                </div>
+                                <span className="text-sm font-black text-slate-800">{s.value}</span>
                             </div>
-                            <span className="text-xs font-black text-slate-800">{s.value}</span>
-                        </div>
-                    ))}
+                        ))}
+                    </div>
                 </div>
             </div>
 
-            {/* CARD 2: Priority Distribution */}
-            <div className="bg-white border-2 border-slate-800 rounded-[32px] p-5 shadow-pop flex flex-row items-center justify-between min-h-[200px]">
-                <div className="h-40 w-40 relative shrink-0">
+            {/* 5. Chart: Priority (Moved Here) */}
+            <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-row items-center gap-6 min-h-[180px]">
+                <div className="h-36 w-36 relative shrink-0">
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                             <Pie
                                 data={priorityCounts}
                                 cx="50%"
                                 cy="50%"
-                                innerRadius={40} 
-                                outerRadius={70} 
+                                innerRadius={35} 
+                                outerRadius={65} 
                                 paddingAngle={5}
                                 dataKey="value"
                             >
@@ -639,54 +717,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                 </div>
 
-                {/* Legend Right Side */}
-                <div className="flex-1 pl-4 flex flex-col justify-center gap-2">
-                    <h4 className="text-sm font-heading text-slate-800 border-b border-slate-100 pb-1 mb-1">Prioritas</h4>
-                    {priorityCounts.map((p, idx) => (
-                        <div key={p.name} className="flex items-center justify-between group">
-                            <div className="flex items-center gap-2">
-                                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[idx] }} />
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">{p.name}</span>
+                <div className="flex-1 flex flex-col justify-center gap-3">
+                    <h4 className="text-sm font-heading font-bold text-slate-800 border-b-2 border-slate-100 pb-2">Prioritas</h4>
+                    <div className="space-y-2">
+                        {priorityCounts.map((p, idx) => (
+                            <div key={p.name} className="flex items-center justify-between group">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[idx] }} />
+                                    <span className="text-xs font-bold text-slate-500 uppercase">{p.name}</span>
+                                </div>
+                                <span className="text-sm font-black text-slate-800">{p.value}</span>
                             </div>
-                            <span className="text-xs font-black text-slate-800">{p.value}</span>
-                        </div>
-                    ))}
+                        ))}
+                    </div>
                 </div>
             </div>
 
-         </div>
-
-         {/* RIGHT COL: Productivity & Recommendations */}
-         <div className="flex flex-col gap-6 h-full">
-            
-            {/* 1. PRODUCTIVITY SCORE (Massive) */}
-            <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-sticker flex flex-col justify-center items-center text-center relative overflow-hidden min-h-[240px]">
-               <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-quaternary to-accent" />
-               <div className="w-full flex justify-between items-start mb-2">
-                  <h3 className="text-xs font-heading text-left leading-tight text-slate-500 uppercase tracking-widest">Completion<br/>Rate</h3>
-                  <div className="p-1.5 bg-quaternary/10 rounded-lg text-quaternary">
-                     <TrendingUp size={20} />
-                  </div>
-               </div>
-               
-               <div className="flex-1 flex flex-col items-center justify-center py-4">
-                  <div className="flex items-baseline">
-                     <span className="text-7xl lg:text-8xl font-heading text-slate-900 tracking-tighter drop-shadow-sm leading-none">{isNaN(productivityScore) ? 0 : productivityScore}</span>
-                     <span className="text-2xl font-bold text-slate-400 ml-1">%</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full mt-4 overflow-hidden">
-                     <div className="bg-accent h-full rounded-full transition-all duration-1000" style={{ width: `${productivityScore}%` }} />
-                  </div>
-               </div>
-               
-               <div className="w-full mt-auto pt-3 border-t-2 border-slate-100 bg-slate-50/50 rounded-xl p-2.5">
-                  <p className="text-[10px] font-bold text-slate-500 leading-relaxed text-center">
-                     {weeklyInsight}
-                  </p>
-               </div>
-            </div>
-
-            {/* 2. RECOMMENDATIONS (Moved Here) */}
+            {/* 6. Recommendations */}
             <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex-1 flex flex-col">
                <div className="flex items-center justify-between mb-4">
                   <h3 className="text-xl font-heading">Rekomendasi</h3>
@@ -695,7 +742,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                </div>
 
-               <div className="space-y-3 flex-1 overflow-y-auto pr-2 scrollbar-hide">
+               <div className="space-y-3 flex-1 overflow-y-auto pr-2 scrollbar-hide max-h-[300px]">
                   {recommendationsList.map((rem, index) => (
                      <div 
                        key={rem.id} 
@@ -736,7 +783,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                </button>
             </div>
 
-         </div>
+        </div>
       </div>
 
       {/* ROW 3: Projects Gallery */}
