@@ -126,17 +126,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setActiveCategories(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
   };
 
-  // Agenda Hari Ini: Membaca tugas yang jatuh tempo (due_date) hari ini dari semua sumber aktif DAN kategori aktif
+  // Agenda Hari Ini
   const todayAgenda = useMemo(() => {
     const todayStr = formatDate(new Date());
     const allTasks = [...tasks, ...googleEvents];
     return allTasks.filter(t => {
       if (t.is_archived) return false;
-      
-      // Filter by Category (default 'General' if undefined)
       const taskCat = t.category || 'General';
       if (!activeCategories.includes(taskCat)) return false;
-
       const dDate = t.due_date ? formatDate(t.due_date) : null;
       return dDate && dDate === todayStr;
     });
@@ -225,6 +222,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     return days;
   }, [currentDate]);
 
+  // Sorting Logic: Priority to Multi-day (Start earlier, then Duration longer) to prevent jagged stacking
   const getTasksForDate = (date: Date) => {
     const dStr = formatDate(date);
     if (!dStr) return [];
@@ -249,7 +247,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         
         return dStr >= startStr && dStr <= endStr;
       })
-      .sort((a, b) => a.id.localeCompare(b.id)); // Ensures consistent sorting
+      .sort((a, b) => {
+        // 1. Sort by Start Date (Earliest first)
+        const startA = new Date(a.start_date || a.due_date!).getTime();
+        const startB = new Date(b.start_date || b.due_date!).getTime();
+        if (startA !== startB) return startA - startB;
+
+        // 2. Sort by Duration (Longer duration first) - This keeps multi-day tasks at the top
+        const endA = new Date(a.due_date!).getTime();
+        const endB = new Date(b.due_date!).getTime();
+        const durA = endA - startA;
+        const durB = endB - startB;
+        if (durA !== durB) return durB - durA;
+
+        // 3. Sort by Title/ID as fallback
+        return (a.title || '').localeCompare(b.title || '');
+      });
   };
 
   const toggleVisibility = (id: string) => {
@@ -265,7 +278,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   return (
     <div className="w-full pb-20 animate-in fade-in duration-500 space-y-6">
       
-      {/* Header Title (Moved out of Sidebar) */}
+      {/* Header Title */}
       <div>
          <h2 className="text-4xl font-heading text-slate-900 tracking-tight">Calendar View Task</h2>
          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola Jadwal & Agenda Harian Anda</p>
@@ -290,7 +303,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 const endT = getTimeString(task.due_date);
                 const timeDisplay = task.is_all_day ? 'All Day' : `${startT} - ${endT}`;
                 
-                // Color logic for sidebar item
                 let catColor = UI_PALETTE[0];
                 if (task.parent_id) {
                    catColor = sourceColors['personal-subtasks'] || UI_PALETTE[0];
@@ -497,7 +509,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </div>
           </header>
 
-          {/* Border Grid dipertegas dengan border-slate-800 opacity rendah agar terlihat "Hitam" namun tidak mendominasi */}
           <div className="grid grid-cols-7 border-b-2 border-slate-800 bg-slate-50/50 text-[9px] font-black uppercase tracking-widest text-slate-800 z-40">
             {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map(day => (
               <div key={day} className="py-2.5 text-center border-r border-slate-800/20 last:border-0">{day}</div>
@@ -519,21 +530,27 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => handleDrop(e, date)}
                   onClick={() => onDayClick(date)}
-                  className={`relative bg-white border-r border-b border-slate-800/10 p-0 flex flex-col min-h-[120px] transition-all hover:bg-slate-50/80 cursor-pointer overflow-visible ${isToday ? 'bg-accent/5' : ''}`}
+                  className={`
+                    relative bg-white border-r border-b border-slate-800/10 p-0 flex flex-col min-h-[120px] transition-all hover:bg-slate-50/80 cursor-pointer overflow-visible 
+                    ${isToday ? 'bg-accent/5' : ''}
+                  `}
                 >
-                  <div className="p-1.5 flex justify-between items-start mb-1 pointer-events-none">
+                  <div className="p-1.5 flex justify-between items-start mb-1 pointer-events-none sticky top-0 bg-transparent z-20">
                     <span className={`inline-flex items-center justify-center w-6 h-6 text-[11px] font-black rounded-lg transition-all ${isToday ? 'bg-accent text-white border border-slate-800 shadow-pop-active scale-110' : 'text-slate-300'}`}>
                       {date.getDate()}
                     </span>
                   </div>
                   
-                  <div className="flex-1 flex flex-col gap-1 pb-2">
+                  {/* Changed from absolute stacking or negative margins to standard flex column layout */}
+                  <div className="flex-1 flex flex-col gap-1 pb-2 w-full">
                     {dayTasks.map(task => {
                       const startStr = formatDate(task.start_date || task.due_date);
                       const endStr = formatDate(task.due_date);
                       const isTaskStart = dStr === startStr;
                       const isTaskEnd = dStr === endStr;
+                      const isSingleDay = isTaskStart && isTaskEnd;
                       
+                      // Calculate segments to style middle parts
                       const segmentDays: string[] = [];
                       let tempDate = new Date(date);
                       while (tempDate.getDay() !== 0 && formatDate(tempDate) !== startStr) {
@@ -550,31 +567,56 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       const dayInSegment = Math.ceil((date.getTime() - segmentStart.getTime()) / (1000 * 60 * 60 * 24));
                       const isMiddle = dayInSegment === Math.floor(segmentLen / 2);
 
-                      const roundedClasses = `
-                        ${isTaskStart ? 'rounded-l-lg ml-1' : ''}
-                        ${isTaskEnd ? 'rounded-r-lg mr-1' : ''}
-                        ${!isTaskStart && !isTaskEnd ? 'rounded-none mx-0' : ''}
-                        ${!isTaskStart && isSunday ? 'rounded-l-md ml-0.5' : ''}
-                        ${!isTaskEnd && isSaturday ? 'rounded-r-md mr-0.5' : ''}
-                      `;
-                      
-                      // LOGIKA WARNA DIPERBAIKI: Prioritaskan Sub-task color jika itu adalah subtask
-                      let taskColor = UI_PALETTE[0];
+                      // Improved Visual Logic for Connected Shapes
+                      let roundedClasses = '';
+                      let marginClasses = 'mx-0';
+                      let widthClasses = 'w-full';
 
+                      if (isSingleDay) {
+                         roundedClasses = 'rounded-md';
+                         marginClasses = 'mx-1'; // Give it breathing room
+                         widthClasses = 'w-[calc(100%-8px)] mx-auto'; // Center small items
+                      } else {
+                         if (isTaskStart) {
+                            roundedClasses = 'rounded-l-md rounded-r-none';
+                            marginClasses = 'ml-1 mr-0';
+                         } else if (isTaskEnd) {
+                            roundedClasses = 'rounded-r-md rounded-l-none';
+                            marginClasses = 'mr-1 ml-0';
+                         } else {
+                            roundedClasses = 'rounded-none';
+                            marginClasses = 'mx-[-1px]'; // Slight negative margin to cover grid lines
+                            widthClasses = 'w-[calc(100%+2px)]'; // Slight overlap
+                         }
+                         
+                         // Edge case: Week boundaries (Sun/Sat) need rounding if task continues off-screen? 
+                         // For now, let's keep it simple or follow the grid.
+                         // If we want week boundaries to look cut off but tidy:
+                         if (!isTaskStart && isSunday) {
+                            roundedClasses = 'rounded-l-md ' + roundedClasses;
+                            marginClasses = 'ml-0.5 ' + marginClasses;
+                         }
+                         if (!isTaskEnd && isSaturday) {
+                            roundedClasses = 'rounded-r-md ' + roundedClasses;
+                            marginClasses = 'mr-0.5 ' + marginClasses;
+                         }
+                      }
+                      
+                      // LOGIKA WARNA
+                      let taskColor = UI_PALETTE[0];
                       if (task.parent_id) {
-                        // Prioritas 1: Jika Sub-task, gunakan warna khusus sub-task
                         taskColor = sourceColors['personal-subtasks'] || UI_PALETTE[0];
                       } else if (task.id.startsWith('google-')) {
-                        // Prioritas 2: Google Events
                         taskColor = sourceColors[task.workspace_id] || UI_PALETTE[0];
                       } else {
-                        // Prioritas 3: Task Biasa (Kategori > Workspace > Default)
                         taskColor = categoryColors[task.category || 'General'] || sourceColors[task.workspace_id] || UI_PALETTE[0];
                       }
 
-                      // LOGIKA TAMPILAN LABEL EVENT: (Jam Mulai) - (Judul)
                       const startTimeDisplay = (!task.is_all_day && task.start_date) ? getTimeString(task.start_date) : '';
-                      const eventLabel = startTimeDisplay ? `${startTimeDisplay} - ${task.title}` : task.title;
+                      const eventLabel = startTimeDisplay ? `${startTimeDisplay} ${task.title}` : task.title;
+
+                      // Only show text if it's start or Sunday, or if it's a single day task
+                      const showLabel = isTaskStart || isSunday || isSingleDay;
 
                       return (
                         <button
@@ -586,14 +628,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           }}
                           onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
                           className={`
-                            text-[9px] font-black px-1 py-1 
-                            border-y border-slate-800/20 transition-all 
-                            hover:scale-[1.01] hover:z-[70] hover:border-slate-800
-                            shrink-0 flex items-center justify-center relative shadow-none
-                            w-[98%] mx-auto
+                            text-[9px] font-black py-1 
+                            border-y border-transparent transition-all 
+                            hover:brightness-110 hover:z-[70] hover:scale-[1.01]
+                            shrink-0 flex items-center relative shadow-sm
                             ${roundedClasses}
-                            ${isTaskStart ? 'border-l border-l-slate-800/40' : ''}
-                            ${isTaskEnd ? 'border-r border-r-slate-800/40' : ''}
+                            ${marginClasses}
+                            ${widthClasses}
                           `}
                           style={{ 
                             backgroundColor: taskColor,
@@ -601,8 +642,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             zIndex: 50
                           }}
                         >
-                          <span className="truncate w-full text-left px-1">
-                            {isMiddle ? eventLabel : '\u00A0'}
+                          <span className={`truncate px-1.5 block w-full text-left ${!showLabel ? 'opacity-0 hover:opacity-100 transition-opacity' : ''}`}>
+                            {eventLabel}
                           </span>
                         </button>
                       );
