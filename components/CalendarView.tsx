@@ -8,11 +8,9 @@ import {
   RefreshCw,
   Zap,
   Palette,
-  CheckCircle2,
-  Tag,
+  Check,
   Plus,
-  Trash2,
-  Check
+  Trash2
 } from 'lucide-react';
 import { Task, TaskStatus, Workspace, TaskPriority } from '../types';
 import { GoogleCalendarService, GoogleCalendar } from '../services/googleCalendarService';
@@ -79,12 +77,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
 
-  // Helper untuk mengompensasi offset zona waktu browser dengan SAFE CHECK
+  // --- HELPER DATE FUNCTIONS ---
   const formatDate = (date: Date | string) => {
     try {
       const d = typeof date === 'string' ? new Date(date) : date;
-      if (!d || isNaN(d.getTime())) return ''; // Return empty string if invalid
-      
+      if (!d || isNaN(d.getTime())) return ''; 
       const offset = d.getTimezoneOffset();
       const adjustedDate = new Date(d.getTime() - (offset * 60 * 1000));
       return adjustedDate.toISOString().split('T')[0];
@@ -100,12 +97,30 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   };
 
+  // --- INITIALIZATION ---
   useEffect(() => {
     if (visibleSources.length === 0 && workspaces.length > 0) {
       setVisibleSources(workspaces.map(ws => ws.id));
     }
   }, [workspaces, visibleSources, setVisibleSources]);
 
+  useEffect(() => {
+    const allIds = [...workspaces.map(ws => ws.id), ...googleCalendars.map(gc => gc.id), 'personal-subtasks'];
+    setSourceColors(prev => {
+      const next = { ...prev };
+      let changed = false;
+      allIds.forEach((id, idx) => {
+        if (!next[id]) {
+          changed = true;
+          const gCal = googleCalendars.find(c => c.id === id);
+          next[id] = gCal?.backgroundColor || UI_PALETTE[idx % UI_PALETTE.length];
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [workspaces, googleCalendars, setSourceColors]);
+
+  // --- HANDLERS ---
   const handleAddCategory = () => {
     if (newCategoryName.trim()) {
       const cat = newCategoryName.trim();
@@ -126,34 +141,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setActiveCategories(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
   };
 
-  // Agenda Hari Ini
-  const todayAgenda = useMemo(() => {
-    const todayStr = formatDate(new Date());
-    const allTasks = [...tasks, ...googleEvents];
-    return allTasks.filter(t => {
-      if (t.is_archived) return false;
-      const taskCat = t.category || 'General';
-      if (!activeCategories.includes(taskCat)) return false;
-      const dDate = t.due_date ? formatDate(t.due_date) : null;
-      return dDate && dDate === todayStr;
-    });
-  }, [tasks, googleEvents, activeCategories]);
-
-  useEffect(() => {
-    const allIds = [...workspaces.map(ws => ws.id), ...googleCalendars.map(gc => gc.id), 'personal-subtasks'];
-    setSourceColors(prev => {
-      const next = { ...prev };
-      let changed = false;
-      allIds.forEach((id, idx) => {
-        if (!next[id]) {
-          changed = true;
-          const gCal = googleCalendars.find(c => c.id === id);
-          next[id] = gCal?.backgroundColor || UI_PALETTE[idx % UI_PALETTE.length];
-        }
-      });
-      return changed ? next : prev;
-    });
-  }, [workspaces, googleCalendars, setSourceColors]);
+  const toggleVisibility = (id: string) => {
+    setVisibleSources(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
 
   const handleSync = useCallback(async () => {
     if (!googleAccessToken) return;
@@ -211,6 +201,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     }
   }, []);
 
+  // --- CALENDAR GRID GENERATION ---
   const calendarDays = useMemo(() => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
@@ -222,50 +213,136 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     return days;
   }, [currentDate]);
 
-  // Sorting Logic
-  const getTasksForDate = (date: Date) => {
-    const dStr = formatDate(date);
-    if (!dStr) return [];
+  // Group days into weeks (Rows)
+  const calendarWeeks = useMemo(() => {
+    const weeks: (Date | null)[][] = [];
+    let currentWeek: (Date | null)[] = [];
+    
+    calendarDays.forEach((day, index) => {
+        currentWeek.push(day);
+        if ((index + 1) % 7 === 0 || index === calendarDays.length - 1) {
+            // Fill remaining days if last week is incomplete
+            while (currentWeek.length < 7) {
+                currentWeek.push(null);
+            }
+            weeks.push(currentWeek);
+            currentWeek = [];
+        }
+    });
+    return weeks;
+  }, [calendarDays]);
 
-    return [...tasks, ...googleEvents]
-      .filter(t => {
-        // Filter by Category
+  // --- DATA PREPARATION FOR OVERLAY RENDERING ---
+  const todayAgenda = useMemo(() => {
+    const todayStr = formatDate(new Date());
+    const allTasks = [...tasks, ...googleEvents];
+    return allTasks.filter(t => {
+      if (t.is_archived) return false;
+      const taskCat = t.category || 'General';
+      if (!activeCategories.includes(taskCat)) return false;
+      const dDate = t.due_date ? formatDate(t.due_date) : null;
+      return dDate && dDate === todayStr;
+    });
+  }, [tasks, googleEvents, activeCategories]);
+
+  // Calculate layout for each week
+  const getWeekLayout = (weekDays: (Date | null)[]) => {
+    if (weekDays.every(d => d === null)) return { tasks: [], maxRow: 0 };
+
+    const weekStart = weekDays.find(d => d !== null);
+    const weekEnd = [...weekDays].reverse().find(d => d !== null);
+    
+    if (!weekStart || !weekEnd) return { tasks: [], maxRow: 0 };
+
+    const weekStartStr = formatDate(weekStart);
+    const weekEndStr = formatDate(weekEnd);
+
+    // 1. Filter tasks visible in this week
+    const weekTasks = [...tasks, ...googleEvents].filter(t => {
         const taskCat = t.category || 'General';
         if (!activeCategories.includes(taskCat)) return false;
-
-        if (t.parent_id) {
-          if (!showPersonalTasks) return false;
-        } else {
-          if (!visibleSources.includes(t.workspace_id)) return false;
-        }
+        if (t.parent_id && !showPersonalTasks) return false;
+        if (!t.parent_id && !visibleSources.includes(t.workspace_id)) return false;
         if (t.is_archived) return false;
-        
-        const startStr = t.start_date || t.due_date ? formatDate(t.start_date || t.due_date!) : '';
-        const endStr = t.due_date ? formatDate(t.due_date) : '';
-        
-        if (!startStr || !endStr) return false;
-        
-        return dStr >= startStr && dStr <= endStr;
-      })
-      .sort((a, b) => {
-        // 1. Sort by Start Date
+
+        const tStart = formatDate(t.start_date || t.due_date!);
+        const tEnd = formatDate(t.due_date!);
+        if (!tStart || !tEnd) return false;
+
+        // Overlap logic: Task ends after week starts AND starts before week ends
+        return tEnd >= weekStartStr && tStart <= weekEndStr;
+    });
+
+    // 2. Sort tasks to ensure deterministic stacking
+    weekTasks.sort((a, b) => {
         const startA = new Date(a.start_date || a.due_date!).getTime();
         const startB = new Date(b.start_date || b.due_date!).getTime();
-        if (startA !== startB) return startA - startB;
+        if (startA !== startB) return startA - startB; // Earlier start first
 
-        // 2. Sort by Duration
-        const endA = new Date(a.due_date!).getTime();
-        const endB = new Date(b.due_date!).getTime();
-        const durA = endA - startA;
-        const durB = endB - startB;
-        if (durA !== durB) return durB - durA;
+        const durA = new Date(a.due_date!).getTime() - startA;
+        const durB = new Date(b.due_date!).getTime() - startB;
+        if (durA !== durB) return durB - durA; // Longer duration first (top)
 
         return (a.title || '').localeCompare(b.title || '');
-      });
-  };
+    });
 
-  const toggleVisibility = (id: string) => {
-    setVisibleSources(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    // 3. Assign Visual Slots (0, 1, 2...)
+    // occupied[rowIndex] = [true, false, true, ...] (7 days)
+    const occupied: boolean[][] = [];
+    const layout: { task: Task, row: number, startCol: number, colSpan: number }[] = [];
+
+    weekTasks.forEach(task => {
+        const tStart = formatDate(task.start_date || task.due_date!);
+        const tEnd = formatDate(task.due_date!);
+
+        // Determine Start Column (0-6)
+        let startCol = 0;
+        let endCol = 6;
+
+        // If task starts inside this week, find which day index
+        if (tStart >= weekStartStr) {
+            const startIndex = weekDays.findIndex(d => d && formatDate(d) === tStart);
+            if (startIndex !== -1) startCol = startIndex;
+        }
+
+        // If task ends inside this week
+        if (tEnd <= weekEndStr) {
+            const endIndex = weekDays.findIndex(d => d && formatDate(d) === tEnd);
+            if (endIndex !== -1) endCol = endIndex;
+        }
+
+        // Check slots for these columns
+        let rowIndex = 0;
+        while (true) {
+            if (!occupied[rowIndex]) occupied[rowIndex] = Array(7).fill(false);
+            
+            // Check collision in the required columns
+            let collision = false;
+            for (let i = startCol; i <= endCol; i++) {
+                if (occupied[rowIndex][i]) {
+                    collision = true;
+                    break;
+                }
+            }
+
+            if (!collision) {
+                // Book it
+                for (let i = startCol; i <= endCol; i++) {
+                    occupied[rowIndex][i] = true;
+                }
+                layout.push({
+                    task,
+                    row: rowIndex,
+                    startCol,
+                    colSpan: endCol - startCol + 1
+                });
+                break;
+            }
+            rowIndex++;
+        }
+    });
+
+    return { layout, maxRow: occupied.length };
   };
 
   const gStatus = (() => {
@@ -277,17 +354,16 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   return (
     <div className="w-full pb-20 animate-in fade-in duration-500 space-y-6">
       
-      {/* Header Title */}
+      {/* Header */}
       <div>
          <h2 className="text-4xl font-heading text-slate-900 tracking-tight">Calendar View Task</h2>
          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola Jadwal & Agenda Harian Anda</p>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6 items-start">
-        {/* Sidebar Filter & Agenda */}
+        {/* Sidebar */}
         <aside className="w-full lg:w-72 shrink-0 space-y-5">
-          
-          {/* AGENDA HARI INI CARD */}
+          {/* Agenda Card */}
           <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop overflow-hidden">
             <div className="bg-slate-800 p-3 flex items-center justify-between text-white">
               <div className="flex items-center gap-2">
@@ -341,165 +417,95 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 <Palette size={16} className="text-accent" strokeWidth={3} />
                 <h3 className="text-[9px] font-black uppercase tracking-widest text-slate-800">Filter Tampilan</h3>
               </div>
-              <button 
-                onClick={() => setIsAddingCategory(!isAddingCategory)}
-                className="p-1 hover:bg-slate-100 rounded-lg transition-colors" 
-                title="Tambah Kategori Custom"
-              >
-                 <Plus size={14} className="text-slate-800" strokeWidth={3} />
-              </button>
+              <button onClick={() => setIsAddingCategory(!isAddingCategory)} className="p-1 hover:bg-slate-100 rounded-lg transition-colors"><Plus size={14} /></button>
             </div>
             
             <div className="space-y-4">
               {isAddingCategory && (
                 <div className="flex gap-2 animate-in slide-in-from-top-2">
-                  <input 
-                    autoFocus
-                    className="w-full text-[10px] font-bold px-3 py-2 border-2 border-slate-800 rounded-xl focus:border-accent outline-none bg-white shadow-sm"
-                    placeholder="Nama Kategori..."
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
-                  />
-                  <button 
-                    onClick={handleAddCategory}
-                    className="px-3 bg-slate-800 text-white rounded-xl text-[10px] font-black shadow-pop-active hover:translate-y-0.5 hover:shadow-none transition-all"
-                  >
-                    <Check size={14} strokeWidth={3} />
-                  </button>
+                  <input autoFocus className="w-full text-[10px] font-bold px-3 py-2 border-2 border-slate-800 rounded-xl outline-none" placeholder="Kategori..." value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()} />
+                  <button onClick={handleAddCategory} className="px-3 bg-slate-800 text-white rounded-xl text-[10px]"><Check size={14} /></button>
                 </div>
               )}
-
-              {/* Custom Categories */}
+              {/* Categories */}
               <div className="space-y-2">
-                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest px-1">Kategori (Editable)</p>
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest px-1">Kategori</p>
                 {categories.map(cat => (
                   <div key={cat} className="flex items-center justify-between group">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div 
-                        className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer transition-transform hover:scale-110 shrink-0"
-                        style={{ backgroundColor: categoryColors[cat] || '#ccc' }}
-                        title="Klik untuk ganti warna"
-                        onClick={() => {
-                          const currentColor = categoryColors[cat];
-                          const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(currentColor) + 1) % UI_PALETTE.length] || UI_PALETTE[0];
+                      <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: categoryColors[cat] || '#ccc' }} onClick={() => {
+                          const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(categoryColors[cat]) + 1) % UI_PALETTE.length];
                           setCategoryColors(prev => ({ ...prev, [cat]: nextColor }));
-                        }}
-                      />
+                      }} />
                       <span className="text-[11px] font-black uppercase text-slate-700 truncate">{cat}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                       <button 
-                        onClick={() => handleDeleteCategory(cat)}
-                        className="text-slate-300 hover:text-secondary opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Hapus Filter"
-                       >
-                         <Trash2 size={12} />
-                       </button>
-                       <input 
-                        type="checkbox" 
-                        checked={activeCategories.includes(cat)} 
-                        onChange={() => toggleCategory(cat)} 
-                        className="w-4 h-4 rounded border border-slate-800 checked:bg-tertiary appearance-none cursor-pointer shrink-0" 
-                      />
+                       <button onClick={() => handleDeleteCategory(cat)} className="text-slate-300 hover:text-secondary opacity-0 group-hover:opacity-100"><Trash2 size={12} /></button>
+                       <input type="checkbox" checked={activeCategories.includes(cat)} onChange={() => toggleCategory(cat)} className="w-4 h-4 rounded border border-slate-800 checked:bg-tertiary appearance-none cursor-pointer" />
                     </div>
                   </div>
                 ))}
               </div>
-
+              {/* Workspaces & Google */}
               <div className="space-y-2 pt-2 border-t border-slate-100">
-                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest px-1">Workspace Lokal</p>
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest px-1">Sumber Task</p>
                 {workspaces.map(ws => (
-                  <div key={ws.id} className="flex items-center justify-between group">
+                  <div key={ws.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
-                      <div 
-                        className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer transition-transform hover:scale-110"
-                        style={{ backgroundColor: sourceColors[ws.id] }}
-                        onClick={() => {
+                      <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: sourceColors[ws.id] }} onClick={() => {
                           const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(sourceColors[ws.id]) + 1) % UI_PALETTE.length];
                           setSourceColors(prev => ({ ...prev, [ws.id]: nextColor }));
-                        }}
-                      />
+                      }} />
                       <span className="text-[11px] font-bold text-slate-700 truncate max-w-[120px]">{ws.name}</span>
                     </div>
                     <input type="checkbox" checked={visibleSources.includes(ws.id)} onChange={() => toggleVisibility(ws.id)} className="w-4 h-4 rounded border border-slate-800 checked:bg-accent appearance-none cursor-pointer" />
                   </div>
                 ))}
-              </div>
-              
-              <div className="flex items-center justify-between group pt-2 border-t border-slate-100">
-                <div className="flex items-center gap-2.5">
-                  <div 
-                    className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer transition-transform hover:scale-110"
-                    style={{ backgroundColor: sourceColors['personal-subtasks'] }}
-                    onClick={() => {
-                      const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(sourceColors['personal-subtasks']) + 1) % UI_PALETTE.length];
-                      setSourceColors(prev => ({ ...prev, 'personal-subtasks': nextColor }));
-                    }}
-                  />
-                  <span className="text-[11px] font-black uppercase text-slate-700">Sub-Tasks Only</span>
+                {/* Personal Subtasks */}
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: sourceColors['personal-subtasks'] }} onClick={() => {
+                          const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(sourceColors['personal-subtasks']) + 1) % UI_PALETTE.length];
+                          setSourceColors(prev => ({ ...prev, 'personal-subtasks': nextColor }));
+                      }} />
+                      <span className="text-[11px] font-black uppercase text-slate-700">Sub-Tasks</span>
+                    </div>
+                    <input type="checkbox" checked={showPersonalTasks} onChange={() => setShowPersonalTasks(!showPersonalTasks)} className="w-4 h-4 rounded border border-slate-800 checked:bg-accent appearance-none cursor-pointer" />
                 </div>
-                <input type="checkbox" checked={showPersonalTasks} onChange={() => setShowPersonalTasks(!showPersonalTasks)} className="w-4 h-4 rounded border border-slate-800 checked:bg-accent appearance-none cursor-pointer" />
-              </div>
-
-              {googleCalendars.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-slate-100">
-                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest px-1">Google Cloud</p>
-                  {googleCalendars.map(gc => (
-                    <div key={gc.id} className="flex items-center justify-between group">
+                {/* Google Calendars */}
+                {googleCalendars.map(gc => (
+                    <div key={gc.id} className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
-                        <div 
-                          className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer transition-transform hover:scale-110"
-                          style={{ backgroundColor: sourceColors[gc.id] }}
-                          onClick={() => {
+                        <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: sourceColors[gc.id] }} onClick={() => {
                             const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(sourceColors[gc.id]) + 1) % UI_PALETTE.length];
                             setSourceColors(prev => ({ ...prev, [gc.id]: nextColor }));
-                          }}
-                        />
+                        }} />
                         <span className="text-[11px] font-bold text-slate-700 truncate max-w-[120px]">{gc.summary}</span>
                       </div>
                       <input type="checkbox" checked={visibleSources.includes(gc.id)} onChange={() => toggleVisibility(gc.id)} className="w-4 h-4 rounded border border-slate-800 checked:bg-secondary appearance-none cursor-pointer" />
                     </div>
-                  ))}
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Google Status Card */}
           <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop p-3">
-            <button 
-              onClick={handleSync}
-              disabled={!googleAccessToken || isSyncing}
-              className="w-full group flex items-center justify-between p-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all disabled:opacity-50"
-            >
+            <button onClick={handleSync} disabled={!googleAccessToken || isSyncing} className="w-full group flex items-center justify-between p-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all disabled:opacity-50">
               <div className="flex items-center gap-2">
-                <div className={`w-8 h-8 ${gStatus.bg} rounded-lg flex items-center justify-center ${gStatus.color} transition-colors`}>
-                  <Chrome size={16} strokeWidth={3} />
-                </div>
-                <div className="text-left">
-                  <p className="text-[8px] font-black uppercase text-slate-400 leading-none mb-1">Google Sync</p>
-                  <p className={`text-[9px] font-bold ${gStatus.color} leading-none`}>{gStatus.label}</p>
-                </div>
+                <div className={`w-8 h-8 ${gStatus.bg} rounded-lg flex items-center justify-center ${gStatus.color}`}><Chrome size={16} strokeWidth={3} /></div>
+                <div className="text-left"><p className="text-[8px] font-black uppercase text-slate-400">Google Sync</p><p className={`text-[9px] font-bold ${gStatus.color}`}>{gStatus.label}</p></div>
               </div>
-              <RefreshCw size={12} className={`text-slate-300 transition-all ${isSyncing ? 'animate-spin text-accent' : 'group-hover:text-slate-800 group-hover:rotate-180'}`} />
+              <RefreshCw size={12} className={`text-slate-300 transition-all ${isSyncing ? 'animate-spin text-accent' : ''}`} />
             </button>
           </div>
         </aside>
 
-        {/* Main Calendar Grid */}
+        {/* Main Calendar View */}
         <div className="flex-1 bg-white border-2 border-slate-800 rounded-[32px] shadow-pop flex flex-col min-h-[600px] overflow-hidden">
-          <header className="p-6 border-b-2 border-slate-800 flex items-center justify-between bg-white relative z-[60]">
+          <header className="p-6 border-b-2 border-slate-800 flex items-center justify-between bg-white z-[60]">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-accent rounded-2xl border-2 border-slate-800 flex items-center justify-center text-white shadow-pop-active transform -rotate-3 transition-transform hover:rotate-0">
-                <CalendarIcon size={24} strokeWidth={3} />
-              </div>
-              <div>
-                <h2 className="text-2xl font-heading leading-none tracking-tight">
-                  {currentDate.toLocaleString('id-ID', { month: 'long' })}
-                </h2>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1">{currentDate.getFullYear()}</p>
-              </div>
+              <div className="w-12 h-12 bg-accent rounded-2xl border-2 border-slate-800 flex items-center justify-center text-white shadow-pop-active transform -rotate-3 hover:rotate-0 transition-transform"><CalendarIcon size={24} strokeWidth={3} /></div>
+              <div><h2 className="text-2xl font-heading leading-none tracking-tight">{currentDate.toLocaleString('id-ID', { month: 'long' })}</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1">{currentDate.getFullYear()}</p></div>
             </div>
             <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-800">
               <button onClick={handlePrevMonth} className="p-2 hover:bg-white rounded-lg transition-all"><ChevronLeft size={16} strokeWidth={3} /></button>
@@ -509,84 +515,87 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </header>
 
           <div className="grid grid-cols-7 border-b-2 border-slate-800 bg-slate-50/50 text-[9px] font-black uppercase tracking-widest text-slate-800 z-40">
-            {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map(day => (
-              <div key={day} className="py-2.5 text-center border-r border-slate-800/20 last:border-0">{day}</div>
-            ))}
+            {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map(day => <div key={day} className="py-2.5 text-center border-r border-slate-800/20 last:border-0">{day}</div>)}
           </div>
 
-          <div className="flex-1 grid grid-cols-7 auto-rows-fr bg-slate-50/10 relative z-30">
-            {calendarDays.map((date, idx) => {
-              if (!date) return <div key={`empty-${idx}`} className="bg-slate-50/5 border-r border-b border-slate-800/10" />;
-              const dStr = formatDate(date);
-              const isToday = formatDate(new Date()) === dStr;
-              const dayTasks = getTasksForDate(date);
+          <div className="flex-1 overflow-y-auto scrollbar-hide bg-slate-50/10">
+            {calendarWeeks.map((week, weekIdx) => {
+                // Calculate Task Layout for this Week
+                const { layout, maxRow } = getWeekLayout(week);
+                
+                // Calculate Dynamic Height for the row based on task stack
+                // Base height 120px, add 28px for each task row beyond fit
+                const minHeight = 120;
+                const tasksHeight = (maxRow * 28) + 40; // 40px for date header padding
+                const rowHeight = Math.max(minHeight, tasksHeight);
 
-              return (
-                <div 
-                  key={date.toISOString()} 
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => handleDrop(e, date)}
-                  onClick={() => onDayClick(date)}
-                  className={`
-                    relative bg-white border-r border-b border-slate-800/10 p-0 flex flex-col min-h-[120px] transition-all hover:bg-slate-50/80 cursor-pointer overflow-visible 
-                    ${isToday ? 'bg-accent/5' : ''}
-                  `}
-                >
-                  <div className="p-1.5 flex justify-between items-start mb-1 pointer-events-none sticky top-0 bg-transparent z-20">
-                    <span className={`inline-flex items-center justify-center w-6 h-6 text-[11px] font-black rounded-lg transition-all ${isToday ? 'bg-accent text-white border border-slate-800 shadow-pop-active scale-110' : 'text-slate-300'}`}>
-                      {date.getDate()}
-                    </span>
-                  </div>
-                  
-                  {/* CHANGED: Independent tasks for every day, simple stacking, standard rounded chips */}
-                  <div className="flex-1 flex flex-col gap-1 pb-2 w-full">
-                    {dayTasks.map(task => {
-                      // Determine if we should show the time: Only on the start day of the task
-                      const isStartDay = formatDate(task.start_date || task.due_date) === dStr;
-                      const timeLabel = (!task.is_all_day && task.start_date) ? getTimeString(task.start_date) : '';
-                      const displayLabel = (isStartDay && timeLabel) ? `${timeLabel} ${task.title}` : task.title;
-                      
-                      // LOGIKA WARNA
-                      let taskColor = UI_PALETTE[0];
-                      if (task.parent_id) {
-                        taskColor = sourceColors['personal-subtasks'] || UI_PALETTE[0];
-                      } else if (task.id.startsWith('google-')) {
-                        taskColor = sourceColors[task.workspace_id] || UI_PALETTE[0];
-                      } else {
-                        taskColor = categoryColors[task.category || 'General'] || sourceColors[task.workspace_id] || UI_PALETTE[0];
-                      }
+                return (
+                    <div key={`week-${weekIdx}`} className="grid grid-cols-7 border-b border-slate-800/10 relative" style={{ height: `${rowHeight}px` }}>
+                        {/* 1. Background Grid Layer */}
+                        {week.map((date, dayIdx) => {
+                            if (!date) return <div key={`empty-${dayIdx}`} className="bg-slate-50/5 border-r border-slate-800/10" />;
+                            const dStr = formatDate(date);
+                            const isToday = formatDate(new Date()) === dStr;
+                            
+                            return (
+                                <div 
+                                    key={dStr} 
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => handleDrop(e, date)}
+                                    onClick={() => onDayClick(date)}
+                                    className={`relative border-r border-slate-800/10 transition-colors hover:bg-slate-50/50 cursor-pointer ${isToday ? 'bg-accent/5' : ''}`}
+                                >
+                                    <div className="p-1.5 flex justify-end">
+                                        <span className={`inline-flex items-center justify-center w-6 h-6 text-[11px] font-black rounded-lg transition-all ${isToday ? 'bg-accent text-white border border-slate-800 shadow-pop-active scale-110' : 'text-slate-300'}`}>
+                                            {date.getDate()}
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })}
 
-                      return (
-                        <button
-                          key={task.id}
-                          draggable={!task.id.startsWith('google-')}
-                          onDragStart={(e) => {
-                             e.dataTransfer.setData('taskId', task.id);
-                             e.dataTransfer.effectAllowed = 'move';
-                          }}
-                          onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
-                          className={`
-                            text-[9px] font-black py-1 px-1.5
-                            border-2 border-transparent transition-all 
-                            hover:brightness-110 hover:z-[70] hover:scale-[1.02] hover:border-slate-800
-                            shrink-0 flex items-center relative shadow-sm
-                            rounded-md mx-1 w-[calc(100%-8px)]
-                          `}
-                          style={{ 
-                            backgroundColor: taskColor,
-                            color: '#fff',
-                            zIndex: 50
-                          }}
-                        >
-                          <span className="truncate w-full text-left">
-                            {displayLabel}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
+                        {/* 2. Tasks Overlay Layer (Absolute positioned) */}
+                        <div className="absolute inset-0 top-8 left-0 right-0 pointer-events-none px-1">
+                            {layout.map((item) => {
+                                const { task, row, startCol, colSpan } = item;
+                                
+                                // Color Logic
+                                let taskColor = UI_PALETTE[0];
+                                if (task.parent_id) taskColor = sourceColors['personal-subtasks'] || UI_PALETTE[0];
+                                else if (task.id.startsWith('google-')) taskColor = sourceColors[task.workspace_id] || UI_PALETTE[0];
+                                else taskColor = categoryColors[task.category || 'General'] || sourceColors[task.workspace_id] || UI_PALETTE[0];
+
+                                const timeLabel = (!task.is_all_day && task.start_date) ? getTimeString(task.start_date) : '';
+                                const label = timeLabel ? `${timeLabel} - ${task.title}` : task.title;
+
+                                return (
+                                    <button
+                                        key={`${task.id}-w${weekIdx}`}
+                                        draggable={!task.id.startsWith('google-')}
+                                        onDragStart={(e) => {
+                                            e.dataTransfer.setData('taskId', task.id);
+                                            e.dataTransfer.effectAllowed = 'move';
+                                        }}
+                                        onClick={(e) => { e.stopPropagation(); onTaskClick(task); }}
+                                        className="absolute h-6 rounded-md text-[9px] font-black px-2 flex items-center shadow-sm hover:z-[60] hover:scale-[1.01] hover:brightness-110 transition-all border-y border-transparent pointer-events-auto"
+                                        style={{
+                                            backgroundColor: taskColor,
+                                            color: '#fff',
+                                            top: `${row * 28}px`, // 24px height + 4px gap
+                                            left: `${(startCol / 7) * 100}%`,
+                                            width: `calc(${(colSpan / 7) * 100}% - 4px)`, // -4px for gap
+                                            marginLeft: '2px', // gap
+                                            zIndex: 50
+                                        }}
+                                        title={task.title}
+                                    >
+                                        <span className="truncate w-full text-left">{label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
             })}
           </div>
         </div>
