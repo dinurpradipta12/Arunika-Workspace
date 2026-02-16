@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { ChevronLeft, ChevronRight, Settings, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 
 interface CalendarHeaderProps {
   currentDate: Date;
@@ -47,9 +47,6 @@ export const CalendarHeader: React.FC<CalendarHeaderProps> = ({
         <button className="flex items-center gap-2 px-4 py-2.5 bg-white border-2 border-slate-800 rounded-xl text-xs font-bold text-slate-800 shadow-sm hover:shadow-pop hover:-translate-y-0.5 transition-all">
           <Calendar size={14} />
           Last Week
-        </button>
-        <button className="p-2.5 bg-white border-2 border-slate-800 rounded-xl text-slate-800 shadow-sm hover:shadow-pop hover:-translate-y-0.5 transition-all">
-          <Settings size={16} />
         </button>
       </div>
     </div>

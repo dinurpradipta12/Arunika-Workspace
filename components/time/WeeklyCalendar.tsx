@@ -37,6 +37,10 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
     return () => clearInterval(i);
   }, []);
 
+  // Calculate current time position in px
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const currentTop = (currentMinutes / 60) * HOUR_HEIGHT;
+
   // --- DATE HELPERS ---
   const getWeekDays = (date: Date) => {
     const start = new Date(date);
@@ -93,9 +97,8 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
     e.preventDefault();
     if (!draggedEvent || !calendarRef.current) return;
 
-    const rect = calendarRef.current.getBoundingClientRect();
-    // Calculate Y relative to the scrolling container
-    // The drop target is the day column div, simpler vertical calculation from offset
+    // Calculate Y relative to the day column top (requires careful offset calc)
+    // Using simple offset relative to the target element (the day column)
     const relY = e.nativeEvent.offsetY; 
     
     // Snap to 15 mins
@@ -171,7 +174,7 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
   };
 
   return (
-    <div className="flex flex-1 overflow-hidden bg-white relative" ref={calendarRef}>
+    <div className="flex flex-col flex-1 overflow-hidden bg-white relative h-full" ref={calendarRef}>
       <EventPopup 
         event={hoveredEvent} 
         position={popupPos} 
@@ -182,87 +185,95 @@ export const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
         onDelete={onEventDelete}
       />
 
-      {/* TIME SIDEBAR */}
-      <div className="w-20 flex-shrink-0 border-r border-slate-100 bg-white overflow-hidden">
-        <div className="h-10 border-b border-slate-100 flex items-center justify-center text-[10px] font-black text-slate-400">
-          GMT+7
+      {/* FIXED HEADER (DAYS) */}
+      <div className="flex border-b border-slate-100 shrink-0 bg-white z-30">
+        {/* Time Col Spacer */}
+        <div className="w-20 border-r border-slate-100 flex items-center justify-center bg-white">
+           <span className="text-[10px] font-black text-slate-400">GMT+7</span>
         </div>
-        <div className="overflow-hidden">
-           {HOURS.map(h => (
-             <div key={h} className="relative border-b border-transparent box-border" style={{ height: `${HOUR_HEIGHT}px` }}>
-                <span className="absolute -top-2 right-2 text-xs font-bold text-slate-400">
-                  {h.toString().padStart(2, '0')}:00
-                </span>
-             </div>
-           ))}
-        </div>
-      </div>
-
-      {/* GRID */}
-      <div className="flex-1 overflow-y-auto scrollbar-hide relative">
-        <div className="grid grid-cols-7 min-w-[800px]">
-          {weekDays.map((date, idx) => {
-            const isToday = date.toDateString() === now.toDateString();
-            const dateEvents = events.filter(e => {
-                const eDate = new Date(e.start);
-                return eDate.getDate() === date.getDate() && eDate.getMonth() === date.getMonth();
-            });
-
-            // Calculate current time position
-            const currentMinutes = now.getHours() * 60 + now.getMinutes();
-            const currentTop = (currentMinutes / 60) * HOUR_HEIGHT;
-
-            return (
-              <div 
-                key={idx} 
-                className={`border-r border-slate-100 relative min-h-[${HOURS.length * HOUR_HEIGHT}px] group`}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, date)}
-              >
-                {/* Header Day */}
-                <div className={`sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-slate-100 py-3 text-center transition-colors ${isToday ? 'bg-accent/5' : ''}`}>
-                  <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${isToday ? 'text-accent' : 'text-slate-400'}`}>
+        
+        {/* Days Header */}
+        <div className="flex-1 grid grid-cols-7 min-w-[800px]">
+           {weekDays.map((date, idx) => {
+              const isToday = date.toDateString() === now.toDateString();
+              return (
+                <div key={idx} className={`py-3 text-center border-r border-slate-100 transition-colors ${isToday ? 'bg-orange-50' : ''}`}>
+                  <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${isToday ? 'text-orange-500' : 'text-slate-400'}`}>
                     {date.toLocaleDateString('en-US', { weekday: 'short' })}
                   </p>
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto text-sm font-bold ${isToday ? 'bg-accent text-white shadow-pop' : 'text-slate-800'}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto text-sm font-bold ${isToday ? 'bg-orange-500 text-white shadow-pop' : 'text-slate-800'}`}>
                     {date.getDate()}
                   </div>
                 </div>
+              )
+           })}
+        </div>
+      </div>
 
-                {/* Hour Lines Background */}
-                <div className="absolute inset-0 top-[60px] z-0 pointer-events-none">
-                   {HOURS.map(h => (
-                     <div key={`line-${h}`} className="border-b border-slate-50 w-full" style={{ height: `${HOUR_HEIGHT}px` }} />
-                   ))}
-                </div>
+      {/* SCROLLABLE BODY */}
+      <div className="flex-1 overflow-y-auto scrollbar-hide relative">
+        <div className="flex relative">
+            {/* TIME COLUMN (Scrolls with grid) */}
+            <div className="w-20 shrink-0 border-r border-slate-100 bg-white z-20">
+               {HOURS.map(h => (
+                 <div key={h} className="relative border-b border-transparent box-border" style={{ height: `${HOUR_HEIGHT}px` }}>
+                    <span className="absolute -top-2 right-2 text-xs font-bold text-slate-400">
+                      {h.toString().padStart(2, '0')}:00
+                    </span>
+                 </div>
+               ))}
+            </div>
 
-                {/* Current Time Line */}
-                {isToday && (
-                   <div 
-                     className="absolute left-0 right-0 border-t-2 border-dashed border-orange-400 z-10 pointer-events-none flex items-center"
-                     style={{ top: `${currentTop + 60}px` }}
-                   >
-                     <div className="w-2 h-2 rounded-full bg-orange-400 -ml-1" />
-                   </div>
-                )}
+            {/* EVENT GRID */}
+            <div className="flex-1 grid grid-cols-7 min-w-[800px] relative">
+               
+               {/* Global Background Lines */}
+               <div className="absolute inset-0 pointer-events-none z-0">
+                  {HOURS.map(h => (
+                     <div key={`line-${h}`} className="border-b border-slate-100 w-full" style={{ height: `${HOUR_HEIGHT}px` }} />
+                  ))}
+               </div>
 
-                {/* Drop Zone / Content Area */}
-                <div className="relative" style={{ height: `${HOURS.length * HOUR_HEIGHT}px` }}>
-                   {dateEvents.map(ev => (
-                     <EventCard 
-                       key={ev.id} 
-                       event={ev} 
-                       hourHeight={HOUR_HEIGHT}
-                       onHover={handleEventHover}
-                       onLeave={handleEventLeave}
-                       onDragStart={handleDragStart}
-                       onResizeStart={handleResizeStart}
-                     />
-                   ))}
-                </div>
-              </div>
-            );
-          })}
+               {/* Current Time Line Overlay (Across entire grid) */}
+               <div 
+                 className="absolute left-0 right-0 border-t-2 border-dashed border-orange-500 z-10 pointer-events-none flex items-center"
+                 style={{ top: `${currentTop}px` }}
+               >
+                 <div className="absolute left-[-5px] w-3 h-3 rounded-full bg-orange-500" />
+               </div>
+
+               {/* Day Columns */}
+               {weekDays.map((date, idx) => {
+                  const isToday = date.toDateString() === now.toDateString();
+                  const dateEvents = events.filter(e => {
+                      const eDate = new Date(e.start);
+                      return eDate.getDate() === date.getDate() && eDate.getMonth() === date.getMonth();
+                  });
+
+                  return (
+                    <div 
+                      key={idx} 
+                      className={`relative border-r border-slate-100 group ${isToday ? 'bg-orange-50/30' : ''}`}
+                      style={{ height: `${HOURS.length * HOUR_HEIGHT}px` }}
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => handleDrop(e, date)}
+                    >
+                       {/* Drop Zone */}
+                       {dateEvents.map(ev => (
+                         <EventCard 
+                           key={ev.id} 
+                           event={ev} 
+                           hourHeight={HOUR_HEIGHT}
+                           onHover={handleEventHover}
+                           onLeave={handleEventLeave}
+                           onDragStart={handleDragStart}
+                           onResizeStart={handleResizeStart}
+                         />
+                       ))}
+                    </div>
+                  );
+               })}
+            </div>
         </div>
       </div>
     </div>

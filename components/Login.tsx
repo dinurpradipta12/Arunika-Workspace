@@ -18,6 +18,26 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
   const [isLoading, setIsLoading] = useState(false);
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [rawError, setRawError] = useState<any>(null);
+  
+  // Branding State
+  const [appName, setAppName] = useState('TaskPlay');
+  const [appLogo, setAppLogo] = useState<string | null>(null);
+
+  // Fetch Global Branding
+  useEffect(() => {
+    const fetchBranding = async () => {
+      try {
+        const { data } = await supabase.from('app_config').select('app_name, app_logo').single();
+        if (data) {
+          if (data.app_name) setAppName(data.app_name);
+          if (data.app_logo) setAppLogo(data.app_logo);
+        }
+      } catch (err) {
+        console.error("Failed to load branding", err);
+      }
+    };
+    fetchBranding();
+  }, []);
 
   useEffect(() => {
     if (initialMessage) {
@@ -120,17 +140,24 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
   };
 
   return (
-    <div className="min-h-screen dot-grid flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background dot-grid flex items-center justify-center p-4">
       <div className="fixed top-20 left-20 w-32 h-32 bg-secondary/20 rounded-full blur-3xl" />
       <div className="fixed bottom-20 right-20 w-48 h-48 bg-tertiary/20 rounded-full blur-3xl" />
       <div className="fixed top-1/2 left-10 w-12 h-12 bg-accent/20 rotate-45" />
 
       <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-500">
         <div className="flex flex-col items-center mb-10">
-          <div className="w-16 h-16 bg-accent rounded-2xl border-4 border-slate-800 shadow-pop flex items-center justify-center text-white mb-4 rotate-3">
-            <CheckSquare size={32} strokeWidth={3} />
-          </div>
-          <h1 className="text-4xl font-heading tracking-tight text-slate-900">TaskPlay</h1>
+          {appLogo ? (
+             <div className="w-24 h-24 mb-4 flex items-center justify-center">
+                <img src={appLogo} alt="Logo" className="w-full h-full object-contain drop-shadow-md" />
+             </div>
+          ) : (
+            <div className="w-16 h-16 bg-accent rounded-2xl border-4 border-slate-800 shadow-pop flex items-center justify-center text-white mb-4 rotate-3">
+              <CheckSquare size={32} strokeWidth={3} />
+            </div>
+          )}
+          
+          <h1 className="text-4xl font-heading tracking-tight text-slate-900">{appName}</h1>
           <p className="text-mutedForeground font-bold uppercase tracking-widest text-[10px] mt-2 text-center leading-relaxed">
             Sistem Manajemen Task & Penjadwalan <br/>
             <span className="text-accent">Personal Productivity</span>
