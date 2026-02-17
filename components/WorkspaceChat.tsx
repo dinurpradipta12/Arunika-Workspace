@@ -218,14 +218,52 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({ workspaceId, curre
     setReplyingTo(null);
 
     try {
-        const { error } = await supabase.from('workspace_messages').insert({
+        const { data: newMessage, error } = await supabase.from('workspace_messages').insert({
             workspace_id: workspaceId,
             user_id: currentUser.id,
             content: text,
             parent_id: parent?.id || null
-        });
+        }).select().single();
+
         if (error) throw error;
-        // Fetch handled by realtime subscription
+
+        // --- HANDLE MENTIONS NOTIFICATION ---
+        // Regex to find @username
+        const mentionMatches = text.match(/@(\w+)/g);
+        if (mentionMatches && members.length > 0 && newMessage) {
+            const mentionedUsers = new Set<string>();
+            
+            mentionMatches.forEach(match => {
+                const usernameQuery = match.substring(1).toLowerCase(); // remove @
+                // Find matching user in members list
+                const targetMember = members.find(m => 
+                    m.users?.username?.toLowerCase() === usernameQuery || 
+                    m.users?.name?.toLowerCase().replace(/\s+/g, '').includes(usernameQuery)
+                );
+                
+                if (targetMember && targetMember.user_id !== currentUser.id) {
+                    mentionedUsers.add(targetMember.user_id);
+                }
+            });
+
+            // Insert notifications
+            for (const targetUserId of mentionedUsers) {
+                await supabase.from('notifications').insert({
+                    user_id: targetUserId,
+                    type: 'mention',
+                    title: 'Mention di Workspace Chat',
+                    message: `${currentUser.name} menandai Anda: "${text.substring(0, 30)}..."`,
+                    is_read: false,
+                    metadata: { 
+                        workspace_id: workspaceId,
+                        message_id: newMessage.id,
+                        sender_avatar: currentUser.avatar_url,
+                        sender_name: currentUser.name
+                    }
+                });
+            }
+        }
+
     } catch (err) {
         console.error("Failed to send message", err);
         alert("Gagal mengirim pesan.");
@@ -239,10 +277,16 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({ workspaceId, curre
   };
 
   const handleClearChat = async () => {
-      if(!confirm("⚠️ PERHATIAN: Ini akan menghapus SELURUH riwayat chat untuk SEMUA orang di workspace ini. Lanjutkan?")) return;
-      await supabase.from('workspace_messages').delete().eq('workspace_id', workspaceId);
-      setMessages([]);
-      setIsHeaderMenuOpen(false);
+      if(!confirm("⚠️ PERHATIAN: Ini akan menghapus SELURUH riwayat chat untuk SEMUA orang di workspace ini. Database akan dibersihkan. Lanjutkan?")) return;
+      try {
+          const { error } = await supabase.from('workspace_messages').delete().eq('workspace_id', workspaceId);
+          if (error) throw error;
+          setMessages([]);
+          setIsHeaderMenuOpen(false);
+          alert("Chat berhasil dibersihkan.");
+      } catch (err: any) {
+          alert("Gagal menghapus chat: " + err.message);
+      }
   };
 
   const handleReaction = async (msgId: string, emoji: string) => {
@@ -308,7 +352,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({ workspaceId, curre
             </div>
 
             {/* MESSAGES */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-slate-50/10 dot-grid" ref={scrollRef}>
+            <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-slate-50/10 dot-grid pt-8" ref={scrollRef}>
                 {isLoading && messages.length === 0 && (
                     <div className="h-full flex items-center justify-center">
                         <p className="text-xs font-bold text-slate-400 animate-pulse">Memuat pesan...</p>
@@ -334,18 +378,6 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({ workspaceId, curre
 
                     return (
                         <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''} group relative px-2`}>
-                            {/* Actions Menu (Hover) */}
-                            <div className={`absolute top-0 ${isMe ? 'left-0 -translate-x-full' : 'right-0 translate-x-full'} opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white border border-slate-200 rounded-full p-1 shadow-sm z-10 mx-2`}>
-                                {QUICK_REACTIONS.map(emoji => (
-                                    <button key={emoji} onClick={() => handleReaction(msg.id, emoji)} className="p-1 hover:bg-slate-100 rounded-full text-sm">{emoji}</button>
-                                ))}
-                                <div className="w-[1px] h-4 bg-slate-200 mx-1" />
-                                <button onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-full" title="Balas"><CornerDownRight size={12} /></button>
-                                {isMe && (
-                                    <button onClick={() => handleDeleteMessage(msg.id)} className="p-1.5 hover:bg-red-50 text-red-500 rounded-full" title="Hapus"><Trash2 size={12} /></button>
-                                )}
-                            </div>
-
                             {/* Avatar */}
                             {!isMe && (
                                 <img src={msg.users?.avatar_url} className="w-8 h-8 rounded-full border-2 border-slate-800 bg-white mt-1" alt={msg.users?.name} title={msg.users?.name} />
@@ -363,9 +395,24 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({ workspaceId, curre
                                     </div>
                                 )}
 
-                                {/* Bubble */}
-                                <div className={`px-4 py-2.5 rounded-2xl border-2 border-slate-800 shadow-sm relative text-sm font-bold leading-relaxed ${isMe ? 'bg-slate-800 text-white rounded-tr-none' : `${getUserColor(msg.user_id)} rounded-tl-none`}`}>
-                                    {renderContent(msg.content)}
+                                {/* Bubble Wrapper with Menu */}
+                                <div className="relative group/bubble">
+                                    {/* Actions Menu (Fixed Position Above) */}
+                                    <div className={`absolute -top-10 ${isMe ? 'right-0' : 'left-0'} opacity-0 group-hover/bubble:opacity-100 transition-opacity flex items-center gap-1 bg-white border border-slate-200 rounded-full p-1 shadow-sm z-50 whitespace-nowrap`}>
+                                        {QUICK_REACTIONS.map(emoji => (
+                                            <button key={emoji} onClick={() => handleReaction(msg.id, emoji)} className="p-1 hover:bg-slate-100 rounded-full text-sm">{emoji}</button>
+                                        ))}
+                                        <div className="w-[1px] h-4 bg-slate-200 mx-1" />
+                                        <button onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-full" title="Balas"><CornerDownRight size={12} /></button>
+                                        {isMe && (
+                                            <button onClick={() => handleDeleteMessage(msg.id)} className="p-1.5 hover:bg-red-50 text-red-500 rounded-full" title="Hapus"><Trash2 size={12} /></button>
+                                        )}
+                                    </div>
+
+                                    {/* Bubble */}
+                                    <div className={`px-4 py-2.5 rounded-2xl border-2 border-slate-800 shadow-sm relative text-sm font-bold leading-relaxed ${isMe ? 'bg-slate-800 text-white rounded-tr-none' : `${getUserColor(msg.user_id)} rounded-tl-none`}`}>
+                                        {renderContent(msg.content)}
+                                    </div>
                                 </div>
 
                                 {/* Reactions */}

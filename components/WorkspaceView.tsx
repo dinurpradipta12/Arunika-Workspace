@@ -83,6 +83,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
   // CHAT STATE
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   const notepadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notepadRef = useRef<HTMLTextAreaElement>(null);
@@ -112,7 +113,38 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
        setNotepadContent(workspace.notepad || '');
     }
     setAssets(workspace.assets || []);
+    fetchUnreadChatCount(); // Fetch count on load
   }, [workspace.id, workspace.notepad, workspace.assets]);
+
+  // --- UNREAD CHAT COUNT LOGIC ---
+  const fetchUnreadChatCount = async () => {
+    if (!currentUserId) return;
+    
+    // 1. Get total messages count in this workspace (not sent by me)
+    const { count: totalMsg, error: msgError } = await supabase
+        .from('workspace_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspace.id)
+        .neq('user_id', currentUserId);
+
+    // 2. Get count of messages I have read
+    // Note: Ideally we filter read receipts by message workspace_id, but here we do a simple approximation or fetch ids
+    // Optimasi: Ambil ID pesan yang belum dibaca secara spesifik
+    const { data: unreadMessages, error } = await supabase
+        .from('workspace_messages')
+        .select('id, reads:workspace_message_reads(user_id)')
+        .eq('workspace_id', workspace.id)
+        .neq('user_id', currentUserId);
+        
+    if (unreadMessages) {
+        // Filter pesan dimana TIDAK ada read receipt dari user ini
+        const unread = unreadMessages.filter((msg: any) => {
+            const readReceipts = msg.reads || [];
+            return !readReceipts.some((r: any) => r.user_id === currentUserId);
+        });
+        setUnreadChatCount(unread.length);
+    }
+  };
 
   useEffect(() => {
     if (channelRef.current) supabase.removeChannel(channelRef.current);
@@ -138,6 +170,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           }
         }
       )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workspace_messages', filter: `workspace_id=eq.${workspace.id}`}, () => {
+          if (!isChatOpen) fetchUnreadChatCount();
+      })
       .on('broadcast', { event: 'typing' }, (payload) => {
           const typerName = payload.payload.user;
           const typerId = payload.payload.userId;
@@ -166,7 +201,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       supabase.removeChannel(channel); 
       channelRef.current = null;
     };
-  }, [workspace.id, currentUserId]); 
+  }, [workspace.id, currentUserId, isChatOpen]); 
+
+  // Reset count when chat opens
+  useEffect(() => {
+      if (isChatOpen) {
+          setUnreadChatCount(0);
+          // Optional: Mark all as read logic is handled inside WorkspaceChat component
+      } else {
+          fetchUnreadChatCount();
+      }
+  }, [isChatOpen]);
 
   const fetchMembers = async () => {
     // FIX: Added 'username' to the select query so mentions work correctly
@@ -399,8 +444,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       <div className="fixed bottom-6 right-6 z-[60]">
           <button 
              onClick={() => setIsChatOpen(!isChatOpen)}
-             className={`p-4 rounded-2xl border-4 border-slate-800 shadow-pop-active transition-all hover:-translate-y-1 hover:shadow-[8px_8px_0px_0px_#1E293B] active:translate-y-0 active:shadow-none flex items-center justify-center ${isChatOpen ? 'bg-white text-slate-800' : 'bg-accent text-white'}`}
+             className={`relative p-4 rounded-2xl border-4 border-slate-800 shadow-pop-active transition-all hover:-translate-y-1 hover:shadow-[8px_8px_0px_0px_#1E293B] active:translate-y-0 active:shadow-none flex items-center justify-center ${isChatOpen ? 'bg-white text-slate-800' : 'bg-accent text-white'}`}
           >
+             {/* Badge Unread */}
+             {unreadChatCount > 0 && !isChatOpen && (
+               <div className="absolute -top-2 -left-2 bg-red-500 text-white border-2 border-slate-800 text-[10px] font-black w-6 h-6 flex items-center justify-center rounded-full z-10 animate-bounce">
+                 {unreadChatCount > 9 ? '9+' : unreadChatCount}
+               </div>
+             )}
+             
              {isChatOpen ? <X size={24} strokeWidth={3} /> : <MessageSquare size={24} strokeWidth={3} />}
           </button>
       </div>

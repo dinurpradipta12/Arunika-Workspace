@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS public.workspace_messages (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- MIGRATION: Ensure parent_id exists if table already existed without it
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workspace_messages' AND column_name = 'parent_id') THEN
+        ALTER TABLE public.workspace_messages ADD COLUMN parent_id UUID REFERENCES public.workspace_messages(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS public.workspace_message_reads (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     message_id UUID NOT NULL REFERENCES public.workspace_messages(id) ON DELETE CASCADE,
