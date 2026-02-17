@@ -156,19 +156,30 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       const allEventsPromises = calendars.map(async (cal) => {
         try {
           const events = await service.fetchEvents(googleAccessToken, cal.id);
-          return events.map(event => ({
-            id: `google-${event.id}`,
-            workspace_id: cal.id, 
-            title: event.summary,
-            due_date: event.end.dateTime || event.end.date || new Date().toISOString(),
-            start_date: event.start.dateTime || event.start.date || new Date().toISOString(),
-            is_all_day: !!event.start.date,
-            priority: TaskPriority.LOW,
-            status: TaskStatus.TODO,
-            created_by: 'google',
-            created_at: new Date().toISOString(),
-            category: 'General'
-          } as Task));
+          return events.map(event => {
+            // FIX: Google Calendar All-Day Events Exclusive End Date Issue
+            // If it is all day (has event.end.date), subtract 1 day from end date for display
+            let finalDueDate = event.end.dateTime || event.end.date || new Date().toISOString();
+            if (event.end.date) {
+               const endDateObj = new Date(event.end.date);
+               endDateObj.setDate(endDateObj.getDate() - 1);
+               finalDueDate = endDateObj.toISOString().split('T')[0];
+            }
+
+            return {
+              id: `google-${event.id}`,
+              workspace_id: cal.id, 
+              title: event.summary,
+              due_date: finalDueDate,
+              start_date: event.start.dateTime || event.start.date || new Date().toISOString(),
+              is_all_day: !!event.start.date,
+              priority: TaskPriority.LOW,
+              status: TaskStatus.TODO,
+              created_by: 'google',
+              created_at: new Date().toISOString(),
+              category: 'General'
+            } as Task;
+          });
         } catch (e) { return []; }
       });
       const results = await Promise.all(allEventsPromises);

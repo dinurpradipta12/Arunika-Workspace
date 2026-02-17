@@ -4,6 +4,17 @@
 -- Jalankan script ini di SQL Editor Supabase
 -- ==========================================
 
+-- ADD NEW COLUMNS TO USERS TABLE IF NOT EXIST
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'bio') THEN
+        ALTER TABLE public.users ADD COLUMN bio TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'custom_status') THEN
+        ALTER TABLE public.users ADD COLUMN custom_status TEXT;
+    END IF;
+END $$;
+
 -- 1. Ensure Tables Exist
 -- Menggunakan TEXT untuk task_id agar cocok dengan tabel tasks yang mungkin menggunakan string ID
 CREATE TABLE IF NOT EXISTS public.task_comments (
@@ -142,10 +153,13 @@ CREATE POLICY "Allow all for workspace_message_reactions" ON public.workspace_me
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.users;
 CREATE POLICY "Public profiles are viewable by everyone" ON public.users FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.users;
+CREATE POLICY "Users can update their own profile" ON public.users FOR UPDATE USING (auth.uid()::text = id);
+
 -- 4. ENABLE REALTIME (CRITICAL FOR POPUP TO APPEAR WITHOUT REFRESH)
 BEGIN;
   DROP PUBLICATION IF EXISTS supabase_realtime;
-  CREATE PUBLICATION supabase_realtime FOR TABLE public.tasks, public.task_comments, public.task_comment_reactions, public.notifications, public.workspace_members, public.workspace_messages, public.workspace_message_reads, public.workspace_message_reactions;
+  CREATE PUBLICATION supabase_realtime FOR TABLE public.users, public.tasks, public.task_comments, public.task_comment_reactions, public.notifications, public.workspace_members, public.workspace_messages, public.workspace_message_reads, public.workspace_message_reactions;
 COMMIT;
 
 -- 5. Refresh API Cache

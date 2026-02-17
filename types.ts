@@ -34,6 +34,8 @@ export interface User {
   status?: string;
   is_active?: boolean;
   temp_password?: string;
+  bio?: string; // NEW
+  custom_status?: string; // NEW
   app_settings?: {
     // appName, appLogo, appFavicon moved to AppConfig for global sync
     notificationsEnabled?: boolean;

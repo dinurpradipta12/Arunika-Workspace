@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
@@ -559,6 +560,26 @@ const App: React.FC = () => {
         
         if (newTaskData) {
             setTasks(prev => [newTaskData as Task, ...prev]);
+
+            // --- AUTO SYNC TO GOOGLE CALENDAR ---
+            // Cek apakah user terkoneksi ke Google Calendar
+            const isGoogleConnected = currentUser.app_settings?.googleConnected;
+            const googleToken = googleAccessToken || currentUser.app_settings?.googleAccessToken;
+
+            if (isGoogleConnected && googleToken) {
+               // Jangan sync sub-task (opsional) atau task yang bukan workspace kalender
+               if (!newTaskData.parent_id) {
+                  const googleService = new GoogleCalendarService(() => {});
+                  const event = await googleService.createEvent(googleToken, newTaskData);
+                  
+                  if (event && event.id) {
+                     // Simpan Google Event ID kembali ke database
+                     await supabase.from('tasks').update({ 
+                       google_event_id: event.id 
+                     }).eq('id', newTaskData.id);
+                  }
+               }
+            }
         }
       }
       
@@ -986,13 +1007,21 @@ const App: React.FC = () => {
               </div>
 
               <Button variant="ghost" onClick={() => setIsSettingsModalOpen(true)} className="p-2 border-2 border-slate-800 rounded-xl bg-white shadow-pop-active transition-all hover:-translate-y-0.5"><Settings size={20} /></Button>
+              
+              {/* --- UPDATED PROFILE SECTION --- */}
               <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer group" onClick={() => setActiveTab('profile')}>
                 <div className="text-right hidden sm:block">
                   <p className="text-xs font-black text-slate-800 leading-none group-hover:text-accent transition-colors">{currentUser.name}</p>
-                  <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{accountRole}</p>
+                  <p className="text-[9px] font-bold text-slate-400 mt-1 truncate max-w-[120px]">{currentUser.email}</p>
                 </div>
-                <img src={currentUser.avatar_url} className="w-10 h-10 rounded-xl border-2 border-slate-800 bg-white shadow-pop-active transition-transform group-hover:rotate-6" alt="Avatar" />
+                <div className="relative">
+                  <img src={currentUser.avatar_url} className="w-10 h-10 rounded-xl border-2 border-slate-800 bg-white shadow-pop-active transition-transform group-hover:rotate-6 object-cover" alt="Avatar" />
+                  {/* Online Indicator */}
+                  <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-quaternary border-2 border-slate-800 rounded-full z-10" title="Online"></div>
+                </div>
               </div>
+              {/* ------------------------------- */}
+
             </div>
           </header>
 
@@ -1009,7 +1038,18 @@ const App: React.FC = () => {
                 }} 
               />
             )}
-            {activeTab === 'profile' && <ProfileView onLogout={handleLogout} user={currentUser} role={accountRole} />}
+            {activeTab === 'profile' && 
+              <ProfileView 
+                onLogout={handleLogout} 
+                user={currentUser} 
+                role={accountRole} 
+                setGoogleAccessToken={setGoogleAccessToken}
+                onNavigate={(id) => {
+                   setActiveWorkspaceId(id);
+                   setActiveTab('workspace_view');
+                }}
+              />
+            }
             {activeTab === 'team' && <TeamSpace currentWorkspace={activeWorkspace} currentUser={currentUser} workspaces={workspaces} />}
             
             {activeTab === 'workspace_view' && activeWorkspace && (
