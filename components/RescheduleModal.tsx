@@ -17,7 +17,11 @@ export const RescheduleModal: React.FC<RescheduleModalProps> = ({ task, isOpen, 
     if (task?.due_date) {
       const d = new Date(task.due_date);
       if (!isNaN(d.getTime())) {
-        setDate(d.toISOString().split('T')[0]);
+        // Parse UTC ISO to Local Input Format YYYY-MM-DD
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        setDate(`${year}-${month}-${day}`);
       } else {
         setDate('');
       }
@@ -30,7 +34,31 @@ export const RescheduleModal: React.FC<RescheduleModalProps> = ({ task, isOpen, 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(task.id, date);
+    if (!date) return;
+
+    // Convert Input Date (Local Midnight) to ISO String (UTC)
+    // Example: Input "2023-10-27" (Local) -> "2023-10-27T00:00:00" Local -> "2023-10-26T17:00:00Z" (if GMT+7)
+    // Or if we want to preserve the specific time of the original task, we need more logic.
+    // For RescheduleModal (typically just changing the day), preserving time is good UX.
+    
+    let finalDateIso = '';
+    
+    if (task.due_date) {
+        // Preserve original time
+        const original = new Date(task.due_date);
+        const hours = original.getHours();
+        const minutes = original.getMinutes();
+        
+        // Construct new date with original local time
+        const newLocal = new Date(`${date}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`);
+        finalDateIso = newLocal.toISOString();
+    } else {
+        // Default to end of day if no previous time
+        const newLocal = new Date(`${date}T23:59:59`);
+        finalDateIso = newLocal.toISOString();
+    }
+
+    onSave(task.id, finalDateIso);
     onClose();
   };
 

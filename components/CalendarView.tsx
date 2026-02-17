@@ -15,7 +15,8 @@ import {
   Link as LinkIcon,
   X,
   Eye,
-  EyeOff
+  EyeOff,
+  Globe
 } from 'lucide-react';
 import { Task, TaskStatus, Workspace, TaskPriority } from '../types';
 import { GoogleCalendarService, GoogleCalendar } from '../services/googleCalendarService';
@@ -277,21 +278,27 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     const task = mergedTasks.find(t => t.id === taskId);
     if (!task) return;
 
-    // CALCULATE NEW TIME (PRESERVING HOURS/MINUTES CORRECTLY)
+    // CALCULATE DURATION
     const originalStart = new Date(task.start_date || new Date().toISOString());
     const originalDue = new Date(task.due_date || new Date().toISOString());
     const duration = originalDue.getTime() - originalStart.getTime();
 
-    // 'date' is 00:00 Local Time of the cell
+    // 'date' comes from cell which is Local Midnight.
+    // We construct a new Local Date based on dropped cell date + original time.
     const newStart = new Date(date); 
     
-    // Only if not all-day, preserve the original time components
-    // FIX: Ensure we don't accidentally set 00:00 if original was parsed as UTC midnight
+    // Preserve Original Local Hours/Minutes
     if (!task.is_all_day) {
         newStart.setHours(originalStart.getHours(), originalStart.getMinutes(), 0, 0);
+    } else {
+        newStart.setHours(0,0,0,0);
     }
 
     const newDue = new Date(newStart.getTime() + duration);
+
+    // Convert to ISO (UTC) for storage
+    const newStartISO = newStart.toISOString();
+    const newDueISO = newDue.toISOString();
 
     if (taskId.startsWith('google-')) {
        // --- HANDLE GOOGLE EVENT DROP ---
@@ -305,8 +312,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
            if (t.id === taskId) {
                return { 
                    ...t, 
-                   start_date: newStart.toISOString(), 
-                   due_date: newDue.toISOString() 
+                   start_date: newStartISO, 
+                   due_date: newDueISO 
                };
            }
            return t;
@@ -319,8 +326,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
            
            await service.updateEvent(googleAccessToken, eventId, {
                ...task,
-               start_date: newStart.toISOString(),
-               due_date: newDue.toISOString(),
+               start_date: newStartISO,
+               due_date: newDueISO,
                is_all_day: task.is_all_day // CRITICAL: Keep original is_all_day status
            }, calendarId);
        } catch (err) {
@@ -335,8 +342,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         const { error } = await supabase
             .from('tasks')
             .update({ 
-                due_date: newDue.toISOString(),
-                start_date: newStart.toISOString() 
+                due_date: newDueISO,
+                start_date: newStartISO 
             })
             .eq('id', taskId);
         
@@ -350,7 +357,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const handleSettingsClick = (e: React.MouseEvent) => {
       e.stopPropagation();
       const rect = e.currentTarget.getBoundingClientRect();
-      setSyncSettingsAnchor({ top: rect.bottom, left: rect.left });
+      // UPDATE: Set anchor to TOP of button so we can render above
+      setSyncSettingsAnchor({ top: rect.top, left: rect.left });
       setIsManageSyncOpen(true);
   };
 
@@ -489,34 +497,70 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   return (
     <div className="w-full pb-20 animate-in fade-in duration-500 space-y-6 relative">
       
-      {/* --- MANAGE SYNC MODAL POPOVER --- */}
+      {/* --- MANAGE SYNC MODAL POPOVER (UPDATED POSITIONING & UI) --- */}
       {isManageSyncOpen && (
-          <div className="fixed inset-0 z-[100] bg-slate-900/10 backdrop-blur-sm" onClick={() => setIsManageSyncOpen(false)}>
+          <div className="fixed inset-0 z-[100] bg-slate-900/20 backdrop-blur-sm" onClick={() => setIsManageSyncOpen(false)}>
               <div 
-                className="absolute z-[101] w-72 bg-white border-4 border-slate-800 rounded-2xl shadow-pop animate-in zoom-in-95 origin-top-left"
+                className="absolute z-[101] w-80 bg-white border-4 border-slate-800 rounded-2xl shadow-[8px_8px_0px_0px_#1E293B] animate-in zoom-in-95 slide-in-from-bottom-4 duration-200 flex flex-col overflow-hidden origin-bottom-left"
                 style={{ 
-                    top: syncSettingsAnchor?.top ?? 100, 
-                    left: syncSettingsAnchor?.left ?? 100 
+                    top: (syncSettingsAnchor?.top ?? 0) - 16, // Move slightly above button
+                    left: syncSettingsAnchor?.left ?? 0,
+                    transform: 'translateY(-100%)', // Lift entire modal up
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                  <div className="p-3 bg-slate-50 border-b-2 border-slate-100 flex justify-between items-center">
-                      <h3 className="text-xs font-black uppercase text-slate-800">Atur Kalender</h3>
-                      <button onClick={() => setIsManageSyncOpen(false)} className="p-1 hover:bg-slate-200 rounded"><X size={14} /></button>
+                  {/* COLORFUL HEADER */}
+                  <div className="p-4 bg-tertiary border-b-4 border-slate-800 flex justify-between items-center shrink-0">
+                      <div className="flex items-center gap-2">
+                         <div className="w-8 h-8 bg-white border-2 border-slate-800 rounded-lg flex items-center justify-center shadow-sm">
+                            <Settings size={18} className="text-slate-900" strokeWidth={3} />
+                         </div>
+                         <h3 className="text-sm font-black uppercase text-slate-900 tracking-widest leading-none mt-0.5">Atur Kalender</h3>
+                      </div>
+                      <button 
+                        onClick={() => setIsManageSyncOpen(false)} 
+                        className="p-1.5 bg-white border-2 border-slate-900 rounded-lg hover:bg-slate-100 transition-colors"
+                      >
+                        <X size={16} strokeWidth={3} />
+                      </button>
                   </div>
-                  <div className="p-3 max-h-60 overflow-y-auto space-y-2">
-                      <p className="text-[9px] text-slate-400 font-bold mb-2">Pilih kalender yang ingin ditampilkan di filter:</p>
-                      {googleCalendars.map(cal => (
-                          <div key={cal.id} className="flex items-center justify-between p-2 rounded border border-slate-100 bg-white">
-                              <span className="text-[10px] font-bold truncate flex-1 pr-2 text-slate-700">{cal.summary}</span>
-                              <button 
-                                onClick={() => toggleHiddenCalendar(cal.id)}
-                                className={`p-1.5 rounded transition-colors ${hiddenCalendarIds.includes(cal.id) ? 'bg-slate-100 text-slate-300' : 'bg-quaternary/20 text-quaternary'}`}
-                              >
-                                  {hiddenCalendarIds.includes(cal.id) ? <EyeOff size={12} /> : <Eye size={12} />}
-                              </button>
+
+                  {/* LIST CONTENT */}
+                  <div className="p-3 max-h-80 overflow-y-auto space-y-2 bg-white">
+                      <p className="text-[9px] text-slate-400 font-bold mb-3 uppercase tracking-widest px-1">Pilih kalender aktif:</p>
+                      {googleCalendars.map(cal => {
+                          const isHidden = hiddenCalendarIds.includes(cal.id);
+                          return (
+                            <div key={cal.id} className={`flex items-center justify-between p-3 rounded-xl border-2 transition-all group ${isHidden ? 'bg-slate-50 border-slate-200 opacity-70' : 'bg-white border-slate-800 shadow-sm'}`}>
+                                <div className="flex items-center gap-3 min-w-0 flex-1 pr-3">
+                                    <div className="w-8 h-8 rounded-lg border-2 border-slate-200 flex items-center justify-center bg-white shrink-0">
+                                        <Globe size={16} className={isHidden ? "text-slate-300" : "text-slate-800"} />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className={`text-[10px] font-black uppercase truncate ${isHidden ? 'text-slate-400' : 'text-slate-800'}`}>{cal.summary}</p>
+                                        <p className="text-[8px] font-bold text-slate-400 truncate max-w-[150px]">{cal.id}</p>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => toggleHiddenCalendar(cal.id)}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center border-2 transition-all ${isHidden ? 'bg-slate-200 border-slate-300 text-slate-400' : 'bg-quaternary border-slate-800 text-slate-900 shadow-pop-active'}`}
+                                    title={isHidden ? "Tampilkan" : "Sembunyikan"}
+                                >
+                                    {isHidden ? <EyeOff size={14} /> : <Eye size={14} strokeWidth={3} />}
+                                </button>
+                            </div>
+                          );
+                      })}
+                      {googleCalendars.length === 0 && (
+                          <div className="text-center py-6 border-2 border-dashed border-slate-200 rounded-xl">
+                              <p className="text-[10px] font-bold text-slate-400 italic">Belum ada kalender terhubung.</p>
                           </div>
-                      ))}
+                      )}
+                  </div>
+                  
+                  {/* FOOTER TIP */}
+                  <div className="p-3 bg-slate-50 border-t-2 border-slate-100 text-center">
+                      <p className="text-[8px] font-bold text-slate-400">Gunakan ID Kalender untuk menambah manual.</p>
                   </div>
               </div>
           </div>

@@ -202,4 +202,25 @@ export class GoogleCalendarService {
       return null;
     }
   }
+
+  public async deleteEvent(accessToken: string, eventId: string, calendarId: string = 'primary'): Promise<void> {
+    try {
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      if (!response.ok && response.status !== 410) { // 410 is Gone (already deleted)
+         throw new Error(`Failed to delete event: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error("Error deleting Google Calendar event:", error);
+      throw error;
+    }
+  }
 }
