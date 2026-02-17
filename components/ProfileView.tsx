@@ -86,65 +86,70 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
         // 3. Fetch Contacts (Colleagues in same workspaces)
         const wsIds = wsList.map((w: any) => w.id);
         
-        // Fetch ALL members from these workspaces (excluding self)
-        const { data: colleagues } = await supabase
-            .from('workspace_members')
-            .select(`
-                user_id,
-                role,
-                workspace_id,
-                users!inner (id, name, email, avatar_url, username, is_active, last_seen),
-                workspaces (name, type)
-            `)
-            .in('workspace_id', wsIds)
-            .neq('user_id', user.id); // Exclude current user
+        if (wsIds.length > 0) {
+            // Fetch ALL members from these workspaces (excluding self)
+            const { data: colleagues } = await supabase
+                .from('workspace_members')
+                .select(`
+                    user_id,
+                    role,
+                    workspace_id,
+                    users (id, name, email, avatar_url, username, is_active, last_seen),
+                    workspaces (name, type)
+                `)
+                .in('workspace_id', wsIds)
+                .neq('user_id', user.id); // Exclude current user
 
-        if (colleagues) {
-            const uniqueUsersMap = new Map();
-            const lbScores: Record<string, number> = {};
+            if (colleagues) {
+                const uniqueUsersMap = new Map();
+                const lbScores: Record<string, number> = {};
 
-            colleagues.forEach((c: any) => {
-                if (c.users && !uniqueUsersMap.has(c.user_id)) {
-                    uniqueUsersMap.set(c.user_id, {
-                        ...c.users,
-                        // Context info: which workspace connected them
-                        connection_ws: c.workspaces?.name || 'Unknown WS',
-                        connection_role: c.role
+                colleagues.forEach((c: any) => {
+                    // Filter out null users (left join safe)
+                    if (c.users && !uniqueUsersMap.has(c.user_id)) {
+                        uniqueUsersMap.set(c.user_id, {
+                            ...c.users,
+                            // Context info: which workspace connected them
+                            connection_ws: c.workspaces?.name || 'Unknown WS',
+                            connection_role: c.role
+                        });
+                    }
+                });
+                setContacts(Array.from(uniqueUsersMap.values()));
+
+                // 4. Leaderboard Logic (Mock score based on tasks done in these workspaces)
+                // Combine contacts + current user ID for leaderboard query
+                const allUserIds = Array.from(uniqueUsersMap.keys()).concat(user.id);
+                
+                if (allUserIds.length > 0) {
+                    const { data: taskCounts } = await supabase
+                        .from('tasks')
+                        .select('created_by')
+                        .in('created_by', allUserIds)
+                        .eq('status', 'done');
+                    
+                    taskCounts?.forEach((t: any) => {
+                        lbScores[t.created_by] = (lbScores[t.created_by] || 0) + 1;
                     });
+
+                    // Build Leaderboard Array
+                    const lb = allUserIds.map(uid => {
+                        const uInfo = uid === user.id ? user : uniqueUsersMap.get(uid);
+                        // Fallback if contact info missing
+                        const name = uInfo?.name || (colleagues.find((c:any) => c.user_id === uid)?.users?.name) || 'User';
+                        const avatar = uInfo?.avatar_url || (colleagues.find((c:any) => c.user_id === uid)?.users?.avatar_url);
+
+                        return {
+                            id: uid,
+                            name: name,
+                            avatar: avatar,
+                            score: lbScores[uid] || 0
+                        };
+                    }).sort((a, b) => b.score - a.score); // High score first
+
+                    setLeaderboard(lb);
                 }
-            });
-            setContacts(Array.from(uniqueUsersMap.values()));
-
-            // 4. Leaderboard Logic (Mock score based on tasks done in these workspaces)
-            // Combine contacts + current user ID for leaderboard query
-            const allUserIds = Array.from(uniqueUsersMap.keys()).concat(user.id);
-            
-            const { data: taskCounts } = await supabase
-                .from('tasks')
-                .select('created_by')
-                .in('created_by', allUserIds)
-                .eq('status', 'done');
-            
-            taskCounts?.forEach((t: any) => {
-                lbScores[t.created_by] = (lbScores[t.created_by] || 0) + 1;
-            });
-
-            // Build Leaderboard Array
-            const lb = allUserIds.map(uid => {
-                const uInfo = uid === user.id ? user : uniqueUsersMap.get(uid);
-                // Fallback if contact info missing
-                const name = uInfo?.name || (colleagues.find((c:any) => c.user_id === uid)?.users?.name) || 'User';
-                const avatar = uInfo?.avatar_url || (colleagues.find((c:any) => c.user_id === uid)?.users?.avatar_url);
-
-                return {
-                    id: uid,
-                    name: name,
-                    avatar: avatar,
-                    score: lbScores[uid] || 0
-                };
-            }).sort((a, b) => b.score - a.score); // High score first
-
-            setLeaderboard(lb);
+            }
         }
     }
   };

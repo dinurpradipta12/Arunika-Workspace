@@ -418,13 +418,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                <h2 className="text-xl font-heading">Dashboard Detail</h2>
                <button onClick={() => setIsDrawerOpen(false)} className="p-2 hover:bg-white/20 rounded-full transition-colors"><X size={20}/></button>
             </div>
-            {/* ... Drawer logic remains similar, simplified for brevity in this response ... */}
             <div className="flex border-b-2 border-slate-100">
                <button onClick={() => setDrawerTab('tasks')} className={`flex-1 py-4 font-black uppercase text-xs tracking-widest ${drawerTab === 'tasks' ? 'bg-white text-slate-800 border-b-4 border-accent' : 'bg-slate-50 text-slate-400'}`}>Active Tasks ({activeTasksList.length})</button>
                <button onClick={() => setDrawerTab('members')} className={`flex-1 py-4 font-black uppercase text-xs tracking-widest ${drawerTab === 'members' ? 'bg-white text-slate-800 border-b-4 border-accent' : 'bg-slate-50 text-slate-400'}`}>Team Members ({allActiveMembers.length})</button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 bg-white">
-                {/* Simplified Drawer Body */}
                 {drawerTab === 'tasks' ? (
                     <div className="space-y-3">
                         {activeTasksList.map(t => (
@@ -739,7 +737,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {/* 4. Chart: Status (Moved Here) */}
             <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-row items-center gap-6 min-h-[180px]">
-                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem]">
+                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem]" style={{ width: 144, height: 144 }}>
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                             <Pie
@@ -784,7 +782,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {/* 5. Chart: Priority (Moved Here) */}
             <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-row items-center gap-6 min-h-[180px]">
-                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem]">
+                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem]" style={{ width: 144, height: 144 }}>
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                             <Pie
