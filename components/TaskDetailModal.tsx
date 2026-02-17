@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { Task, TaskStatus, TaskPriority, WorkspaceAsset } from '../types';
+import { Task, TaskStatus, TaskPriority, WorkspaceAsset, User } from '../types';
 import { TaskDetailView } from './TaskDetailView';
 import { X, Calendar, Flag, FileText, Link2, Plus, Save, ExternalLink, Trash2, File, Globe } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -10,6 +9,7 @@ interface TaskDetailModalProps {
   onClose: () => void;
   parentTask: Task | null;
   subTasks: Task[];
+  currentUser: User | null; // Added currentUser prop
   onStatusChange: (id: string, status: TaskStatus) => void;
   onAddTask: () => void;
   onEditTask: (task: Task) => void;
@@ -24,6 +24,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onClose,
   parentTask,
   subTasks,
+  currentUser, // Destructure currentUser
   onStatusChange,
   onAddTask,
   onEditTask,
@@ -151,7 +152,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     >
       {/* Outer Flex Container: Increased Padding to px-16 */}
       <div 
-        className="flex h-[85vh] w-full max-w-[98vw] items-center justify-center relative transition-all duration-500 px-4 md:px-16"
+        className="flex h-[85vh] w-full max-w-[98vw] items-center justify-center relative transition-all duration-500 px-4 md:p-16"
         onClick={(e) => e.stopPropagation()} 
       >
         
@@ -179,6 +180,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 <TaskDetailView 
                     parentTask={parentTask}
                     subTasks={subTasks}
+                    currentUser={currentUser} // Pass passed prop
                     onBack={onClose} 
                     onStatusChange={onStatusChange}
                     onAddTask={onAddTask}

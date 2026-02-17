@@ -41,6 +41,7 @@ import { CalendarView } from './components/CalendarView';
 import { NewWorkspaceModal } from './components/NewWorkspaceModal';
 import { JoinWorkspaceModal } from './components/JoinWorkspaceModal'; 
 import { WorkspaceView } from './components/WorkspaceView';
+import { NotificationSystem } from './components/NotificationSystem'; // NEW IMPORT
 import { supabase } from './lib/supabase';
 import { Task, TaskStatus, TaskPriority, Workspace, User, Notification, WorkspaceType, AppConfig } from './types';
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
@@ -95,7 +96,7 @@ const App: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const currentUserRef = useRef<User | null>(null); // Ref to track user without triggering dependencies
+  const currentUserRef = useRef<User | null>(null); 
   
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
@@ -132,9 +133,8 @@ const App: React.FC = () => {
   const [accountRole, setAccountRole] = useState('Owner');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Notification & Logout Message State
+  // Notification State (List Only - Popup is handled by NotificationSystem)
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [currentNotification, setCurrentNotification] = useState<Notification | null>(null);
   const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
   
@@ -148,7 +148,7 @@ const App: React.FC = () => {
   const workspaceChannelRef = useRef<any>(null);
   const userStatusChannelRef = useRef<any>(null);
   const configChannelRef = useRef<any>(null);
-  const membersChannelRef = useRef<any>(null); // NEW: Members Channel
+  const membersChannelRef = useRef<any>(null); 
 
   // Sync ref with state
   useEffect(() => {
@@ -159,49 +159,36 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        // Priority 1: Dropdowns / Popovers
         if (isNotifDropdownOpen) {
           setIsNotifDropdownOpen(false);
           return;
         }
-        
-        // Priority 2: Leaf Modals (Reschedule, etc)
         if (reschedulingTask) {
           setReschedulingTask(null);
           return;
         }
-
-        // Priority 3: Creation Modals
         if (isNewTaskModalOpen) {
           setIsNewTaskModalOpen(false);
           setEditingTask(null);
           return;
         }
-        
         if (isNewWorkspaceModalOpen) {
           setIsNewWorkspaceModalOpen(false);
           setEditingWorkspace(null);
           return;
         }
-
         if (isJoinWorkspaceModalOpen) {
           setIsJoinWorkspaceModalOpen(false);
           return;
         }
-
-        // Priority 4: Task Inspection (Subtask Simple Modal)
         if (inspectedTask) {
           setInspectedTask(null);
           return;
         }
-
-        // Priority 5: Main Task Detail (Large Modal)
         if (detailTask) {
           setDetailTask(null);
           return;
         }
-
-        // Priority 6: Settings
         if (isSettingsModalOpen) {
           setIsSettingsModalOpen(false);
           return;
@@ -236,7 +223,6 @@ const App: React.FC = () => {
         setInspectedTask(task);
         setDetailTask(null);
     } else {
-        // Always open Large Modal for parent tasks, never inline view
         setDetailTask(task);
         setInspectedTask(null);
     }
@@ -323,11 +309,9 @@ const App: React.FC = () => {
   }, [currentUser?.id, visibleSources.length]);
 
   const fetchOrCreateUser = useCallback(async (sessionUser: any) => {
-    // Prevent dependency loop by checking ref instead of state
     if (!currentUserRef.current) {
       setIsProfileLoading(true);
     }
-    
     try {
       let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
       const isLegacyAdmin = sessionUser.email === 'arunika@taskplay.com' || sessionUser.user_metadata?.username === 'arunika' || sessionUser.email?.includes('arunika');
@@ -364,7 +348,7 @@ const App: React.FC = () => {
     } finally {
       setIsProfileLoading(false);
     }
-  }, []); // REMOVED currentUser DEPENDENCY TO FIX LOOP
+  }, []); 
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -426,8 +410,21 @@ const App: React.FC = () => {
       if (configChannelRef.current) supabase.removeChannel(configChannelRef.current);
       configChannelRef.current = supabase.channel('app-config-live').on('postgres_changes', { event: '*', schema: 'public', table: 'app_config', filter: 'id=eq.1'}, (payload) => { setGlobalBranding(payload.new as AppConfig); }).subscribe();
 
+      // NOTIFICATION LISTENER FOR BELL ICON COUNT ONLY
+      // Popup logic moved to NotificationSystem
       if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
-      notificationChannelRef.current = supabase.channel(`notifications:${currentUser.id}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}`}, (payload) => { const newNotif = payload.new as Notification; setNotifications(prev => [newNotif, ...prev]); setCurrentNotification(newNotif); setTimeout(() => setCurrentNotification(null), 8000); }).subscribe();
+      notificationChannelRef.current = supabase
+        .channel(`notifications-list-${currentUser.id}`)
+        .on('postgres_changes', { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'notifications', 
+            filter: `user_id=eq.${currentUser.id}`
+        }, (payload) => { 
+            const newNotif = payload.new as Notification; 
+            setNotifications(prev => [newNotif, ...prev]); 
+        })
+        .subscribe();
 
       if (userStatusChannelRef.current) supabase.removeChannel(userStatusChannelRef.current);
       userStatusChannelRef.current = supabase.channel(`user-status-${currentUser.id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}`}, (payload: any) => { if (payload.new.is_active === false) { setIsAccountLocked(true); setCurrentUser(prev => prev ? { ...prev, is_active: false } : null); } else if (payload.new.is_active === true) { setIsAccountLocked(false); setCurrentUser(prev => prev ? { ...prev, is_active: true } : null); } }).subscribe();
@@ -435,7 +432,6 @@ const App: React.FC = () => {
   }, [currentUser?.id, isAuthenticated, fetchData]);
 
   useEffect(() => {
-    // FUNCTION: Fetch active workspace members
     const fetchMembers = async () => {
         if (!activeWorkspaceId) {
             setActiveWorkspaceMembers([]);
@@ -450,7 +446,6 @@ const App: React.FC = () => {
 
     fetchMembers();
 
-    // SETUP REALTIME SUBSCRIPTION FOR MEMBERS
     if (membersChannelRef.current) supabase.removeChannel(membersChannelRef.current);
     
     if (activeWorkspaceId) {
@@ -461,7 +456,7 @@ const App: React.FC = () => {
                 table: 'workspace_members', 
                 filter: `workspace_id=eq.${activeWorkspaceId}` 
             }, () => {
-                fetchMembers(); // Re-fetch when members table changes for this workspace
+                fetchMembers(); 
             })
             .subscribe();
     }
@@ -475,7 +470,6 @@ const App: React.FC = () => {
     if (!currentUser) return;
     try {
       if (data.id) {
-        // UPDATE Existing Workspace
         const { error } = await supabase.from('workspaces').update({
           name: data.name,
           type: data.type,
@@ -485,11 +479,8 @@ const App: React.FC = () => {
         }).eq('id', data.id);
         
         if (error) throw error;
-        
-        // Optimistic Update
         setWorkspaces(prev => prev.map(ws => ws.id === data.id ? { ...ws, ...data } : ws));
       } else {
-        // CREATE New Workspace
         const { data: newWs, error } = await supabase.from('workspaces').insert({ 
           name: data.name, 
           type: data.type, 
@@ -532,8 +523,6 @@ const App: React.FC = () => {
 
   const handleSaveTask = async (taskData: Partial<Task>) => {
     if (!currentUser) return;
-    // Set fetching false here to prevent spinner if we want seamless update, or true if we want indicator.
-    // For this fix, let's rely on local optimistic update first.
     setIsFetching(true); 
     
     try {
@@ -549,19 +538,16 @@ const App: React.FC = () => {
       const payload: any = { title: taskData.title, description: taskData.description || null, status: taskData.status || TaskStatus.TODO, priority: taskData.priority || TaskPriority.MEDIUM, workspace_id: targetWorkspaceId, parent_id: taskData.parent_id || null, due_date: taskData.due_date || null, start_date: taskData.start_date || null, is_all_day: taskData.is_all_day ?? true, is_archived: taskData.is_archived ?? false, category: taskData.category || 'General', created_by: currentUser.id, assigned_to: taskData.assigned_to || null };
       
       if (editingTask && editingTask.id) {
-        // --- OPTIMISTIC UPDATE FOR INSTANT UI FEEDBACK ---
         setTasks(prevTasks => prevTasks.map(t => 
             t.id === editingTask.id ? { ...t, ...payload } : t
         ));
 
-        // Update Modals Immediately
         if (detailTask && detailTask.id === editingTask.id) {
             setDetailTask(prev => prev ? ({ ...prev, ...payload }) : null);
         }
         if (inspectedTask && inspectedTask.id === editingTask.id) {
             setInspectedTask(prev => prev ? ({ ...prev, ...payload }) : null);
         }
-        // ------------------------------------------------
 
         const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
         if (error) throw error;
@@ -571,7 +557,6 @@ const App: React.FC = () => {
         const { data: newTaskData, error } = await supabase.from('tasks').insert(payload).select().single();
         if (error) throw error;
         
-        // Optimistic add
         if (newTaskData) {
             setTasks(prev => [newTaskData as Task, ...prev]);
         }
@@ -579,13 +564,10 @@ const App: React.FC = () => {
       
       setIsNewTaskModalOpen(false);
       setEditingTask(null);
-      // fetchData() is triggered by realtime subscription usually, but we can call it to be sure
-      // Reducing frequent full fetches helps with resource errors
-      // fetchData(); 
     } catch (err: any) {
       console.error("Save task failure:", err);
       alert("Gagal menyimpan agenda.");
-      fetchData(); // Revert on error
+      fetchData(); 
     } finally {
       setIsFetching(false);
     }
@@ -597,8 +579,6 @@ const App: React.FC = () => {
         const personalSettings = { notificationsEnabled: settingsUpdate.notificationsEnabled, googleConnected: settingsUpdate.googleConnected, sourceColors: currentUser.app_settings?.sourceColors, visibleSources: currentUser.app_settings?.visibleSources, googleAccessToken: settingsUpdate.googleAccessToken || currentUser.app_settings?.googleAccessToken };
         const updates = { ...profileData, status: newRole, app_settings: personalSettings };
         
-        // --- CRITICAL FIX: OPTIMISTIC UPDATE LOCAL STATE IMMEDIATELY ---
-        // This prevents the "glitch" where data reverts to old state before the DB confirms.
         setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
         
         const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
@@ -626,7 +606,6 @@ const App: React.FC = () => {
 
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
     
-    // If detail modal is open, update its status too
     if (detailTask && detailTask.id === id) {
         setDetailTask(prev => prev ? ({ ...prev, status }) : null);
     }
@@ -634,9 +613,7 @@ const App: React.FC = () => {
     try { 
       await supabase.from('tasks').update({ status }).eq('id', id); 
 
-      // BROADCAST NOTIFICATION IF TASK IS DONE
       if (status === TaskStatus.DONE && currentUser) {
-          // 1. Get Workspace Members
           const { data: members } = await supabase
               .from('workspace_members')
               .select('user_id')
@@ -644,7 +621,7 @@ const App: React.FC = () => {
           
           if (members && members.length > 0) {
               const notificationsToInsert = members
-                  .filter(m => m.user_id !== currentUser.id) // Notify everyone except self
+                  .filter(m => m.user_id !== currentUser.id) 
                   .map(m => ({
                       user_id: m.user_id,
                       type: 'task_completed',
@@ -736,7 +713,7 @@ const App: React.FC = () => {
         await supabase.from('notifications').update({ is_read: true }).eq('id', notif.id);
      }
      setIsNotifDropdownOpen(false);
-     setCurrentNotification(null); 
+     
      const metadata = notif.metadata || {};
      if (metadata.task_id) {
         const targetTask = tasks.find(t => t.id === metadata.task_id);
@@ -749,14 +726,11 @@ const App: React.FC = () => {
      }
   };
 
-  // Helper to find Assignee User for a task
   const getAssigneeUser = (userId?: string) => {
     if (!userId) return undefined;
     if (userId === currentUser?.id) return { name: currentUser.name, avatar_url: currentUser.avatar_url };
-    // Try to find in active workspace members if available (imperfect fallback for My Tasks view)
     const member = activeWorkspaceMembers.find(m => m.user_id === userId);
     if (member?.users) return { name: member.users.name, avatar_url: member.users.avatar_url };
-    // Fallback placeholder
     return { name: 'User', avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}` };
   };
 
@@ -810,37 +784,13 @@ const App: React.FC = () => {
   const connStatus = getConnectionStatus();
 
   return (
-    // CHANGED: h-full to h-screen to force viewport height and fix sticky scrolling issues
     <div className="h-screen w-full bg-background overflow-hidden flex justify-center">
       
-      {/* --- DYNAMIC ISLAND NOTIFICATION POPUP --- */}
-      {currentNotification && (
-        <div 
-          className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex justify-center w-full pointer-events-none"
-        >
-           <div 
-             onClick={() => handleNotificationClick(currentNotification)}
-             className="pointer-events-auto cursor-pointer bg-black text-white rounded-full px-6 py-3 shadow-2xl flex items-center gap-4 animate-in slide-in-from-top-4 zoom-in-95 duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] min-w-[320px] max-w-md justify-between hover:scale-105 transition-transform"
-           >
-              <div className="flex items-center gap-3">
-                 <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
-                    {currentNotification.type === 'task_completed' ? (
-                       <CheckCircle2 size={16} className="text-quaternary" />
-                    ) : (
-                       <Bell size={16} className="text-white" />
-                    )}
-                 </div>
-                 <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-white/60 uppercase tracking-widest leading-none mb-0.5">{currentNotification.title}</span>
-                    <span className="text-xs font-bold text-white truncate max-w-[200px]">{currentNotification.message}</span>
-                 </div>
-              </div>
-              <div className="w-8 h-8 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors" onClick={(e) => { e.stopPropagation(); setCurrentNotification(null); }}>
-                 <X size={14} className="text-white/50" />
-              </div>
-           </div>
-        </div>
-      )}
+      {/* --- NOTIFICATION SYSTEM (SEPARATED) --- */}
+      <NotificationSystem 
+        currentUser={currentUser} 
+        onNotificationClick={handleNotificationClick} 
+      />
 
       <div className="h-full w-full dot-grid flex overflow-hidden">
         <NewTaskModal 
@@ -917,6 +867,7 @@ const App: React.FC = () => {
           isOpen={!!detailTask}
           parentTask={detailTask}
           subTasks={tasks.filter(t => t.parent_id === detailTask?.id && !t.is_archived)}
+          currentUser={currentUser} 
           onClose={() => setDetailTask(null)}
           onStatusChange={handleStatusChange}
           onAddTask={() => {
@@ -926,10 +877,7 @@ const App: React.FC = () => {
           onEditTask={openEditModal}
           onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); setDetailTask(null); }} 
           onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); setDetailTask(null); }} 
-          onInspectTask={(t) => {
-             // DO NOTHING HERE because TaskDetailModal handles subtask inspection internally now
-             // But we can trigger a refresh if needed
-          }}
+          onInspectTask={(t) => {}}
           onRescheduleTask={(t) => setReschedulingTask(t)}
         />
 
@@ -952,9 +900,9 @@ const App: React.FC = () => {
           currentBranding={globalBranding}
         />
         
-        {/* RESTRUCTURED MAIN CONTENT AREA - FROZEN HEADER */}
+        {/* RESTRUCTURED MAIN CONTENT AREA */}
         <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-          {/* Header - Fixed/Sticky Logic */}
+          {/* Header */}
           <header className="shrink-0 relative z-[65] bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
             <button className="p-2 border-2 border-slate-800 rounded-xl shadow-pop-active bg-white transition-all hover:-translate-y-0.5" onClick={() => setSidebarOpen(!isSidebarOpen)}>
               {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
@@ -1067,7 +1015,7 @@ const App: React.FC = () => {
             {activeTab === 'workspace_view' && activeWorkspace && (
               <WorkspaceView 
                 workspace={activeWorkspace}
-                tasks={currentWorkspaceTasks} // This prop is auto-updated by App's state
+                tasks={currentWorkspaceTasks} 
                 onAddTask={(initialData) => {
                   setEditingTask({ workspace_id: activeWorkspaceId, ...initialData } as Task);
                   setIsNewTaskModalOpen(true);
@@ -1075,7 +1023,7 @@ const App: React.FC = () => {
                 onStatusChange={handleStatusChange}
                 onEditTask={openEditModal}
                 onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
-                onTaskClick={handleGlobalTaskClick} // Pass the global handler
+                onTaskClick={handleGlobalTaskClick} 
               />
             )}
 
@@ -1083,7 +1031,7 @@ const App: React.FC = () => {
               <CalendarView 
                 tasks={tasks} 
                 workspaces={workspaces} 
-                onTaskClick={handleGlobalTaskClick} // Use global handler here too
+                onTaskClick={handleGlobalTaskClick} 
                 userEmail={currentUser.email} 
                 googleAccessToken={googleAccessToken} 
                 onDayClick={(date) => {
@@ -1118,7 +1066,6 @@ const App: React.FC = () => {
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola alur kerja personal Anda</p>
                   </div>
                   <div className="flex gap-3">
-                    {/* View Mode Toggles */}
                     <div className="flex bg-white rounded-full border-2 border-slate-800 p-1 shadow-sm gap-1">
                         <Button 
                           variant={viewMode === 'board' ? 'primary' : 'ghost'}
@@ -1139,9 +1086,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 
-                {/* CONTENT AREA: Board vs Table */}
                 {viewMode === 'board' ? (
-                  /* DRAGGABLE COLUMNS (KANBAN) */
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DONE].map(status => (
                       <div 
@@ -1163,11 +1108,11 @@ const App: React.FC = () => {
                               key={task.id} 
                               task={task} 
                               onStatusChange={handleStatusChange} 
-                              onClick={handleGlobalTaskClick} // Use Global Handler
+                              onClick={handleGlobalTaskClick} 
                               onEdit={openEditModal}
                               onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
                               onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }}
-                              onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)} // Enable Drag
+                              onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)} 
                               workspaceName={workspaces.find(ws => ws.id === task.workspace_id)?.name}
                               assigneeUser={getAssigneeUser(task.assigned_to)}
                             />
@@ -1182,7 +1127,6 @@ const App: React.FC = () => {
                     ))}
                   </div>
                 ) : (
-                  /* TABLE VIEW */
                   <div className="bg-white border-2 border-slate-800 rounded-3xl overflow-hidden shadow-pop">
                       <table className="w-full text-left">
                         <thead className="bg-slate-50 border-b-2 border-slate-100">
@@ -1235,7 +1179,6 @@ const App: React.FC = () => {
                   </div>
                 )}
 
-                {/* ARCHIVE SECTION - COLLAPSIBLE */}
                 <div className="mt-8 pt-4 border-t border-slate-200">
                   <button 
                     onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
@@ -1252,7 +1195,7 @@ const App: React.FC = () => {
                         <div key={task.id} className="relative group opacity-70 hover:opacity-100 transition-opacity">
                           <TaskItem 
                             task={task} 
-                            onStatusChange={() => {}} // Disabled for archived
+                            onStatusChange={() => {}} 
                             onClick={handleGlobalTaskClick}
                             onEdit={openEditModal}
                             onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}

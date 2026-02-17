@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   ArrowLeft, 
@@ -20,13 +19,14 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
-import { Task, TaskStatus, TaskPriority } from '../types';
+import { Task, TaskStatus, TaskPriority, User } from '../types';
 import { supabase } from '../lib/supabase';
 import { TaskComments } from './TaskComments';
 
 interface TaskDetailViewProps {
   parentTask: Task;
   subTasks: Task[];
+  currentUser: User | null; 
   onBack: () => void;
   onStatusChange: (id: string, status: TaskStatus) => void;
   onAddTask: () => void;
@@ -42,6 +42,7 @@ interface TaskDetailViewProps {
 export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ 
   parentTask, 
   subTasks, 
+  currentUser,
   onBack, 
   onStatusChange, 
   onAddTask,
@@ -53,7 +54,6 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
-  const [currentUser, setCurrentUser] = useState<any>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const activeSubTasks = useMemo(() => subTasks.filter(t => t.status !== TaskStatus.DONE), [subTasks]);
@@ -62,8 +62,6 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
   const progress = subTasks.length > 0 ? (completedSubTasks.length / subTasks.length) * 100 : 0;
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setCurrentUser(data.user));
-    
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsMenuOpen(false);
@@ -76,7 +74,6 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
   const formatDateTime = (dateStr?: string) => {
     if (!dateStr) return 'Tanpa Batas Waktu';
     const date = new Date(dateStr);
-    // FORMAT: Senin, 1 Januari 2026 • 14:00
     return date.toLocaleString('id-ID', { 
       weekday: 'long',
       day: 'numeric', 
@@ -107,11 +104,8 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
   }
 
   return (
-    // FULL COLOR BACKGROUND: Added gradient and adjusted padding
     <div className="space-y-8 animate-in slide-in-from-right-4 duration-500 pb-20 bg-gradient-to-br from-white via-purple-50 to-white min-h-full rounded-2xl p-4 md:p-6">
-      {/* Header Utama */}
       <div className="flex flex-col gap-6">
-        {/* ROW 1: Action Buttons (Top) */}
         <div className="flex items-center justify-between">
             <button 
               onClick={onBack}
@@ -159,21 +153,15 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
             </div>
         </div>
 
-        {/* ROW 2: Title & Meta (Bottom) */}
         <div>
           <h2 className="text-4xl md:text-5xl font-heading text-slate-900 leading-tight mb-4">{parentTask.title}</h2>
-          {/* DESKRIPSI DIPERBESAR */}
           <p className="text-base md:text-lg font-medium text-slate-600 leading-relaxed max-w-4xl">
              {parentTask.description || <span className="italic text-slate-300 text-base">Tidak ada deskripsi tambahan.</span>}
           </p>
         </div>
       </div>
 
-      {/* DASHBOARD GRID: Progress & Info */}
-      {/* REDUCED GAP from gap-6 to gap-3 */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-        
-        {/* COL 1: Progress Card (Takes 3/5 width now for better spacing) */}
         <Card className="md:col-span-3 border-none shadow-none bg-white/50 border-2 border-slate-200" variant="white">
           <div className="bg-white p-6 rounded-2xl border-2 border-slate-800 shadow-sm h-full">
             <div className="flex items-center justify-between mb-6">
@@ -194,10 +182,7 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
           </div>
         </Card>
 
-        {/* COL 2: Status & Info (Takes 2/5 width) */}
         <div className="md:col-span-2 flex flex-col gap-3">
-            
-            {/* FIXED STATUS CARD - 1 Row */}
             <div className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-sm">
                 <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2">
                     <Target size={14} /> Status Pengerjaan
@@ -219,7 +204,6 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
                 </div>
             </div>
 
-            {/* DEADLINE CARD */}
             <button 
                 onClick={() => onRescheduleTask(parentTask)}
                 className="bg-white border-2 border-slate-800 rounded-xl p-4 flex items-center gap-4 hover:shadow-pop transition-all group text-left shadow-sm"
@@ -233,7 +217,6 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
                 </div>
             </button>
 
-            {/* CATEGORY CARD */}
             <div className="bg-white border-2 border-slate-800 rounded-xl p-4 flex items-center gap-4 shadow-sm">
                 <div className="w-10 h-10 bg-slate-100 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-400">
                     <Tag size={20} />
@@ -247,8 +230,7 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
         </div>
       </div>
 
-      {/* LOWER SECTION: SubTasks & Comments Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4 border-t-2 border-slate-100/50 min-h-[400px]">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4 border-t-2 border-slate-100/50">
         
         {/* LEFT: Sub Tasks List */}
         <div className="space-y-6">
@@ -274,7 +256,6 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
                     onClick={() => onInspectTask(task)}
                     className="group flex flex-col md:flex-row md:items-center gap-4 p-4 bg-white border-2 border-slate-200 rounded-xl hover:border-slate-800 hover:shadow-pop transition-all cursor-pointer relative overflow-hidden"
                     >
-                    {/* Priority Indicator Line */}
                     <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${pStyle.bg}`} />
                     
                     <div className="flex items-center gap-4 flex-1 pl-2">
@@ -317,7 +298,6 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
                 })
             )}
 
-            {/* Folder Tugas Selesai */}
             {completedSubTasks.length > 0 && (
                 <div className="mt-10">
                 <button 
@@ -370,9 +350,9 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({
             </div>
         </div>
 
-        {/* RIGHT: Comments Section (NEW) */}
+        {/* RIGHT: Comments Section (FIXED HEIGHT) */}
         {currentUser && (
-            <div className="flex flex-col h-full min-h-[500px]">
+            <div className="flex flex-col h-[600px] sticky top-6">
                 <TaskComments taskId={parentTask.id} currentUser={currentUser} />
             </div>
         )}

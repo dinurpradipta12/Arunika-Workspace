@@ -16,6 +16,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   const [replyingTo, setReplyingTo] = useState<TaskComment | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeReactionId, setActiveReactionId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchComments();
@@ -23,7 +24,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     // Subscribe to realtime changes
     const channel = supabase.channel(`comments-${taskId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comments', filter: `task_id=eq.${taskId}` }, (payload) => {
-          console.log('Realtime update on comments:', payload);
           fetchComments();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comment_reactions' }, () => fetchComments())
@@ -32,9 +32,15 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     return () => { supabase.removeChannel(channel); };
   }, [taskId]);
 
+  useEffect(() => {
+    // Auto scroll to bottom when new comments arrive
+    if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [comments.length]);
+
   const fetchComments = async () => {
     try {
-        // 1. Fetch Comments with User Data
         const { data: commentsData, error } = await supabase
           .from('task_comments')
           .select(`
@@ -54,30 +60,25 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
           return;
         }
 
-        // 2. Fetch Reactions separately
         const commentIds = commentsData.map(c => c.id);
         const { data: reactionsData } = await supabase
           .from('task_comment_reactions')
           .select(`*, users(name)`)
           .in('comment_id', commentIds);
 
-        // 3. Structure Data (Nest Reactions & Replies)
         const structuredComments = commentsData.map((c: any) => ({
           ...c,
           reactions: reactionsData?.filter((r: any) => r.comment_id === c.id) || [],
           replies: []
         }));
 
-        // 4. Build Hierarchy (Parent -> Children)
         const rootComments: TaskComment[] = [];
         const commentMap: Record<string, TaskComment> = {};
 
-        // First pass: Index all comments
         structuredComments.forEach((c: TaskComment) => {
             commentMap[c.id] = c;
         });
 
-        // Second pass: Assign to parents or root
         structuredComments.forEach((c: TaskComment) => {
             if (c.parent_id && commentMap[c.parent_id]) {
                 commentMap[c.parent_id].replies?.push(c);
@@ -107,14 +108,14 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
 
       if (error) throw error;
       
-      // --- NOTIFICATION LOGIC FOR REPLY ---
-      // If replying to someone else, send them a notification
       if (replyingTo && replyingTo.user_id !== currentUser.id) {
+          const senderName = currentUser.name || currentUser.email?.split('@')[0] || 'Seseorang';
+          
           await supabase.from('notifications').insert({
               user_id: replyingTo.user_id,
               type: 'comment_reply',
               title: 'Balasan Komentar',
-              message: `${currentUser.name} membalas komentar Anda: "${content.substring(0, 30)}${content.length > 30 ? '...' : ''}"`,
+              message: `${senderName} membalas komentar Anda: "${content.substring(0, 30)}${content.length > 30 ? '...' : ''}"`,
               is_read: false,
               metadata: { 
                   task_id: taskId,
@@ -125,8 +126,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
 
       setContent('');
       setReplyingTo(null);
-      
-      // Explicitly fetch immediately to ensure UI update
       await fetchComments();
       
     } catch (err: any) {
@@ -138,9 +137,8 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   };
 
   const handleReaction = async (commentId: string, emoji: string) => {
-    setActiveReactionId(null); // Close popover
+    setActiveReactionId(null); 
     try {
-      // Check if exists (toggle logic)
       const { data: existing } = await supabase
         .from('task_comment_reactions')
         .select('id')
@@ -150,24 +148,17 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
         .single();
 
       if (existing) {
-        // REMOVE REACTION
         await supabase.from('task_comment_reactions').delete().eq('id', existing.id);
       } else {
-        // ADD REACTION
         await supabase.from('task_comment_reactions').insert({
           comment_id: commentId,
           user_id: currentUser.id,
           emoji
         });
 
-        // --- NOTIFICATION LOGIC FOR REACTION ---
-        // Find the target comment to get the author ID
         let targetComment: TaskComment | undefined;
-        
-        // Search in root comments
         targetComment = comments.find(c => c.id === commentId);
         
-        // If not found, search in replies
         if (!targetComment) {
             for (const c of comments) {
                 if (c.replies) {
@@ -180,13 +171,14 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
             }
         }
 
-        // Send notification if commenting on someone else's comment
         if (targetComment && targetComment.user_id !== currentUser.id) {
+            const senderName = currentUser.name || currentUser.email?.split('@')[0] || 'Seseorang';
+            
             await supabase.from('notifications').insert({
                 user_id: targetComment.user_id,
                 type: 'reaction',
                 title: 'Reaksi Baru',
-                message: `${currentUser.name} memberikan reaksi ${emoji} pada komentar Anda: "${targetComment.content.substring(0, 25)}${targetComment.content.length > 25 ? '...' : ''}"`,
+                message: `${senderName} memberikan reaksi ${emoji} pada komentar Anda: "${targetComment.content.substring(0, 25)}${targetComment.content.length > 25 ? '...' : ''}"`,
                 is_read: false,
                 metadata: { 
                     task_id: taskId,
@@ -195,7 +187,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
             });
         }
       }
-      // Optimistic update or fetch
       fetchComments();
     } catch (err) { console.error(err); }
   };
@@ -208,12 +199,10 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
       } catch (err) { console.error(err); }
   };
 
-  // REUSABLE CARD RENDERER
   const CommentCard = ({ comment, isReply = false }: { comment: TaskComment, isReply?: boolean }) => {
     const isOwner = comment.users?.status === 'Owner' || comment.users?.status === 'Admin';
     const isMe = comment.user_id === currentUser.id;
 
-    // Group reactions by emoji
     const groupedReactions: Record<string, string[]> = {};
     comment.reactions?.forEach(r => {
         if (!groupedReactions[r.emoji]) groupedReactions[r.emoji] = [];
@@ -222,7 +211,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
 
     return (
       <div className={`group flex gap-3 ${isReply ? 'mt-4' : 'mb-6'}`}>
-        {/* Avatar */}
         <div className="flex flex-col items-center">
             <img 
                 src={comment.users?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${comment.user_id}`} 
@@ -234,7 +222,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
             )}
         </div>
 
-        {/* Content Body */}
         <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs font-black text-slate-800">{comment.users?.name || 'Unknown User'}</span>
@@ -250,7 +237,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
             <div className={`p-3 rounded-xl border-2 ${isMe ? 'bg-slate-50 border-slate-200' : 'bg-white border-slate-100'} text-sm text-slate-700 leading-relaxed font-medium relative hover:border-slate-300 transition-colors`}>
                 {comment.content}
                 
-                {/* Delete Option */}
                 {isMe && (
                     <button onClick={() => handleDelete(comment.id)} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all">
                         <Trash2 size={12} />
@@ -258,7 +244,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                 )}
             </div>
 
-            {/* Actions Bar */}
             <div className="flex items-center gap-3 mt-1.5 ml-1">
                 <button 
                     onClick={() => { setReplyingTo(comment); document.getElementById('comment-input')?.focus(); }}
@@ -275,7 +260,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                         <SmilePlus size={12} /> React
                     </button>
                     
-                    {/* Emoji Picker Popover */}
                     {activeReactionId === comment.id && (
                         <div className="absolute top-full left-0 mt-1 bg-white border-2 border-slate-800 rounded-xl shadow-pop z-50 p-2 flex gap-1 animate-in zoom-in-95">
                             {EMOJI_LIST.map(emoji => (
@@ -287,7 +271,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                     )}
                 </div>
 
-                {/* Display Reactions */}
                 <div className="flex flex-wrap gap-1">
                     {Object.entries(groupedReactions).map(([emoji, userNames]) => (
                         <div 
@@ -302,7 +285,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                 </div>
             </div>
 
-            {/* Nested Replies */}
             {comment.replies && comment.replies.length > 0 && (
                 <div className="mt-2">
                     {comment.replies.map(reply => (
@@ -326,7 +308,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
          </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
+      <div className="flex-1 overflow-y-auto p-4 scrollbar-hide" ref={scrollRef}>
          {comments.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-50 py-10">
                <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mb-3">
@@ -340,7 +322,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
          )}
       </div>
 
-      {/* Input Area */}
       <div className="p-3 bg-white border-t-2 border-slate-200 shrink-0">
          {replyingTo && (
             <div className="flex items-center justify-between bg-slate-100 px-3 py-1.5 rounded-t-lg text-[10px] border-x border-t border-slate-200 -mb-1 relative z-10">
