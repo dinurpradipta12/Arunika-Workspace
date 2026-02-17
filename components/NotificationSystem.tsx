@@ -11,20 +11,60 @@ interface NotificationSystemProps {
 export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentUser, onNotificationClick }) => {
   const [activePopup, setActivePopup] = useState<Notification | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lastProcessedIdRef = useRef<string | null>(null);
+  const isSubscribedRef = useRef(false);
 
-  // Sound effect (optional, simple beep)
+  // Sound effect
   useEffect(() => {
     audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     audioRef.current.volume = 0.5;
   }, []);
 
+  // Function to handle showing the popup
+  const showPopup = (notif: Notification) => {
+    // Prevent duplicate popups for the same ID
+    if (lastProcessedIdRef.current === notif.id) return;
+    
+    console.log("SHOWING POPUP:", notif);
+    lastProcessedIdRef.current = notif.id;
+    
+    // Play sound
+    if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(() => {});
+    }
+
+    setActivePopup(notif);
+
+    // Auto hide after 6 seconds
+    setTimeout(() => {
+      setActivePopup((prev) => (prev?.id === notif.id ? null : prev));
+    }, 6000);
+  };
+
   useEffect(() => {
     if (!currentUser) return;
 
-    console.log("Notification System: Subscribing for user", currentUser.id);
+    // 1. Initial Fetch to set baseline (don't show popup for old stuff, just mark latest ID)
+    const initFetch = async () => {
+        const { data } = await supabase
+            .from('notifications')
+            .select('id')
+            .eq('user_id', currentUser.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+        
+        if (data) {
+            lastProcessedIdRef.current = data.id;
+        }
+    };
+    initFetch();
 
+    // 2. Realtime Subscription
+    console.log("Notification System: Subscribing for user", currentUser.id);
     const channel = supabase
-      .channel(`popup-notif-${currentUser.id}`)
+      .channel(`popup-notif-${currentUser.id}-${Date.now()}`) // Unique channel name
       .on(
         'postgres_changes',
         {
@@ -34,27 +74,42 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
           filter: `user_id=eq.${currentUser.id}`,
         },
         (payload) => {
-          console.log("New Notification Received:", payload.new);
-          const newNotif = payload.new as Notification;
-          
-          // Play sound
-          if (audioRef.current) {
-              audioRef.current.currentTime = 0;
-              audioRef.current.play().catch(() => {}); // Ignore interaction errors
-          }
-
-          setActivePopup(newNotif);
-
-          // Auto hide after 6 seconds
-          setTimeout(() => {
-            setActivePopup((prev) => (prev?.id === newNotif.id ? null : prev));
-          }, 6000);
+          console.log("Realtime Notification Received:", payload.new);
+          showPopup(payload.new as Notification);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+          console.log("Notification Subscription Status:", status);
+          isSubscribedRef.current = (status === 'SUBSCRIBED');
+      });
+
+    // 3. Fallback Polling (Every 5 seconds)
+    // Ensures notifications arrive even if WebSocket drops or RLS delays the event
+    const intervalId = setInterval(async () => {
+        if (!currentUser) return;
+        
+        // Fetch the very latest notification
+        const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', currentUser.id)
+            .eq('is_read', false) // Only unread
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (data && !error) {
+            // If this is a NEW notification we haven't shown yet
+            if (data.id !== lastProcessedIdRef.current) {
+                console.log("Polling found new notification:", data);
+                showPopup(data as Notification);
+            }
+        }
+    }, 5000); // Check every 5 seconds
 
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(intervalId);
     };
   }, [currentUser]);
 
