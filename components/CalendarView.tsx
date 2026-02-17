@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -10,7 +10,9 @@ import {
   Palette,
   Check,
   Plus,
-  Trash2
+  Trash2,
+  Settings as SettingsIcon,
+  X
 } from 'lucide-react';
 import { Task, TaskStatus, Workspace, TaskPriority } from '../types';
 import { GoogleCalendarService, GoogleCalendar } from '../services/googleCalendarService';
@@ -76,6 +78,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [showPersonalTasks, setShowPersonalTasks] = useState(true);
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  
+  // Manual Calendar ID State
+  const [manualCalendarId, setManualCalendarId] = useState('');
+  
+  // Calendar Settings Modal
+  const [showCalendarSettings, setShowCalendarSettings] = useState(false);
+  const [settingsPos, setSettingsPos] = useState<{top: number, left: number} | null>(null);
+  const settingsBtnRef = useRef<HTMLButtonElement>(null);
 
   // --- HELPER DATE FUNCTIONS ---
   const formatDate = (date: Date | string) => {
@@ -145,20 +155,52 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setVisibleSources(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
+  const handleAddManualCalendar = () => {
+    if (manualCalendarId.trim()) {
+      const newCal: GoogleCalendar = {
+        id: manualCalendarId.trim(),
+        summary: manualCalendarId.trim(), // Use ID as name initially
+        backgroundColor: '#64748B', // Default color
+      };
+      // Add to list if not exists
+      setGoogleCalendars(prev => {
+        if(prev.find(c => c.id === newCal.id)) return prev;
+        return [...prev, newCal];
+      });
+      setVisibleSources(prev => [...prev, newCal.id]);
+      setManualCalendarId('');
+      // Trigger sync logic if possible, but handleSync relies on fetched list usually.
+      // We will let the next sync cycle pick it up or trigger manually.
+    }
+  };
+
   const handleSync = useCallback(async () => {
     if (!googleAccessToken) return;
     setIsSyncing(true);
     try {
       const service = new GoogleCalendarService(() => {});
-      const calendars = await service.fetchCalendars(googleAccessToken);
-      setGoogleCalendars(calendars);
+      
+      // Fetch user's calendars list
+      let calendars = await service.fetchCalendars(googleAccessToken);
+      
+      // Merge with manually added calendars that might not be in the primary fetch list
+      // (This handles the manual ID scenario if the API returns them, or if we want to force fetch from them)
+      // Since fetchCalendars returns user's list, manual IDs might need to be appended if they are public calendars
+      // We keep existing manual ones if they are not in the new list (simplified approach)
+      
+      setGoogleCalendars(prev => {
+         const newIds = new Set(calendars.map(c => c.id));
+         const manualCals = prev.filter(c => !newIds.has(c.id)); // Keep manuals
+         return [...calendars, ...manualCals];
+      });
 
-      const allEventsPromises = calendars.map(async (cal) => {
+      // Use the updated list for fetching events
+      const currentCalendars = [...calendars, ...googleCalendars.filter(c => !calendars.find(k => k.id === c.id))];
+
+      const allEventsPromises = currentCalendars.map(async (cal) => {
         try {
           const events = await service.fetchEvents(googleAccessToken, cal.id);
           return events.map(event => {
-            // FIX: Google Calendar All-Day Events Exclusive End Date Issue
-            // If it is all day (has event.end.date), subtract 1 day from end date for display
             let finalDueDate = event.end.dateTime || event.end.date || new Date().toISOString();
             if (event.end.date) {
                const endDateObj = new Date(event.end.date);
@@ -177,19 +219,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               status: TaskStatus.TODO,
               created_by: 'google',
               created_at: new Date().toISOString(),
-              category: 'General'
+              category: 'General',
+              google_event_id: event.id, // Needed for update/delete
+              google_calendar_id: cal.id // Needed for update/delete
             } as Task;
           });
         } catch (e) { return []; }
       });
       const results = await Promise.all(allEventsPromises);
       setGoogleEvents(results.flat());
-      const calIds = calendars.map(c => c.id);
       
-      // AUTO ADD TO VISIBLE SOURCES TO ENSURE THEY SHOW UP
+      // Auto-add new calendars to visible sources if not present
+      const calIds = currentCalendars.map(c => c.id);
       setVisibleSources(prev => [...new Set([...prev, ...calIds])]);
+      
     } finally { setIsSyncing(false); }
-  }, [googleAccessToken, setGoogleCalendars, setGoogleEvents, setVisibleSources]);
+  }, [googleAccessToken, googleCalendars, setGoogleCalendars, setGoogleEvents, setVisibleSources]);
 
   // Auto-sync when token is available on mount
   useEffect(() => {
@@ -197,6 +242,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         handleSync();
     }
   }, [googleAccessToken]);
+
+  const toggleSettingsModal = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (showCalendarSettings) {
+        setShowCalendarSettings(false);
+    } else {
+        if (settingsBtnRef.current) {
+            const rect = settingsBtnRef.current.getBoundingClientRect();
+            setSettingsPos({ top: rect.bottom, left: rect.left });
+        }
+        setShowCalendarSettings(true);
+    }
+  };
 
   const handlePrevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
   const handleNextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
@@ -375,8 +433,44 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   })();
 
   return (
-    <div className="w-full pb-20 animate-in fade-in duration-500 space-y-6">
+    <div className="w-full pb-20 animate-in fade-in duration-500 space-y-6 relative">
       
+      {/* Settings Modal (Calendar Management) */}
+      {showCalendarSettings && (
+        <div className="fixed inset-0 z-[200] bg-slate-900/10 backdrop-blur-[2px]" onClick={() => setShowCalendarSettings(false)}>
+            <div 
+                className="absolute bg-white border-4 border-slate-800 rounded-2xl shadow-pop z-[210] w-72 overflow-hidden animate-in zoom-in-95"
+                style={{ 
+                    top: settingsPos ? settingsPos.top + 10 : '50%',
+                    left: settingsPos ? settingsPos.left : '50%',
+                    transform: settingsPos ? 'none' : 'translate(-50%, -50%)'
+                }}
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="p-4 bg-slate-50 border-b-2 border-slate-100 flex justify-between items-center">
+                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-800">Manage Calendars</h3>
+                    <button onClick={() => setShowCalendarSettings(false)} className="p-1 hover:bg-slate-200 rounded"><X size={14}/></button>
+                </div>
+                <div className="p-4 max-h-[300px] overflow-y-auto scrollbar-hide space-y-2">
+                    {googleCalendars.length === 0 ? <p className="text-xs text-slate-400 italic">Tidak ada kalender terhubung.</p> : googleCalendars.map(gc => (
+                        <div key={gc.id} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-lg">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-3 h-3 rounded-full border border-slate-800" style={{backgroundColor: sourceColors[gc.id]}} />
+                                <span className="text-xs font-bold text-slate-700 truncate">{gc.summary}</span>
+                            </div>
+                            <input 
+                                type="checkbox" 
+                                checked={visibleSources.includes(gc.id)} 
+                                onChange={() => toggleVisibility(gc.id)}
+                                className="w-4 h-4 rounded border border-slate-800 checked:bg-secondary cursor-pointer"
+                            />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* Header */}
       <div>
          <h2 className="text-4xl font-heading text-slate-900 tracking-tight">Calendar View Task</h2>
@@ -443,6 +537,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               <button onClick={() => setIsAddingCategory(!isAddingCategory)} className="p-1 hover:bg-slate-100 rounded-lg transition-colors"><Plus size={14} /></button>
             </div>
             
+            {/* MANUAL CALENDAR INPUT (White Box, Black Text) */}
+            <div className="flex gap-2">
+                <input 
+                    placeholder="Input ID Google Calendar..." 
+                    className="flex-1 bg-white text-slate-900 border-2 border-slate-200 rounded-xl px-3 py-2 text-[10px] font-bold outline-none focus:border-slate-800"
+                    value={manualCalendarId}
+                    onChange={(e) => setManualCalendarId(e.target.value)}
+                />
+                <button 
+                    onClick={handleAddManualCalendar}
+                    className="bg-slate-800 text-white px-3 rounded-xl hover:bg-slate-700 transition-colors"
+                >
+                    <Plus size={14} />
+                </button>
+            </div>
+
             <div className="space-y-4">
               {isAddingCategory && (
                 <div className="flex gap-2 animate-in slide-in-from-top-2">
@@ -495,8 +605,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     </div>
                     <input type="checkbox" checked={showPersonalTasks} onChange={() => setShowPersonalTasks(!showPersonalTasks)} className="w-4 h-4 rounded border border-slate-800 checked:bg-accent appearance-none cursor-pointer" />
                 </div>
-                {/* Google Calendars */}
-                {googleCalendars.map(gc => (
+                {/* Google Calendars List handled by Modal now, but kept here for fallback or main visibility if needed, or we can hide it to reduce clutter as per instruction for modal usage */}
+                {googleCalendars.slice(0, 3).map(gc => (
                     <div key={gc.id} className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
                         <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: sourceColors[gc.id] }} onClick={() => {
@@ -508,17 +618,28 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       <input type="checkbox" checked={visibleSources.includes(gc.id)} onChange={() => toggleVisibility(gc.id)} className="w-4 h-4 rounded border border-slate-800 checked:bg-secondary appearance-none cursor-pointer" />
                     </div>
                 ))}
+                {googleCalendars.length > 3 && (
+                    <p className="text-[9px] text-slate-400 italic pl-1">+{googleCalendars.length - 3} lainnya (Lihat Setting)</p>
+                )}
               </div>
             </div>
           </div>
 
-          <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop p-3">
-            <button onClick={handleSync} disabled={!googleAccessToken || isSyncing} className="w-full group flex items-center justify-between p-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all disabled:opacity-50">
+          <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop p-3 flex gap-2">
+            <button onClick={handleSync} disabled={!googleAccessToken || isSyncing} className="flex-1 group flex items-center justify-between p-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all disabled:opacity-50">
               <div className="flex items-center gap-2">
                 <div className={`w-8 h-8 ${gStatus.bg} rounded-lg flex items-center justify-center ${gStatus.color}`}><Chrome size={16} strokeWidth={3} /></div>
                 <div className="text-left"><p className="text-[8px] font-black uppercase text-slate-400">Google Sync</p><p className={`text-[9px] font-bold ${gStatus.color}`}>{gStatus.label}</p></div>
               </div>
               <RefreshCw size={12} className={`text-slate-300 transition-all ${isSyncing ? 'animate-spin text-accent' : ''}`} />
+            </button>
+            <button 
+                ref={settingsBtnRef}
+                onClick={toggleSettingsModal}
+                disabled={!googleAccessToken}
+                className="w-12 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all flex items-center justify-center disabled:opacity-50"
+            >
+                <SettingsIcon size={20} className="text-slate-700" />
             </button>
           </div>
         </aside>

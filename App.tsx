@@ -42,7 +42,7 @@ import { CalendarView } from './components/CalendarView';
 import { NewWorkspaceModal } from './components/NewWorkspaceModal';
 import { JoinWorkspaceModal } from './components/JoinWorkspaceModal'; 
 import { WorkspaceView } from './components/WorkspaceView';
-import { NotificationSystem } from './components/NotificationSystem'; // NEW IMPORT
+import { NotificationSystem } from './components/NotificationSystem'; 
 import { supabase } from './lib/supabase';
 import { Task, TaskStatus, TaskPriority, Workspace, User, Notification, WorkspaceType, AppConfig } from './types';
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
@@ -525,6 +525,33 @@ const App: React.FC = () => {
     }
   };
 
+  // Helper for deleting google event
+  const deleteGoogleEvent = async (task: Task) => {
+    if (task.google_event_id && googleAccessToken) {
+        try {
+            const calendarId = task.google_calendar_id || 'primary';
+            const googleService = new GoogleCalendarService(() => {});
+            await googleService.deleteEvent(googleAccessToken, task.google_event_id, calendarId);
+        } catch (e) {
+            console.error("Failed to delete Google Calendar event", e);
+        }
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+        const taskToDelete = tasks.find(t => t.id === taskId);
+        if (taskToDelete) {
+            await deleteGoogleEvent(taskToDelete);
+        }
+        await supabase.from('tasks').delete().eq('id', taskId);
+        fetchData();
+        setDetailTask(null);
+    } catch (err) {
+        console.error("Error deleting task:", err);
+    }
+  };
+
   const handleDeleteWorkspace = async (workspaceId: string) => {
     if (!confirm("Apakah Anda yakin ingin menghapus workspace ini? Semua data di dalamnya akan hilang.")) return;
     try {
@@ -558,7 +585,13 @@ const App: React.FC = () => {
       }
       const payload: any = { title: taskData.title, description: taskData.description || null, status: taskData.status || TaskStatus.TODO, priority: taskData.priority || TaskPriority.MEDIUM, workspace_id: targetWorkspaceId, parent_id: taskData.parent_id || null, due_date: taskData.due_date || null, start_date: taskData.start_date || null, is_all_day: taskData.is_all_day ?? true, is_archived: taskData.is_archived ?? false, category: taskData.category || 'General', created_by: currentUser.id, assigned_to: taskData.assigned_to || null };
       
+      // Google Calendar Logic
+      const isGoogleConnected = !!googleAccessToken || currentUser.app_settings?.googleConnected;
+      const googleToken = googleAccessToken || currentUser.app_settings?.googleAccessToken;
+      const googleService = new GoogleCalendarService(() => {});
+
       if (editingTask && editingTask.id) {
+        // UPDATE EXISTING
         setTasks(prevTasks => prevTasks.map(t => 
             t.id === editingTask.id ? { ...t, ...payload } : t
         ));
@@ -573,7 +606,18 @@ const App: React.FC = () => {
         const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
         if (error) throw error;
 
+        // Sync Update to Google
+        if (isGoogleConnected && googleToken && editingTask.google_event_id) {
+            try {
+                const calendarId = editingTask.google_calendar_id || 'primary';
+                await googleService.updateEvent(googleToken, editingTask.google_event_id, { ...editingTask, ...payload }, calendarId);
+            } catch (e) {
+                console.error("Failed to update Google Event", e);
+            }
+        }
+
       } else {
+        // CREATE NEW
         payload.created_at = new Date().toISOString();
         const { data: newTaskData, error } = await supabase.from('tasks').insert(payload).select().single();
         if (error) throw error;
@@ -581,13 +625,9 @@ const App: React.FC = () => {
         if (newTaskData) {
             setTasks(prev => [newTaskData as Task, ...prev]);
 
-            // --- AUTO SYNC TO GOOGLE CALENDAR ---
-            const isGoogleConnected = !!googleAccessToken || currentUser.app_settings?.googleConnected;
-            const googleToken = googleAccessToken || currentUser.app_settings?.googleAccessToken;
-
+            // Sync Create to Google
             if (isGoogleConnected && googleToken) {
                if (!newTaskData.parent_id) {
-                  const googleService = new GoogleCalendarService(() => {});
                   const event = await googleService.createEvent(googleToken, newTaskData);
                   
                   if (event && event.id) {
@@ -902,7 +942,7 @@ const App: React.FC = () => {
           onStatusChange={handleStatusChange} 
           onEdit={openEditModal} 
           onReschedule={(t) => setReschedulingTask(t)} 
-          onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }} 
+          onDelete={handleDeleteTask} 
           onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }} 
         />
 
@@ -920,7 +960,7 @@ const App: React.FC = () => {
           }}
           onEditTask={openEditModal}
           onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); setDetailTask(null); }} 
-          onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); setDetailTask(null); }} 
+          onDeleteTask={handleDeleteTask} 
           onInspectTask={(t) => {}}
           onRescheduleTask={(t) => setReschedulingTask(t)}
         />
@@ -1085,7 +1125,7 @@ const App: React.FC = () => {
                 }}
                 onStatusChange={handleStatusChange}
                 onEditTask={openEditModal}
-                onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+                onDeleteTask={handleDeleteTask}
                 onTaskClick={handleGlobalTaskClick} 
               />
             )}
@@ -1173,7 +1213,7 @@ const App: React.FC = () => {
                               onStatusChange={handleStatusChange} 
                               onClick={handleGlobalTaskClick} 
                               onEdit={openEditModal}
-                              onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+                              onDelete={handleDeleteTask}
                               onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }}
                               onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)} 
                               workspaceName={workspaces.find(ws => ws.id === task.workspace_id)?.name}
@@ -1229,7 +1269,7 @@ const App: React.FC = () => {
                                   <td className="p-4 text-right">
                                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button onClick={(e) => { e.stopPropagation(); openEditModal(task); }} className="p-1.5 hover:bg-white rounded border hover:border-slate-300 text-slate-400 hover:text-slate-800"><MessageSquare size={14} /></button>
-                                        <button onClick={async (e) => { e.stopPropagation(); await supabase.from('tasks').delete().eq('id', task.id); fetchData(); }} className="p-1.5 hover:bg-white rounded border hover:border-secondary text-slate-400 hover:text-secondary"><Trash2 size={14} /></button>
+                                        <button onClick={async (e) => { e.stopPropagation(); handleDeleteTask(task.id); }} className="p-1.5 hover:bg-white rounded border hover:border-secondary text-slate-400 hover:text-secondary"><Trash2 size={14} /></button>
                                     </div>
                                   </td>
                               </tr>
@@ -1261,7 +1301,7 @@ const App: React.FC = () => {
                             onStatusChange={() => {}} 
                             onClick={handleGlobalTaskClick}
                             onEdit={openEditModal}
-                            onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+                            onDelete={handleDeleteTask}
                             onRestore={async (id) => { await supabase.from('tasks').update({ is_archived: false }).eq('id', id); fetchData(); }}
                           />
                         </div>
