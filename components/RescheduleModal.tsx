@@ -17,11 +17,7 @@ export const RescheduleModal: React.FC<RescheduleModalProps> = ({ task, isOpen, 
     if (task?.due_date) {
       const d = new Date(task.due_date);
       if (!isNaN(d.getTime())) {
-        // Parse UTC ISO to Local Input Format YYYY-MM-DD
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        setDate(`${year}-${month}-${day}`);
+        setDate(d.toLocaleDateString('en-CA')); // YYYY-MM-DD local
       } else {
         setDate('');
       }
@@ -34,31 +30,21 @@ export const RescheduleModal: React.FC<RescheduleModalProps> = ({ task, isOpen, 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date) return;
-
-    // Convert Input Date (Local Midnight) to ISO String (UTC)
-    // Example: Input "2023-10-27" (Local) -> "2023-10-27T00:00:00" Local -> "2023-10-26T17:00:00Z" (if GMT+7)
-    // Or if we want to preserve the specific time of the original task, we need more logic.
-    // For RescheduleModal (typically just changing the day), preserving time is good UX.
     
-    let finalDateIso = '';
+    // Convert selected date (local YYYY-MM-DD) to ISO String with UTC 
+    // We preserve the existing time if possible, or set to end of day if just changing date
+    // For simplicity here, we assume setting a new date sets it to that day in UTC perspective, 
+    // but to be safe and consistent with NewTaskModal logic:
     
-    if (task.due_date) {
-        // Preserve original time
-        const original = new Date(task.due_date);
-        const hours = original.getHours();
-        const minutes = original.getMinutes();
-        
-        // Construct new date with original local time
-        const newLocal = new Date(`${date}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`);
-        finalDateIso = newLocal.toISOString();
-    } else {
-        // Default to end of day if no previous time
-        const newLocal = new Date(`${date}T23:59:59`);
-        finalDateIso = newLocal.toISOString();
-    }
-
-    onSave(task.id, finalDateIso);
+    // Create local date object at 00:00 or preserve time if needed
+    // Here we act like "All Day" or just date setter
+    const newDateObj = new Date(date + 'T23:59:59'); 
+    
+    // To properly support rescheduling specific times, we would need a time picker.
+    // For now, this component seems to only have a Date picker.
+    // So we use the ISO string of the selected date.
+    
+    onSave(task.id, newDateObj.toISOString());
     onClose();
   };
 

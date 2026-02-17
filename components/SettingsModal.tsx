@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, User, Settings, Bell, Calendar, Link2, 
@@ -56,6 +57,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (isOpen) {
       calendarService.current = new GoogleCalendarService((token) => {
         setGoogleAccessToken(token);
+        // Persist token immediately when received from OAuth
+        localStorage.setItem('google_access_token', token);
       });
       
       setTempName(user.name || '');

@@ -23,9 +23,7 @@ import {
   Table as TableIcon,
   ChevronDown,
   CheckCircle2,
-  ArrowRight,
-  MoreHorizontal,
-  Circle
+  ArrowRight
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -44,7 +42,7 @@ import { CalendarView } from './components/CalendarView';
 import { NewWorkspaceModal } from './components/NewWorkspaceModal';
 import { JoinWorkspaceModal } from './components/JoinWorkspaceModal'; 
 import { WorkspaceView } from './components/WorkspaceView';
-import { NotificationSystem } from './components/NotificationSystem'; 
+import { NotificationSystem } from './components/NotificationSystem'; // NEW IMPORT
 import { supabase } from './lib/supabase';
 import { Task, TaskStatus, TaskPriority, Workspace, User, Notification, WorkspaceType, AppConfig } from './types';
 import { GoogleCalendarService, GoogleCalendar } from './services/googleCalendarService';
@@ -123,15 +121,7 @@ const App: React.FC = () => {
   const defaultCategories = ['General', 'Meeting', 'Design', 'Development'];
   const [categories, setCategories] = useState<string[]>(defaultCategories); 
   const [activeCategories, setActiveCategories] = useState<string[]>(defaultCategories);
-  
-  // FIX: Initialize category colors correctly
-  const [categoryColors, setCategoryColors] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    defaultCategories.forEach((cat, idx) => {
-      initial[cat] = UI_PALETTE[idx % UI_PALETTE.length];
-    });
-    return initial;
-  });
+  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
   
   const [googleEvents, setGoogleEvents] = useState<Task[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
@@ -139,12 +129,16 @@ const App: React.FC = () => {
   const [isFetching, setIsFetching] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  // PERSISTENT GOOGLE TOKEN
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(() => {
+    return localStorage.getItem('google_access_token');
+  });
+  
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
   const [accountRole, setAccountRole] = useState('Owner');
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
-  // Notification State
+  // Notification State (List Only - Popup is handled by NotificationSystem)
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
@@ -166,23 +160,14 @@ const App: React.FC = () => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
 
-  // Click outside listener for Notification Dropdown
+  // Save Google Token to LocalStorage when it changes
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (notifDropdownRef.current && !notifDropdownRef.current.contains(event.target as Node)) {
-        setIsNotifDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // --- PERSIST GOOGLE TOKEN ON LOAD (CRITICAL FIX) ---
-  useEffect(() => {
-    if (currentUser?.app_settings?.googleAccessToken) {
-      setGoogleAccessToken(currentUser.app_settings.googleAccessToken);
-    }
-  }, [currentUser]);
+    if (googleAccessToken) {
+      localStorage.setItem('google_access_token', googleAccessToken);
+    } 
+    // We don't automatically remove it on null to prevent accidental loss, 
+    // unless explicit logout handles it.
+  }, [googleAccessToken]);
 
   // --- GLOBAL ESC KEY HANDLER (STACK LOGIC) ---
   useEffect(() => {
@@ -247,596 +232,1053 @@ const App: React.FC = () => {
     return { color: 'text-secondary', label: 'Menyambungkan', icon: <WifiOff size={16} /> };
   };
 
-  // --- INITIAL DATA FETCH ---
-  const fetchData = async () => {
+  const handleGlobalTaskClick = (task: Task) => {
+    if (task.parent_id) {
+        setInspectedTask(task);
+        setDetailTask(null);
+    } else {
+        setDetailTask(task);
+        setInspectedTask(null);
+    }
+  };
+  
+  useEffect(() => {
+    const appName = globalBranding?.app_name || 'TaskPlay';
+    const appFavicon = globalBranding?.app_favicon;
+    if (document.title !== appName) document.title = appName;
+    if (appFavicon) {
+      let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      link.href = appFavicon;
+    }
+  }, [globalBranding]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(event.target as Node)) {
+        setIsNotifDropdownOpen(false);
+      }
+    };
+    if (isNotifDropdownOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isNotifDropdownOpen]);
+
+  useEffect(() => {
+    if (tasks.length > 0) {
+      const usedCategories = new Set(tasks.map(t => t.category || 'General'));
+      const allCats = Array.from(new Set([...categories, ...Array.from(usedCategories)]));
+      setCategories(prev => Array.from(new Set([...prev, ...allCats])));
+      setCategoryColors(prev => {
+        const next = { ...prev };
+        allCats.forEach((cat, idx) => {
+          if (!next[cat]) next[cat] = UI_PALETTE[idx % UI_PALETTE.length];
+        });
+        return next;
+      });
+    } else {
+      setCategoryColors(prev => {
+        const next = { ...prev };
+        categories.forEach((cat, idx) => {
+           if (!next[cat]) next[cat] = UI_PALETTE[idx % UI_PALETTE.length];
+        });
+        return next;
+      });
+    }
+  }, [tasks]); 
+
+  const fetchData = useCallback(async () => {
+    if (!currentUser) return;
     setIsFetching(true);
     try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user) {
-            const { data: userProfile } = await supabase.from('users').select('*').eq('id', session.user.id).single();
-            if (userProfile) {
-                setCurrentUser(userProfile);
-                setAccountRole(userProfile.status || 'Owner');
-                
-                // Load App Settings from User Profile
-                if (userProfile.app_settings) {
-                    if (userProfile.app_settings.sourceColors) setSourceColors(userProfile.app_settings.sourceColors);
-                    if (userProfile.app_settings.visibleSources) setVisibleSources(userProfile.app_settings.visibleSources);
-                }
-            }
+      const [wsResult, tasksResult, brandingResult, notifResult] = await Promise.allSettled([
+        supabase.from('workspaces').select('*').order('created_at', { ascending: true }),
+        supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+        supabase.from('app_config').select('*').single(),
+        supabase.from('notifications').select('*').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(20)
+      ]);
 
-            const { data: wsData } = await supabase.from('workspace_members').select('workspace_id, workspaces(*)').eq('user_id', session.user.id);
-            if (wsData) {
-                const workspacesList = wsData.map((w: any) => w.workspaces).filter(Boolean);
-                setWorkspaces(workspacesList);
-                if (workspacesList.length > 0 && !activeWorkspaceId) {
-                    setActiveWorkspaceId(workspacesList[0].id);
-                }
-            }
-
-            const { data: tasksData } = await supabase.from('tasks').select('*');
-            if (tasksData) setTasks(tasksData as Task[]);
-
-            // Fetch Notifications
-            const { data: notifData } = await supabase.from('notifications').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(20);
-            if (notifData) setNotifications(notifData as Notification[]);
-
-            // Fetch Branding
-            const { data: brandingData } = await supabase.from('app_config').select('*').single();
-            if (brandingData) setGlobalBranding(brandingData);
-
-            setIsAuthenticated(true);
-            setIsApiConnected(true);
-        } else {
-            setIsAuthenticated(false);
+      const wsData = wsResult.status === 'fulfilled' ? wsResult.value.data : [];
+      const tData = tasksResult.status === 'fulfilled' ? tasksResult.value.data : [];
+      const bData = brandingResult.status === 'fulfilled' ? brandingResult.value.data : null;
+      const nData = notifResult.status === 'fulfilled' ? notifResult.value.data : [];
+      
+      setIsApiConnected(true);
+      
+      if (wsData) {
+        setWorkspaces(wsData as Workspace[]);
+        if (visibleSources.length === 0) {
+          setVisibleSources((wsData as Workspace[]).map(ws => ws.id));
         }
-    } catch (e) {
-        console.error("Data Fetch Error:", e);
+      }
+      if (tData) setTasks(tData as Task[]);
+      if (bData) setGlobalBranding(bData as AppConfig);
+      if (nData) setNotifications(nData as Notification[]);
+
+    } catch (err) {
+      console.error("Fetch fatal error:", err);
+      setIsApiConnected(false);
     } finally {
-        setIsFetching(false);
-        setIsAuthLoading(false);
+      setIsFetching(false);
+    }
+  }, [currentUser?.id, visibleSources.length]);
+
+  const fetchOrCreateUser = useCallback(async (sessionUser: any) => {
+    if (!currentUserRef.current) {
+      setIsProfileLoading(true);
+    }
+    try {
+      let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
+      
+      const email = sessionUser.email?.toLowerCase() || '';
+      const metaUsername = sessionUser.user_metadata?.username?.toLowerCase() || '';
+      const dbUsername = data?.username?.toLowerCase() || '';
+
+      const isLegacyAdmin = 
+          email.includes('arunika') || 
+          metaUsername === 'arunika' || 
+          dbUsername === 'arunika';
+
+      if (error || !data) {
+        const generatedUsername = email.split('@')[0] || `user_${sessionUser.id.substring(0,6)}`;
+        const newUser = {
+          id: sessionUser.id,
+          email: sessionUser.email,
+          username: sessionUser.user_metadata?.username || generatedUsername,
+          name: sessionUser.user_metadata?.name || generatedUsername,
+          avatar_url: sessionUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${sessionUser.id}`,
+          status: isLegacyAdmin ? 'Admin' : 'Member',
+          app_settings: { }, 
+          is_active: true
+        };
+        const { data: createdData } = await supabase.from('users').upsert(newUser).select().single();
+        data = createdData || newUser;
+      } else if (data && isLegacyAdmin && data.status !== 'Admin') {
+        // FORCE PROMOTE IF ARUNIKA
+        await supabase.from('users').update({ status: 'Admin' }).eq('id', sessionUser.id);
+        data.status = 'Admin';
+      }
+
+      if (data) {
+        if (data.is_active === false) setIsAccountLocked(true);
+        else setIsAccountLocked(false);
+        setCurrentUser(data as User);
+        const role = (data.status?.toLowerCase() === 'admin' || data.status?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
+        setAccountRole(role);
+      }
+    } catch (e) {
+      console.error("Profile sync error:", e);
+      if (sessionUser) setCurrentUser({ id: sessionUser.id, email: sessionUser.email, name: 'User', avatar_url: '', created_at: '' } as User);
+    } finally {
+      setIsProfileLoading(false);
+    }
+  }, []); 
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setIsAuthenticated(true);
+        fetchOrCreateUser(session.user);
+      }
+      setIsAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        setIsAuthenticated(true);
+        fetchOrCreateUser(session.user);
+      } else {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+        setIsAccountLocked(false);
+      }
+      setIsAuthLoading(false);
+    });
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      subscription.unsubscribe();
+    };
+  }, [fetchOrCreateUser]);
+
+  useEffect(() => {
+    if (currentUser && isAuthenticated) {
+      fetchData();
+      
+      if (taskChannelRef.current) supabase.removeChannel(taskChannelRef.current);
+      taskChannelRef.current = supabase
+        .channel('tasks-live-v7')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
+        .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
+      
+      if (workspaceChannelRef.current) supabase.removeChannel(workspaceChannelRef.current);
+      workspaceChannelRef.current = supabase
+        .channel('workspaces-live')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, (payload) => {
+           if (payload.eventType === 'UPDATE') {
+              setWorkspaces(prev => prev.map(ws => 
+                 ws.id === payload.new.id ? { ...ws, ...payload.new } : ws
+              ));
+           } else {
+              fetchData();
+           }
+        })
+        .subscribe();
+
+      if (configChannelRef.current) supabase.removeChannel(configChannelRef.current);
+      configChannelRef.current = supabase.channel('app-config-live').on('postgres_changes', { event: '*', schema: 'public', table: 'app_config', filter: 'id=eq.1'}, (payload) => { setGlobalBranding(payload.new as AppConfig); }).subscribe();
+
+      if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
+      notificationChannelRef.current = supabase
+        .channel(`notifications-list-${currentUser.id}`)
+        .on('postgres_changes', { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'notifications', 
+            filter: `user_id=eq.${currentUser.id}`
+        }, (payload) => { 
+            const newNotif = payload.new as Notification; 
+            setNotifications(prev => [newNotif, ...prev]); 
+        })
+        .subscribe();
+
+      if (userStatusChannelRef.current) supabase.removeChannel(userStatusChannelRef.current);
+      userStatusChannelRef.current = supabase.channel(`user-status-${currentUser.id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}`}, (payload: any) => { if (payload.new.is_active === false) { setIsAccountLocked(true); setCurrentUser(prev => prev ? { ...prev, is_active: false } : null); } else if (payload.new.is_active === true) { setIsAccountLocked(false); setCurrentUser(prev => prev ? { ...prev, is_active: true } : null); } }).subscribe();
+    }
+  }, [currentUser?.id, isAuthenticated, fetchData]);
+
+  useEffect(() => {
+    const fetchMembers = async () => {
+        if (!activeWorkspaceId) {
+            setActiveWorkspaceMembers([]);
+            return;
+        }
+        const { data } = await supabase
+            .from('workspace_members')
+            .select(`id, role, user_id, users:user_id (id, name, email, avatar_url)`)
+            .eq('workspace_id', activeWorkspaceId);
+        setActiveWorkspaceMembers(data || []);
+    };
+
+    fetchMembers();
+
+    if (membersChannelRef.current) supabase.removeChannel(membersChannelRef.current);
+    
+    if (activeWorkspaceId) {
+        membersChannelRef.current = supabase.channel(`members-sync-${activeWorkspaceId}`)
+            .on('postgres_changes', { 
+                event: '*', 
+                schema: 'public', 
+                table: 'workspace_members', 
+                filter: `workspace_id=eq.${activeWorkspaceId}` 
+            }, () => {
+                fetchMembers(); 
+            })
+            .subscribe();
+    }
+
+    return () => {
+        if (membersChannelRef.current) supabase.removeChannel(membersChannelRef.current);
+    };
+  }, [activeWorkspaceId]);
+
+  const handleSaveWorkspace = async (data: { id?: string; name: string; category: string; description: string; type: WorkspaceType; logo_url?: string }) => {
+    if (!currentUser) return;
+    try {
+      if (data.id) {
+        const { error } = await supabase.from('workspaces').update({
+          name: data.name,
+          type: data.type,
+          category: data.category,
+          description: data.description,
+          logo_url: data.logo_url
+        }).eq('id', data.id);
+        
+        if (error) throw error;
+        setWorkspaces(prev => prev.map(ws => ws.id === data.id ? { ...ws, ...data } : ws));
+      } else {
+        const { data: newWs, error } = await supabase.from('workspaces').insert({ 
+          name: data.name, 
+          type: data.type, 
+          owner_id: currentUser.id, 
+          category: data.category, 
+          description: data.description,
+          logo_url: data.logo_url
+        }).select().single();
+        
+        if (error) throw error;
+        if (newWs) {
+          await supabase.from('workspace_members').insert({ workspace_id: newWs.id, user_id: currentUser.id, role: 'owner' });
+          setWorkspaces(prev => [...prev, newWs as Workspace]);
+          setActiveWorkspaceId(newWs.id);
+          setActiveTab('workspace_view');
+        }
+      }
+    } catch (err: any) {
+      console.error("Workspace operation failed:", err);
+      alert("Gagal menyimpan workspace: " + err.message);
     }
   };
 
-  useEffect(() => {
-    fetchData();
+  const handleDeleteWorkspace = async (workspaceId: string) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus workspace ini? Semua data di dalamnya akan hilang.")) return;
+    try {
+      const { error } = await supabase.from('workspaces').delete().eq('id', workspaceId);
+      if (error) throw error;
+      
+      setWorkspaces(prev => prev.filter(ws => ws.id !== workspaceId));
+      if (activeWorkspaceId === workspaceId) {
+        setActiveWorkspaceId(null);
+        setActiveTab('dashboard');
+      }
+    } catch (err: any) {
+      console.error("Delete workspace failed:", err);
+      alert("Gagal menghapus workspace: " + err.message);
+    }
+  };
+
+  const handleSaveTask = async (taskData: Partial<Task>) => {
+    if (!currentUser) return;
+    setIsFetching(true); 
     
-    // Realtime Subscriptions
-    const tasksChannel = supabase.channel('tasks-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-          if (payload.eventType === 'INSERT') setTasks(prev => [...prev, payload.new as Task]);
-          if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? payload.new as Task : t));
-          if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
-      })
-      .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
-
-    const workspacesChannel = supabase.channel('workspaces-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'workspaces' }, () => fetchData())
-      .subscribe();
-
-    const configChannel = supabase.channel('config-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_config' }, (payload) => {
-          if (payload.new) setGlobalBranding(payload.new as AppConfig);
-      })
-      .subscribe();
-
-    return () => {
-        supabase.removeChannel(tasksChannel);
-        supabase.removeChannel(workspacesChannel);
-        supabase.removeChannel(configChannel);
-    };
-  }, []);
-
-  // --- HANDLERS ---
-
-  const handleCreateTask = async (taskData: Partial<Task>, targetCalendarId?: string) => {
-    // Determine if it's a Google Task or Supabase Task
-    if (targetCalendarId) {
-        // Create Google Calendar Event
-        if (!googleAccessToken) {
-            alert("Please connect Google Calendar first.");
-            return;
+    try {
+      let targetWorkspaceId = taskData.workspace_id;
+      if (!targetWorkspaceId) {
+        if (activeTab === 'workspace_view' && activeWorkspaceId) {
+           targetWorkspaceId = activeWorkspaceId;
+        } else {
+           const personalWs = workspaces.find(w => w.type === 'personal');
+           targetWorkspaceId = personalWs ? personalWs.id : (workspaces[0]?.id || null);
         }
-        setIsFetching(true);
-        try {
-            const service = new GoogleCalendarService(() => {});
-            await service.createEvent(googleAccessToken, taskData, targetCalendarId);
-            // Re-sync happens automatically via hook in CalendarView or we can trigger it
-            // For now, simple delay or we can optimistic update googleEvents
-        } catch (e) {
-            console.error(e);
-            alert("Failed to create Google Event");
-        } finally {
-            setIsFetching(false);
-            setIsNewTaskModalOpen(false);
+      }
+      const payload: any = { title: taskData.title, description: taskData.description || null, status: taskData.status || TaskStatus.TODO, priority: taskData.priority || TaskPriority.MEDIUM, workspace_id: targetWorkspaceId, parent_id: taskData.parent_id || null, due_date: taskData.due_date || null, start_date: taskData.start_date || null, is_all_day: taskData.is_all_day ?? true, is_archived: taskData.is_archived ?? false, category: taskData.category || 'General', created_by: currentUser.id, assigned_to: taskData.assigned_to || null };
+      
+      if (editingTask && editingTask.id) {
+        setTasks(prevTasks => prevTasks.map(t => 
+            t.id === editingTask.id ? { ...t, ...payload } : t
+        ));
+
+        if (detailTask && detailTask.id === editingTask.id) {
+            setDetailTask(prev => prev ? ({ ...prev, ...payload }) : null);
         }
-    } else {
-        // Create Supabase Task
-        try {
-            const { error } = await supabase.from('tasks').insert({
-                ...taskData,
-                created_by: currentUser?.id,
-                status: TaskStatus.TODO
-            });
-            if (error) throw error;
-            setIsNewTaskModalOpen(false);
-        } catch (e: any) {
-            alert("Gagal membuat task: " + e.message);
+        if (inspectedTask && inspectedTask.id === editingTask.id) {
+            setInspectedTask(prev => prev ? ({ ...prev, ...payload }) : null);
         }
+
+        const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
+        if (error) throw error;
+
+      } else {
+        payload.created_at = new Date().toISOString();
+        const { data: newTaskData, error } = await supabase.from('tasks').insert(payload).select().single();
+        if (error) throw error;
+        
+        if (newTaskData) {
+            setTasks(prev => [newTaskData as Task, ...prev]);
+
+            // --- AUTO SYNC TO GOOGLE CALENDAR ---
+            const isGoogleConnected = !!googleAccessToken || currentUser.app_settings?.googleConnected;
+            const googleToken = googleAccessToken || currentUser.app_settings?.googleAccessToken;
+
+            if (isGoogleConnected && googleToken) {
+               if (!newTaskData.parent_id) {
+                  const googleService = new GoogleCalendarService(() => {});
+                  const event = await googleService.createEvent(googleToken, newTaskData);
+                  
+                  if (event && event.id) {
+                     await supabase.from('tasks').update({ 
+                       google_event_id: event.id 
+                     }).eq('id', newTaskData.id);
+                  }
+               }
+            }
+        }
+      }
+      
+      setIsNewTaskModalOpen(false);
+      setEditingTask(null);
+    } catch (err: any) {
+      console.error("Save task failure:", err);
+      alert("Gagal menyimpan agenda.");
+      fetchData(); 
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
+  const handleUpdateProfile = async (profileData: Partial<User>, newRole: string, settingsUpdate: any) => {
+    if (!currentUser) return;
+    try {
+        // Save Google Token to Local Storage if it was updated
+        if (settingsUpdate.googleAccessToken) {
+           localStorage.setItem('google_access_token', settingsUpdate.googleAccessToken);
+        }
+
+        const personalSettings = { notificationsEnabled: settingsUpdate.notificationsEnabled, googleConnected: settingsUpdate.googleConnected, sourceColors: currentUser.app_settings?.sourceColors, visibleSources: currentUser.app_settings?.visibleSources, googleAccessToken: settingsUpdate.googleAccessToken || currentUser.app_settings?.googleAccessToken };
+        const updates = { ...profileData, status: newRole, app_settings: personalSettings };
+        
+        setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
+        
+        const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
+        if (error) throw error;
+        
+        const isAdmin = newRole.toLowerCase() === 'admin' || newRole.toLowerCase() === 'owner' || accountRole === 'Owner';
+        if (isAdmin) {
+           const { error: configError } = await supabase.from('app_config').upsert({ id: 1, app_name: settingsUpdate.appName, app_logo: settingsUpdate.appLogo, app_favicon: settingsUpdate.appFavicon, updated_by: currentUser.id, updated_at: new Date().toISOString() });
+           if (configError) throw configError;
+           setGlobalBranding({ id: 1, app_name: settingsUpdate.appName, app_logo: settingsUpdate.appLogo, app_favicon: settingsUpdate.appFavicon });
+        }
+        
+        const calculatedRole = (newRole?.toLowerCase() === 'admin' || newRole?.toLowerCase() === 'owner') ? 'Owner' : 'Member';
+        setAccountRole(calculatedRole);
+        alert("Pengaturan berhasil disimpan! Perubahan global akan terlihat oleh semua user.");
+    } catch (err: any) {
+        console.error(err);
+        alert("Gagal menyimpan perubahan: " + err.message);
     }
   };
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
-      // Optimistic
-      setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-      
-      if (id.startsWith('google-')) {
-          // Google tasks don't really have status in this app context usually, 
-          // but if we extended schema, we would update description or color.
-          // For now, ignore or store status in local state if needed.
-          return;
-      }
+    const targetTask = tasks.find(t => t.id === id);
+    if (!targetTask) return;
 
-      await supabase.from('tasks').update({ status }).eq('id', id);
-  };
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+    
+    if (detailTask && detailTask.id === id) {
+        setDetailTask(prev => prev ? ({ ...prev, status }) : null);
+    }
+    
+    try { 
+      await supabase.from('tasks').update({ status }).eq('id', id); 
 
-  const handleDeleteTask = async (taskId: string) => {
-      // 1. Check if it is a Google Task
-      if (taskId.startsWith('google-')) {
-        const eventId = taskId.replace('google-', '');
-        // Find the event to get calendar ID if possible, or default to primary
-        const event = googleEvents.find(e => e.id === taskId);
-        const calendarId = event?.workspace_id || 'primary'; // WorkspaceID in google event wrapper is the calendar ID
-        
-        if (!googleAccessToken) {
-            alert("Google account not connected.");
-            return;
-        }
-
-        if (!confirm("Are you sure you want to delete this Google Calendar event?")) return;
-
-        try {
-            setIsFetching(true);
-            const service = new GoogleCalendarService(() => {}); 
-            await service.deleteEvent(googleAccessToken, eventId, calendarId);
-            
-            // Optimistic update
-            setGoogleEvents(prev => prev.filter(e => e.id !== taskId));
-            
-            // Close modals if open
-            setInspectedTask(null);
-            setDetailTask(null);
-        } catch (err) {
-            console.error("Failed to delete Google event", err);
-            alert("Gagal menghapus event Google Calendar.");
-        } finally {
-            setIsFetching(false);
-        }
-        return;
-      }
-
-      // 2. Normal Supabase Task
-      if (!confirm("Are you sure you want to delete this task?")) return;
-
-      try {
-          const { error } = await supabase.from('tasks').delete().eq('id', taskId);
-          if (error) throw error;
+      if (status === TaskStatus.DONE && currentUser) {
+          const { data: members } = await supabase
+              .from('workspace_members')
+              .select('user_id')
+              .eq('workspace_id', targetTask.workspace_id);
           
-          setTasks(prev => prev.filter(t => t.id !== taskId));
-          setInspectedTask(null);
-          setDetailTask(null);
-      } catch (err: any) {
-          console.error("Delete error:", err);
-          alert("Gagal menghapus task.");
-      }
-  };
+          if (members && members.length > 0) {
+              const notificationsToInsert = members
+                  .filter(m => m.user_id !== currentUser.id) 
+                  .map(m => ({
+                      user_id: m.user_id,
+                      type: 'task_completed',
+                      title: 'Task Selesai ✅',
+                      message: `${currentUser.name} menyelesaikan task: "${targetTask.title}"`,
+                      is_read: false,
+                      metadata: { task_id: id, workspace_id: targetTask.workspace_id }
+                  }));
 
-  const handleUpdateTask = async (task: Partial<Task>, targetCalendarId?: string) => {
-      if (task.id?.startsWith('google-')) {
-          // Update Google Event
-          if (!googleAccessToken) return;
-          const eventId = task.id.replace('google-', '');
-          const calendarId = targetCalendarId || task.workspace_id || 'primary';
-          
-          try {
-              const service = new GoogleCalendarService(() => {});
-              await service.updateEvent(googleAccessToken, eventId, task, calendarId);
-              // Optimistic update
-              setGoogleEvents(prev => prev.map(t => t.id === task.id ? { ...t, ...task } as Task : t));
-              setIsNewTaskModalOpen(false);
-              setEditingTask(null);
-          } catch(e) {
-              console.error(e);
-              alert("Failed to update Google Event");
-          }
-      } else {
-          // Update Supabase Task
-          const { error } = await supabase.from('tasks').update(task).eq('id', task.id);
-          if (!error) {
-              setTasks(prev => prev.map(t => t.id === task.id ? { ...t, ...task } as Task : t));
-              setIsNewTaskModalOpen(false);
-              setEditingTask(null);
+              if (notificationsToInsert.length > 0) {
+                  await supabase.from('notifications').insert(notificationsToInsert);
+              }
           }
       }
+    } catch (err) { 
+      fetchData(); 
+      console.error("Status update error", err);
+    }
   };
 
-  const handleReschedule = async (taskId: string, newDate: string) => {
-      if (taskId.startsWith('google-')) {
-          const task = googleEvents.find(t => t.id === taskId);
-          if (task) {
-              await handleUpdateTask({ ...task, due_date: newDate, start_date: newDate }, task.workspace_id);
-          }
-      } else {
-          await supabase.from('tasks').update({ due_date: newDate, start_date: newDate }).eq('id', taskId);
-      }
-      setReschedulingTask(null);
+  const handleBoardDragOver = (e: React.DragEvent, status: TaskStatus) => { e.preventDefault(); setDragOverColumn(status); };
+  const handleBoardDrop = async (e: React.DragEvent, status: TaskStatus) => {
+    e.preventDefault();
+    setDragOverColumn(null);
+    const taskId = e.dataTransfer.getData('taskId');
+    if (taskId) { await handleStatusChange(taskId, status); }
   };
 
-  // --- RENDER CONTENT ---
+  const getDragOverStyle = (status: TaskStatus) => {
+    switch (status) {
+      case TaskStatus.TODO: return 'bg-slate-100 border-slate-400 border-dashed scale-[1.01]';
+      case TaskStatus.IN_PROGRESS: return 'bg-blue-50 border-blue-400 border-dashed scale-[1.01]';
+      case TaskStatus.IN_REVIEW: return 'bg-pink-50 border-pink-400 border-dashed scale-[1.01]';
+      case TaskStatus.DONE: return 'bg-emerald-50 border-emerald-400 border-dashed scale-[1.01]';
+      default: return 'border-transparent';
+    }
+  };
+
+  const getStatusColor = (status: TaskStatus) => {
+    switch(status) {
+      case TaskStatus.TODO: return 'text-slate-900';
+      case TaskStatus.IN_PROGRESS: return 'text-blue-500';
+      case TaskStatus.IN_REVIEW: return 'text-secondary'; // Pink
+      case TaskStatus.DONE: return 'text-quaternary'; // Green
+      default: return 'text-slate-900';
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    setIsAccountLocked(false);
+    setLoginMessage(null);
+    localStorage.removeItem('taskplay_activeTab');
+    localStorage.removeItem('taskplay_activeWorkspaceId');
+    localStorage.removeItem('google_access_token'); // Clear Google Token on explicit logout
+  };
+
+  const openEditModal = (task: Task) => {
+    setEditingTask(task);
+    setIsNewTaskModalOpen(true);
+  };
+
+  const openNewTaskModal = () => {
+    if (activeTab === 'dashboard' || activeTab === 'tasks') {
+       const personalWs = workspaces.find(w => w.type === 'personal');
+       if (personalWs) setEditingTask({ workspace_id: personalWs.id } as Task);
+       else setEditingTask(null);
+    } else {
+      setEditingTask(null);
+    }
+    setIsNewTaskModalOpen(true);
+  };
+
+  const handleMarkAllRead = async () => {
+    if (!currentUser) return;
+    try { const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', currentUser.id).eq('is_read', false); if (error) throw error; setNotifications(prev => prev.map(n => ({ ...n, is_read: true }))); } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteAllNotifications = async () => {
+    if (!currentUser) return;
+    if (!confirm("Hapus semua notifikasi?")) return;
+    try { const { error } = await supabase.from('notifications').delete().eq('user_id', currentUser.id); if (error) throw error; setNotifications([]); setIsNotifDropdownOpen(false); } catch (err) { console.error(err); }
+  };
+
+  const handleNotificationClick = async (notif: Notification) => {
+     if (!notif.is_read) {
+        setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
+        await supabase.from('notifications').update({ is_read: true }).eq('id', notif.id);
+     }
+     setIsNotifDropdownOpen(false);
+     
+     const metadata = notif.metadata || {};
+     if (metadata.task_id) {
+        const targetTask = tasks.find(t => t.id === metadata.task_id);
+        if (targetTask) { handleGlobalTaskClick(targetTask); } else { const { data } = await supabase.from('tasks').select('*').eq('id', metadata.task_id).single(); if (data) handleGlobalTaskClick(data as Task); else alert("Task tidak ditemukan atau sudah dihapus."); }
+     } else if (metadata.workspace_id) {
+        setActiveWorkspaceId(metadata.workspace_id);
+        setActiveTab('workspace_view');
+     } else if (notif.type === 'join_workspace') {
+        setActiveTab('team');
+     }
+  };
+
+  const getAssigneeUser = (userId?: string) => {
+    if (!userId) return undefined;
+    if (userId === currentUser?.id) return { name: currentUser.name, avatar_url: currentUser.avatar_url };
+    const member = activeWorkspaceMembers.find(m => m.user_id === userId);
+    if (member?.users) return { name: member.users.name, avatar_url: member.users.avatar_url };
+    return { name: 'User', avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}` };
+  };
+
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+  const parentTasks = tasks.filter(t => !t.parent_id && !t.is_archived);
+  const currentWorkspaceTasks = activeWorkspaceId ? tasks.filter(t => t.workspace_id === activeWorkspaceId) : [];
+  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
+
+  if (isAuthLoading || (isAuthenticated && isProfileLoading)) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-background dot-grid">
+        <div className="relative">
+          <div className="w-24 h-24 border-[10px] border-slate-200 rounded-[32px] animate-spin border-t-accent" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2 className="animate-pulse text-accent" size={28} />
+          </div>
+        </div>
+        <h2 className="mt-10 font-heading text-3xl text-slate-800">Menyiapkan Profil...</h2>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) return <Login onLoginSuccess={() => { setIsAuthenticated(true); setLoginMessage(null); }} initialMessage={loginMessage} />;
   
-  if (isAuthLoading) {
-      return <div className="h-screen w-full flex items-center justify-center bg-background"><Loader2 className="animate-spin text-accent" size={48} /></div>;
+  if (isAuthenticated && isAccountLocked) {
+    return (
+      <div className="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
+         <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mb-6">
+            <Ban size={48} className="text-red-500" strokeWidth={3} />
+         </div>
+         <h1 className="text-3xl font-heading text-slate-900 mb-2 max-w-lg">
+           Akses Aplikasi Dihentikan
+         </h1>
+         <p className="text-slate-500 font-medium mb-8 max-w-md leading-relaxed">
+           Mohon maaf akses anda sudah diakhiri, mohon hubungi administrator untuk membuka kembali.
+         </p>
+         <Button 
+            variant="secondary" 
+            className="border-2 border-slate-200 hover:border-slate-800 shadow-sm"
+            onClick={handleLogout}
+         >
+            <LogOut size={18} className="mr-2" /> Keluar Aplikasi
+         </Button>
+      </div>
+    );
   }
 
-  if (!isAuthenticated) {
-      return <Login onLoginSuccess={() => { setIsAuthenticated(true); fetchData(); }} initialMessage={loginMessage} />;
-  }
+  if (!currentUser) return <div className="h-screen w-full flex items-center justify-center">Failed to load profile.</div>;
 
-  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
-  const activeWorkspaceTasks = tasks.filter(t => t.workspace_id === activeWorkspaceId && !t.is_archived);
+  const selectedTask = tasks.find(t => t.id === selectedTaskId);
+  const connStatus = getConnectionStatus();
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden font-sans text-foreground">
+    <div className="h-screen w-full bg-background overflow-hidden flex justify-center">
       
+      {/* --- NOTIFICATION SYSTEM (SEPARATED) --- */}
       <NotificationSystem 
-         currentUser={currentUser}
-         onNotificationClick={(n) => {
-             if (n.metadata?.task_id) {
-                 const task = tasks.find(t => t.id === n.metadata.task_id);
-                 if (task) setInspectedTask(task);
-             }
-             // Mark as read
-             supabase.from('notifications').update({ is_read: true }).eq('id', n.id).then();
-             // Local update
-             setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, is_read: true } : notif));
-         }}
+        currentUser={currentUser} 
+        onNotificationClick={handleNotificationClick} 
       />
 
-      <Sidebar 
-        isOpen={isSidebarOpen}
-        setSidebarOpen={setSidebarOpen}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        selectedTaskId={selectedTaskId}
-        setSelectedTaskId={setSelectedTaskId}
-        isTasksExpanded={isTasksExpanded}
-        setIsTasksExpanded={setIsTasksExpanded}
-        topLevelTasks={tasks.filter(t => !t.parent_id)}
-        tasks={tasks}
-        workspaces={workspaces}
-        handleTaskClick={(t) => setInspectedTask(t)}
-        onLogout={async () => { await supabase.auth.signOut(); setIsAuthenticated(false); }}
-        currentUser={currentUser}
-        role={accountRole}
-        customBranding={{ name: globalBranding?.app_name, logo: globalBranding?.app_logo }}
-        onAddWorkspace={() => { setEditingWorkspace(null); setIsNewWorkspaceModalOpen(true); }}
-        onEditWorkspace={(ws) => { setEditingWorkspace(ws); setIsNewWorkspaceModalOpen(true); }}
-        onDeleteWorkspace={async (id) => { if(confirm("Hapus workspace?")) await supabase.from('workspaces').delete().eq('id', id); }}
-        onSelectWorkspace={(id) => { setActiveWorkspaceId(id); setActiveTab('workspace_view'); }}
-        activeWorkspaceId={activeWorkspaceId}
-        onJoinWorkspace={() => setIsJoinWorkspaceModalOpen(true)}
-      />
+      <div className="h-full w-full dot-grid flex overflow-hidden">
+        <NewTaskModal 
+          isOpen={isNewTaskModalOpen} 
+          onClose={() => { setIsNewTaskModalOpen(false); setEditingTask(null); }} 
+          onSave={handleSaveTask} 
+          workspaces={workspaces} 
+          googleCalendars={googleCalendars} 
+          initialData={editingTask}
+          parentTasks={parentTasks}
+          categories={categories}
+          onAddCategory={(cat) => {
+            if (!categories.includes(cat)) {
+              setCategories(prev => [...prev, cat]);
+              setActiveCategories(prev => [...prev, cat]); 
+              setCategoryColors(prev => ({...prev, [cat]: UI_PALETTE[categories.length % UI_PALETTE.length]}));
+            }
+          }}
+          members={activeWorkspaceMembers} 
+        />
+        
+        <NewWorkspaceModal 
+          isOpen={isNewWorkspaceModalOpen}
+          onClose={() => { setIsNewWorkspaceModalOpen(false); setEditingWorkspace(null); }}
+          onSave={handleSaveWorkspace}
+          initialData={editingWorkspace}
+        />
+        
+        <JoinWorkspaceModal 
+          isOpen={isJoinWorkspaceModalOpen}
+          onClose={() => setIsJoinWorkspaceModalOpen(false)}
+          onSuccess={() => { fetchData(); alert('Berhasil bergabung ke workspace!'); }}
+        />
+        
+        <Sidebar 
+          isOpen={isSidebarOpen} 
+          setSidebarOpen={setSidebarOpen} 
+          activeTab={activeTab} 
+          setActiveTab={setActiveTab} 
+          selectedTaskId={selectedTaskId} 
+          setSelectedTaskId={setSelectedTaskId} 
+          isTasksExpanded={isTasksExpanded} 
+          setIsTasksExpanded={setIsTasksExpanded} 
+          topLevelTasks={parentTasks} 
+          tasks={tasks} 
+          workspaces={workspaces} 
+          handleTaskClick={(t) => handleGlobalTaskClick(t)} 
+          onLogout={handleLogout} 
+          currentUser={currentUser} 
+          role={accountRole}
+          customBranding={{ name: globalBranding?.app_name, logo: globalBranding?.app_logo }} 
+          onAddWorkspace={() => setIsNewWorkspaceModalOpen(true)}
+          onEditWorkspace={(ws) => { setEditingWorkspace(ws); setIsNewWorkspaceModalOpen(true); }}
+          onDeleteWorkspace={handleDeleteWorkspace}
+          onSelectWorkspace={(id) => { setActiveWorkspaceId(id); setActiveTab('workspace_view'); }}
+          activeWorkspaceId={activeWorkspaceId}
+          onJoinWorkspace={() => setIsJoinWorkspaceModalOpen(true)}
+        />
 
-      <main className="flex-1 flex flex-col h-full min-w-0 relative overflow-hidden bg-slate-50/50">
-         {/* Top Bar */}
-         <header className="h-16 px-6 border-b-2 border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between shrink-0 z-20 sticky top-0">
-            <div className="flex items-center gap-3">
-               <button onClick={() => setSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-500">
-                  {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
-               </button>
-               {activeTab === 'dashboard' && <h2 className="text-lg font-heading text-slate-800">Dashboard</h2>}
-               {activeTab === 'calendar' && <h2 className="text-lg font-heading text-slate-800">Calendar</h2>}
-               {activeTab === 'tasks' && <h2 className="text-lg font-heading text-slate-800">My Tasks</h2>}
-               {activeTab === 'workspace_view' && activeWorkspace && <h2 className="text-lg font-heading text-slate-800">{activeWorkspace.name}</h2>}
-            </div>
+        {/* TASK INSPECT MODAL (SIMPLE) - For Subtasks */}
+        <TaskInspectModal 
+          task={inspectedTask} 
+          isOpen={!!inspectedTask} 
+          onClose={() => setInspectedTask(null)} 
+          onStatusChange={handleStatusChange} 
+          onEdit={openEditModal} 
+          onReschedule={(t) => setReschedulingTask(t)} 
+          onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }} 
+          onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }} 
+        />
 
+        {/* TASK DETAIL MODAL (LARGE) - For Main Tasks */}
+        <TaskDetailModal 
+          isOpen={!!detailTask}
+          parentTask={detailTask}
+          subTasks={tasks.filter(t => t.parent_id === detailTask?.id && !t.is_archived)}
+          currentUser={currentUser} 
+          onClose={() => setDetailTask(null)}
+          onStatusChange={handleStatusChange}
+          onAddTask={() => {
+             setEditingTask({ parent_id: detailTask?.id, workspace_id: detailTask?.workspace_id } as Task);
+             setIsNewTaskModalOpen(true);
+          }}
+          onEditTask={openEditModal}
+          onArchiveTask={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); setDetailTask(null); }} 
+          onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); setDetailTask(null); }} 
+          onInspectTask={(t) => {}}
+          onRescheduleTask={(t) => setReschedulingTask(t)}
+        />
+
+        <RescheduleModal 
+          task={reschedulingTask} 
+          isOpen={!!reschedulingTask} 
+          onClose={() => setReschedulingTask(null)} 
+          onSave={async (id, date) => { await supabase.from('tasks').update({ due_date: new Date(date).toISOString() }).eq('id', id); fetchData(); }} 
+        />
+
+        <SettingsModal 
+          isOpen={isSettingsModalOpen} 
+          onClose={() => setIsSettingsModalOpen(false)} 
+          user={currentUser} 
+          role={accountRole} 
+          notificationsEnabled={currentUser.app_settings?.notificationsEnabled ?? true} 
+          onSaveProfile={handleUpdateProfile} 
+          googleAccessToken={googleAccessToken} 
+          setGoogleAccessToken={setGoogleAccessToken}
+          currentBranding={globalBranding}
+        />
+        
+        {/* RESTRUCTURED MAIN CONTENT AREA */}
+        <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+          {/* Header */}
+          <header className="shrink-0 relative z-[65] bg-white/95 backdrop-blur-md border-b-2 border-slate-100 px-6 py-3 flex items-center justify-between">
+            <button className="p-2 border-2 border-slate-800 rounded-xl shadow-pop-active bg-white transition-all hover:-translate-y-0.5" onClick={() => setSidebarOpen(!isSidebarOpen)}>
+              {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
+            </button>
             <div className="flex items-center gap-4">
-               {/* Online Indicator */}
-               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border ${getConnectionStatus().color} bg-white border-slate-200`}>
-                  {getConnectionStatus().icon} {getConnectionStatus().label}
-               </div>
-               
-               {/* Notification Bell */}
-               <div className="relative" ref={notifDropdownRef}>
-                   <button 
-                      onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)} 
-                      className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500 relative"
-                   >
+              <button onClick={fetchData} className="group hidden md:flex items-center px-4 py-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all">
+                 <div className={`${connStatus.color} mr-2`}>{connStatus.icon}</div>
+                 <div className="flex flex-col items-start leading-none pr-3">
+                   <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">Database</span>
+                   <span className={`text-[9px] font-bold ${connStatus.color}`}>{connStatus.label}</span>
+                 </div>
+                 <RefreshCw size={12} className={`text-slate-300 ${isFetching ? 'animate-spin text-accent' : ''}`} />
+              </button>
+
+              {/* NOTIFICATION BELL */}
+              <div className="relative" ref={notifDropdownRef}>
+                 <Button 
+                   variant="ghost" 
+                   onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)} 
+                   className={`p-2 border-2 border-slate-800 rounded-xl shadow-pop-active transition-all hover:-translate-y-0.5 ${isNotifDropdownOpen ? 'bg-accent text-white' : 'bg-white'}`}
+                 >
+                   <div className="relative">
                       <Bell size={20} />
-                      {notifications.some(n => !n.is_read) && (
-                          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white" />
+                      {unreadCount > 0 && (
+                        <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] bg-red-500 rounded-full border-2 border-slate-800 text-[9px] font-black text-white flex items-center justify-center">
+                           {unreadCount > 9 ? '9+' : unreadCount}
+                        </span>
                       )}
-                   </button>
-                   {isNotifDropdownOpen && (
-                       <div className="absolute top-full right-0 mt-2 w-80 bg-white border-2 border-slate-800 rounded-xl shadow-pop z-50 overflow-hidden animate-in fade-in zoom-in-95">
-                           <div className="p-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                               <span className="text-xs font-bold text-slate-700">Notifikasi</span>
-                               <button 
-                                  onClick={() => {
-                                      const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
-                                      // Optimistic update
-                                      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-                                      // Backend update
-                                      supabase.from('notifications').update({ is_read: true }).in('id', unreadIds).then();
-                                  }} 
-                                  className="text-[10px] text-accent font-bold hover:underline"
-                               >
-                                  Tandai Dibaca
-                               </button>
-                           </div>
-                           <div className="max-h-64 overflow-y-auto scrollbar-hide">
-                               {notifications.length === 0 ? (
-                                   <div className="p-4 text-center text-slate-400 text-xs italic">Tidak ada notifikasi baru.</div>
-                               ) : (
-                                   notifications.map(n => (
-                                       <div 
-                                          key={n.id} 
-                                          onClick={() => {
-                                              if(n.metadata?.task_id) {
-                                                  const t = tasks.find(t => t.id === n.metadata.task_id);
-                                                  if(t) setInspectedTask(t);
-                                              }
-                                              setIsNotifDropdownOpen(false);
-                                          }}
-                                          className={`p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer ${!n.is_read ? 'bg-blue-50/50' : ''}`}
-                                       >
-                                           <div className="flex justify-between items-start">
-                                              <p className="text-xs font-bold text-slate-800">{n.title}</p>
-                                              <span className="text-[9px] text-slate-400">{new Date(n.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                           </div>
-                                           <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2">{n.message}</p>
-                                       </div>
-                                   ))
-                               )}
-                           </div>
-                       </div>
-                   )}
-               </div>
+                   </div>
+                 </Button>
 
-               <button onClick={() => setIsSettingsModalOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500 relative">
-                  <Settings size={20} />
-               </button>
-               
-               {currentUser && (
-                  <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer" onClick={() => setActiveTab('profile')}>
-                     <div className="text-right hidden md:block">
-                        <p className="text-xs font-bold text-slate-900">{currentUser.name}</p>
-                        {/* Display Full Email without truncation */}
-                        <p className="text-[10px] font-medium text-slate-400">{currentUser.email}</p>
-                     </div>
-                     <img src={currentUser.avatar_url} className="w-9 h-9 rounded-full border-2 border-white shadow-sm object-cover bg-slate-200" />
-                  </div>
-               )}
+                 {/* NOTIFICATION DROPDOWN */}
+                 {isNotifDropdownOpen && (
+                   <div className="absolute top-full right-0 mt-3 w-80 sm:w-96 bg-white border-4 border-slate-800 rounded-2xl shadow-pop z-50 animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[500px]">
+                      <div className="p-4 border-b-2 border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
+                         <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">Notifikasi</h3>
+                         <div className="flex gap-2">
+                            {unreadCount > 0 && (
+                              <button onClick={handleMarkAllRead} className="p-1.5 hover:bg-white rounded-lg text-slate-500 hover:text-accent transition-colors" title="Tandai semua dibaca">
+                                <Check size={16} />
+                              </button>
+                            )}
+                            {notifications.length > 0 && (
+                              <button onClick={handleDeleteAllNotifications} className="p-1.5 hover:bg-white rounded-lg text-slate-500 hover:text-red-500 transition-colors" title="Hapus semua">
+                                <Trash2 size={16} />
+                              </button>
+                            )}
+                         </div>
+                      </div>
+                      
+                      <div className="overflow-y-auto flex-1 p-2 space-y-1">
+                        {notifications.length === 0 ? (
+                           <div className="py-10 text-center flex flex-col items-center opacity-50">
+                              <Bell size={32} className="text-slate-300 mb-2" />
+                              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Tidak ada notifikasi</p>
+                           </div>
+                        ) : (
+                           notifications.map(notif => (
+                             <div 
+                               key={notif.id} 
+                               onClick={() => handleNotificationClick(notif)}
+                               className={`p-3 rounded-xl border-2 transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99] flex gap-3 items-start group ${notif.is_read ? 'bg-white border-transparent hover:border-slate-100' : 'bg-blue-50 border-blue-100 hover:border-blue-200'}`}
+                             >
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border-2 border-slate-800 ${notif.is_read ? 'bg-slate-100 text-slate-400' : 'bg-accent text-white'}`}>
+                                   <MessageSquare size={14} strokeWidth={3} />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                   <div className="flex justify-between items-start">
+                                      <p className={`text-xs font-bold ${notif.is_read ? 'text-slate-600' : 'text-slate-900'}`}>{notif.title}</p>
+                                      {!notif.is_read && <div className="w-2 h-2 bg-red-500 rounded-full shrink-0 mt-1" />}
+                                   </div>
+                                   <p className="text-[10px] font-medium text-slate-500 mt-0.5 line-clamp-2 leading-relaxed">{notif.message}</p>
+                                   <p className="text-[9px] font-bold text-slate-300 mt-2 uppercase tracking-widest">{new Date(notif.created_at).toLocaleTimeString()} • {new Date(notif.created_at).toLocaleDateString()}</p>
+                                </div>
+                             </div>
+                           ))
+                        )}
+                      </div>
+                   </div>
+                 )}
+              </div>
+
+              <Button variant="ghost" onClick={() => setIsSettingsModalOpen(true)} className="p-2 border-2 border-slate-800 rounded-xl bg-white shadow-pop-active transition-all hover:-translate-y-0.5"><Settings size={20} /></Button>
+              
+              {/* --- UPDATED PROFILE SECTION --- */}
+              <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer group" onClick={() => setActiveTab('profile')}>
+                <div className="text-right hidden sm:block">
+                  <p className="text-xs font-black text-slate-800 leading-none group-hover:text-accent transition-colors">{currentUser.name}</p>
+                  <p className="text-[9px] font-bold text-slate-400 mt-1 truncate max-w-[120px]">{currentUser.email}</p>
+                </div>
+                <div className="relative">
+                  <img src={currentUser.avatar_url} className="w-10 h-10 rounded-xl border-2 border-slate-800 bg-white shadow-pop-active transition-transform group-hover:rotate-6 object-cover" alt="Avatar" />
+                  {/* Online Indicator */}
+                  <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-quaternary border-2 border-slate-800 rounded-full z-10" title="Online"></div>
+                </div>
+              </div>
+              {/* ------------------------------- */}
+
             </div>
-         </header>
+          </header>
 
-         {/* Main Content Area */}
-         <div className="flex-1 overflow-y-auto p-4 md:p-8 scrollbar-hide">
+          {/* SCROLLABLE CONTENT AREA */}
+          <div className="flex-1 overflow-y-auto w-full p-4 px-12 max-w-[1920px] mx-auto scrollbar-hide">
             {activeTab === 'dashboard' && (
-               <Dashboard 
-                  workspaces={workspaces}
-                  tasks={tasks}
-                  currentUser={currentUser}
-                  onNavigateWorkspace={(id) => { setActiveWorkspaceId(id); setActiveTab('workspace_view'); }}
-               />
+              <Dashboard 
+                workspaces={workspaces} 
+                tasks={tasks} 
+                currentUser={currentUser}
+                onNavigateWorkspace={(id) => {
+                   setActiveWorkspaceId(id);
+                   setActiveTab('workspace_view');
+                }} 
+              />
             )}
-
-            {activeTab === 'tasks' && (
-               <div className="h-full flex flex-col gap-6">
-                  <div className="flex items-center justify-between shrink-0">
-                     <h2 className="text-3xl font-heading">My Board</h2>
-                     <Button variant="primary" onClick={() => { setIsNewTaskModalOpen(true); setEditingTask(null); }}>
-                        <Plus size={18} className="mr-2" strokeWidth={3} /> New Task
-                     </Button>
-                  </div>
-                  
-                  {/* Kanban Board View */}
-                  <div className="flex gap-6 overflow-x-auto pb-4 h-full items-start">
-                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DONE].map(status => {
-                        const columnTasks = tasks.filter(t => t.status === status && !t.is_archived && !t.parent_id);
-                        
-                        let colColor = "bg-slate-200";
-                        let colTitle = "Todo";
-                        if (status === TaskStatus.IN_PROGRESS) { colColor = "bg-blue-200"; colTitle = "In Progress"; }
-                        if (status === TaskStatus.IN_REVIEW) { colColor = "bg-pink-200"; colTitle = "In Review"; }
-                        if (status === TaskStatus.DONE) { colColor = "bg-emerald-200"; colTitle = "Done"; }
-
-                        return (
-                           <div 
-                              key={status} 
-                              className="min-w-[300px] w-[300px] flex flex-col h-full bg-slate-100/50 rounded-2xl border-2 border-slate-200"
-                              onDragOver={(e) => { e.preventDefault(); setDragOverColumn(status); }}
-                              onDrop={async (e) => {
-                                 e.preventDefault();
-                                 setDragOverColumn(null);
-                                 const taskId = e.dataTransfer.getData('taskId');
-                                 if (taskId) {
-                                    handleStatusChange(taskId, status);
-                                 }
-                              }}
-                           >
-                              <div className={`p-4 border-b-2 border-slate-200 flex justify-between items-center rounded-t-2xl ${dragOverColumn === status ? 'bg-white' : ''}`}>
-                                 <div className="flex items-center gap-2">
-                                    <div className={`w-3 h-3 rounded-full ${colColor}`} />
-                                    <span className="text-xs font-black uppercase tracking-widest text-slate-600">{colTitle}</span>
-                                 </div>
-                                 <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded text-slate-400">{columnTasks.length}</span>
-                              </div>
-                              
-                              <div className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-hide">
-                                 {columnTasks.map(task => (
-                                    <TaskItem 
-                                       key={task.id} 
-                                       task={task} 
-                                       onStatusChange={handleStatusChange} 
-                                       onClick={(t) => setInspectedTask(t)}
-                                       onDelete={handleDeleteTask}
-                                       onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
-                                       onReschedule={(t) => setReschedulingTask(t)}
-                                       onDragStart={(e) => { e.dataTransfer.setData('taskId', task.id); }}
-                                       workspaceName={workspaces.find(w => w.id === task.workspace_id)?.name}
-                                    />
-                                 ))}
-                                 {columnTasks.length === 0 && (
-                                    <div className="h-20 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 text-xs font-bold uppercase tracking-widest">
-                                       Kosong
-                                    </div>
-                                 )}
-                              </div>
-                           </div>
-                        );
-                     })}
-                  </div>
-               </div>
+            {activeTab === 'profile' && 
+              <ProfileView 
+                onLogout={handleLogout} 
+                user={currentUser} 
+                role={accountRole} 
+                setGoogleAccessToken={setGoogleAccessToken}
+                onNavigate={(id) => {
+                   setActiveWorkspaceId(id);
+                   setActiveTab('workspace_view');
+                }}
+              />
+            }
+            {activeTab === 'team' && <TeamSpace currentWorkspace={activeWorkspace} currentUser={currentUser} workspaces={workspaces} />}
+            
+            {activeTab === 'workspace_view' && activeWorkspace && (
+              <WorkspaceView 
+                workspace={activeWorkspace}
+                tasks={currentWorkspaceTasks} 
+                onAddTask={(initialData) => {
+                  setEditingTask({ workspace_id: activeWorkspaceId, ...initialData } as Task);
+                  setIsNewTaskModalOpen(true);
+                }}
+                onStatusChange={handleStatusChange}
+                onEditTask={openEditModal}
+                onDeleteTask={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+                onTaskClick={handleGlobalTaskClick} 
+              />
             )}
 
             {activeTab === 'calendar' && (
-               <CalendarView 
-                  tasks={tasks}
-                  workspaces={workspaces}
-                  onTaskClick={(t) => setInspectedTask(t)}
-                  userEmail={currentUser?.email || ''}
-                  googleAccessToken={googleAccessToken}
-                  onDayClick={(date) => { /* Handle new task on date */ }}
-                  sourceColors={sourceColors}
-                  setSourceColors={setSourceColors}
-                  visibleSources={visibleSources}
-                  setVisibleSources={setVisibleSources}
-                  googleEvents={googleEvents}
-                  setGoogleEvents={setGoogleEvents}
-                  googleCalendars={googleCalendars}
-                  setGoogleCalendars={setGoogleCalendars}
-                  categories={categories}
-                  setCategories={setCategories}
-                  activeCategories={activeCategories}
-                  setActiveCategories={setActiveCategories}
-                  categoryColors={categoryColors}
-                  setCategoryColors={setCategoryColors}
-               />
+              <CalendarView 
+                tasks={tasks} 
+                workspaces={workspaces} 
+                onTaskClick={handleGlobalTaskClick} 
+                userEmail={currentUser.email} 
+                googleAccessToken={googleAccessToken} 
+                onDayClick={(date) => {
+                  const offset = date.getTimezoneOffset();
+                  const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+                  const dateStr = localDate.toISOString();
+                  setEditingTask({ due_date: dateStr, start_date: dateStr } as Task);
+                  setIsNewTaskModalOpen(true);
+                }}
+                sourceColors={sourceColors}
+                setSourceColors={setSourceColors}
+                visibleSources={visibleSources}
+                setVisibleSources={setVisibleSources}
+                googleEvents={googleEvents}
+                setGoogleEvents={setGoogleEvents}
+                googleCalendars={googleCalendars}
+                setGoogleCalendars={setGoogleCalendars}
+                categories={categories}
+                setCategories={setCategories}
+                activeCategories={activeCategories}
+                setActiveCategories={setActiveCategories}
+                categoryColors={categoryColors}
+                setCategoryColors={setCategoryColors}
+              />
             )}
+            
+            {activeTab === 'tasks' && (
+              <div className="space-y-8 pb-20">
+                <div className="flex justify-between items-end">
+                  <div>
+                    <h2 className="text-4xl font-heading tracking-tighter">My Board</h2>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola alur kerja personal Anda</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="flex bg-white rounded-full border-2 border-slate-800 p-1 shadow-sm gap-1">
+                        <Button 
+                          variant={viewMode === 'board' ? 'primary' : 'ghost'}
+                          onClick={() => setViewMode('board')}
+                          className={`text-xs px-4 py-2 ${viewMode === 'board' ? 'shadow-none' : 'border-transparent hover:border-transparent'}`}
+                        >
+                          Board View
+                        </Button>
+                        <Button 
+                          variant={viewMode === 'table' ? 'primary' : 'ghost'}
+                          onClick={() => setViewMode('table')}
+                          className={`text-xs px-4 py-2 ${viewMode === 'table' ? 'shadow-none' : 'border-transparent hover:border-transparent'}`}
+                        >
+                          Table View
+                        </Button>
+                    </div>
+                    <Button variant="primary" onClick={openNewTaskModal} className="px-6 py-3 shadow-pop text-md font-black">+ New Task</Button>
+                  </div>
+                </div>
+                
+                {viewMode === 'board' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DONE].map(status => (
+                      <div 
+                        key={status} 
+                        className={`space-y-4 rounded-3xl p-4 transition-all duration-300 border-2 ${dragOverColumn === status ? getDragOverStyle(status) : 'border-transparent'}`}
+                        onDragOver={(e) => handleBoardDragOver(e, status)}
+                        onDragLeave={() => setDragOverColumn(null)}
+                        onDrop={(e) => handleBoardDrop(e, status)}
+                      >
+                        <div className="flex items-center justify-between border-b-2 border-slate-800 pb-2">
+                            <h3 className={`font-heading text-lg uppercase tracking-widest ${getStatusColor(status)}`}>{status.replace('_', ' ')}</h3>
+                            <span className="text-[9px] font-black bg-slate-800 text-white px-2 py-0.5 rounded-lg">
+                              {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length}
+                            </span>
+                        </div>
+                        <div className="space-y-3 min-h-[200px]">
+                          {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).map(task => (
+                            <TaskItem 
+                              key={task.id} 
+                              task={task} 
+                              onStatusChange={handleStatusChange} 
+                              onClick={handleGlobalTaskClick} 
+                              onEdit={openEditModal}
+                              onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+                              onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); fetchData(); }}
+                              onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)} 
+                              workspaceName={workspaces.find(ws => ws.id === task.workspace_id)?.name}
+                              assigneeUser={getAssigneeUser(task.assigned_to)}
+                            />
+                          ))}
+                          {tasks.filter(t => t.status === status && !t.parent_id && !t.is_archived).length === 0 && (
+                            <div className="py-10 text-center border-2 border-dashed border-slate-100 rounded-2xl opacity-50">
+                                <p className="text-[9px] font-black uppercase text-slate-300 tracking-widest italic">Belum ada task</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-white border-2 border-slate-800 rounded-3xl overflow-hidden shadow-pop">
+                      <table className="w-full text-left">
+                        <thead className="bg-slate-50 border-b-2 border-slate-100">
+                            <tr>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Task Name</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Status</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Priority</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Due Date</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400">Workspace</th>
+                              <th className="p-4 text-xs font-black uppercase tracking-widest text-slate-400 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {tasks.filter(t => !t.parent_id && !t.is_archived).map(task => (
+                              <tr key={task.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors group cursor-pointer" onClick={() => handleGlobalTaskClick(task)}>
+                                  <td className="p-4">
+                                    <p className="font-bold text-slate-800">{task.title}</p>
+                                    {task.description && <p className="text-xs text-slate-400 truncate max-w-[200px]">{task.description}</p>}
+                                  </td>
+                                  <td className="p-4">
+                                    <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${task.status === TaskStatus.DONE ? 'bg-quaternary/10 text-quaternary' : task.status === TaskStatus.IN_PROGRESS ? 'bg-blue-100 text-blue-500' : task.status === TaskStatus.IN_REVIEW ? 'bg-pink-100 text-secondary' : 'bg-slate-100 text-slate-500'}`}>
+                                        {task.status.replace('_', ' ')}
+                                    </span>
+                                  </td>
+                                  <td className="p-4">
+                                    <div className="flex items-center gap-1">
+                                        <div className={`w-2 h-2 rounded-full ${task.priority === TaskPriority.HIGH ? 'bg-secondary' : task.priority === TaskPriority.MEDIUM ? 'bg-tertiary' : 'bg-quaternary'}`} />
+                                        <span className="text-xs font-bold capitalize">{task.priority}</span>
+                                    </div>
+                                  </td>
+                                  <td className="p-4 text-sm font-bold text-slate-600">
+                                    {task.due_date ? new Date(task.due_date).toLocaleDateString() : '-'}
+                                  </td>
+                                  <td className="p-4 text-xs font-bold text-slate-500">
+                                    {workspaces.find(ws => ws.id === task.workspace_id)?.name || '-'}
+                                  </td>
+                                  <td className="p-4 text-right">
+                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={(e) => { e.stopPropagation(); openEditModal(task); }} className="p-1.5 hover:bg-white rounded border hover:border-slate-300 text-slate-400 hover:text-slate-800"><MessageSquare size={14} /></button>
+                                        <button onClick={async (e) => { e.stopPropagation(); await supabase.from('tasks').delete().eq('id', task.id); fetchData(); }} className="p-1.5 hover:bg-white rounded border hover:border-secondary text-slate-400 hover:text-secondary"><Trash2 size={14} /></button>
+                                    </div>
+                                  </td>
+                              </tr>
+                            ))}
+                            {tasks.filter(t => !t.parent_id && !t.is_archived).length === 0 && (
+                              <tr><td colSpan={6} className="p-8 text-center text-slate-400 font-bold italic">No tasks found.</td></tr>
+                            )}
+                        </tbody>
+                      </table>
+                  </div>
+                )}
 
-            {activeTab === 'team' && (
-               <TeamSpace 
-                  currentWorkspace={activeWorkspace}
-                  currentUser={currentUser}
-                  workspaces={workspaces}
-               />
+                <div className="mt-8 pt-4 border-t border-slate-200">
+                  <button 
+                    onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
+                    className="flex items-center gap-2 text-slate-400 hover:text-slate-600 transition-colors w-full"
+                  >
+                    <Archive size={16} />
+                    <span className="text-xs font-bold uppercase tracking-widest">Archived Tasks ({tasks.filter(t => t.is_archived && !t.parent_id).length})</span>
+                    <ChevronDown size={14} className={`transition-transform ${isArchiveExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {isArchiveExpanded && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4 animate-in slide-in-from-top-2">
+                      {tasks.filter(t => t.is_archived && !t.parent_id).map(task => (
+                        <div key={task.id} className="relative group opacity-70 hover:opacity-100 transition-opacity">
+                          <TaskItem 
+                            task={task} 
+                            onStatusChange={() => {}} 
+                            onClick={handleGlobalTaskClick}
+                            onEdit={openEditModal}
+                            onDelete={async (id) => { await supabase.from('tasks').delete().eq('id', id); fetchData(); }}
+                            onRestore={async (id) => { await supabase.from('tasks').update({ is_archived: false }).eq('id', id); fetchData(); }}
+                          />
+                        </div>
+                      ))}
+                      {tasks.filter(t => t.is_archived && !t.parent_id).length === 0 && (
+                        <div className="col-span-full py-4 text-center border border-dashed border-slate-200 rounded-xl">
+                          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">No archived tasks</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
-
-            {activeTab === 'workspace_view' && activeWorkspace && (
-               <WorkspaceView 
-                  workspace={activeWorkspace}
-                  tasks={activeWorkspaceTasks}
-                  onAddTask={(init) => { setEditingTask(init as Task || null); setIsNewTaskModalOpen(true); }}
-                  onStatusChange={handleStatusChange}
-                  onEditTask={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
-                  onDeleteTask={handleDeleteTask}
-                  onTaskClick={(t) => setInspectedTask(t)}
-               />
-            )}
-
-            {activeTab === 'profile' && currentUser && (
-               <ProfileView 
-                  user={currentUser}
-                  role={accountRole}
-                  onLogout={async () => { await supabase.auth.signOut(); setIsAuthenticated(false); }}
-                  setGoogleAccessToken={setGoogleAccessToken}
-                  onNavigate={(id) => { setActiveWorkspaceId(id); setActiveTab('workspace_view'); }}
-               />
-            )}
-         </div>
-      </main>
-
-      {/* MODALS */}
-      <NewTaskModal 
-         isOpen={isNewTaskModalOpen}
-         onClose={() => setIsNewTaskModalOpen(false)}
-         onSave={editingTask ? (data, calId) => handleUpdateTask({ ...data, id: editingTask.id }, calId) : handleCreateTask}
-         initialData={editingTask}
-         workspaces={workspaces}
-         googleCalendars={googleCalendars}
-         categories={categories}
-         onAddCategory={(cat) => {
-             if (!categories.includes(cat)) {
-                 setCategories(prev => [...prev, cat]);
-                 setActiveCategories(prev => [...prev, cat]);
-                 setCategoryColors(prev => ({ ...prev, [cat]: UI_PALETTE[categories.length % UI_PALETTE.length] }));
-             }
-         }}
-      />
-
-      <TaskInspectModal 
-         task={inspectedTask}
-         isOpen={!!inspectedTask}
-         onClose={() => setInspectedTask(null)}
-         onStatusChange={handleStatusChange}
-         onEdit={(t) => { setInspectedTask(null); setEditingTask(t); setIsNewTaskModalOpen(true); }}
-         onReschedule={(t) => setReschedulingTask(t)}
-         onDelete={handleDeleteTask}
-         onArchive={async (id) => { await supabase.from('tasks').update({ is_archived: true }).eq('id', id); setInspectedTask(null); }}
-      />
-
-      <SettingsModal 
-         isOpen={isSettingsModalOpen}
-         onClose={() => setIsSettingsModalOpen(false)}
-         user={currentUser!}
-         role={accountRole}
-         notificationsEnabled={true}
-         onSaveProfile={async (data, role, settings) => {
-             await supabase.from('users').update({ ...data, app_settings: settings }).eq('id', currentUser!.id);
-             // Logic to update global branding if owner...
-             if (accountRole === 'Owner' && globalBranding) {
-                 await supabase.from('app_config').update({ 
-                     app_name: settings.appName,
-                     app_logo: settings.appLogo, 
-                     app_favicon: settings.appFavicon
-                 }).eq('id', globalBranding.id);
-             }
-             fetchData();
-         }}
-         googleAccessToken={googleAccessToken}
-         setGoogleAccessToken={setGoogleAccessToken}
-         currentBranding={globalBranding}
-      />
-
-      <NewWorkspaceModal 
-         isOpen={isNewWorkspaceModalOpen}
-         onClose={() => setIsNewWorkspaceModalOpen(false)}
-         onSave={async (data) => {
-             if (data.id) {
-                 await supabase.from('workspaces').update(data).eq('id', data.id);
-             } else {
-                 await supabase.from('workspaces').insert({ ...data, owner_id: currentUser!.id });
-             }
-             fetchData();
-         }}
-         initialData={editingWorkspace}
-      />
-
-      <JoinWorkspaceModal 
-         isOpen={isJoinWorkspaceModalOpen}
-         onClose={() => setIsJoinWorkspaceModalOpen(false)}
-         onSuccess={() => { fetchData(); alert("Berhasil bergabung!"); }}
-      />
-
-      <RescheduleModal 
-         isOpen={!!reschedulingTask}
-         onClose={() => setReschedulingTask(null)}
-         task={reschedulingTask}
-         onSave={handleReschedule}
-      />
-
+          </div>
+        </main>
+      </div>
     </div>
   );
 };

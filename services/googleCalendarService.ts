@@ -71,17 +71,7 @@ export class GoogleCalendarService {
         }
       );
 
-      if (response.status === 401) {
-        console.warn("Google Calendar Token Expired or Invalid");
-        return [];
-      }
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Failed to fetch calendars (${response.status}):`, errText);
-        throw new Error(`Failed to fetch calendar list: ${response.statusText}`);
-      }
-
+      if (!response.ok) throw new Error("Failed to fetch calendar list");
       const data = await response.json();
       
       // Filter kalender yang bisa dibaca (accessRole !== "none")
@@ -96,7 +86,7 @@ export class GoogleCalendarService {
   public async fetchEvents(accessToken: string, calendarId: string = 'primary'): Promise<GoogleCalendarEvent[]> {
     try {
       const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?timeMin=${new Date().toISOString()}&maxResults=250&singleEvents=true`,
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?timeMin=${new Date().toISOString()}`,
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -104,16 +94,6 @@ export class GoogleCalendarService {
         }
       );
       
-      if (response.status === 401) {
-        console.warn(`Google Calendar Token Expired when fetching events for ${calendarId}`);
-        return [];
-      }
-
-      if (response.status === 404) {
-        console.warn(`Calendar not found or not accessible: ${calendarId}`);
-        return [];
-      }
-
       if (!response.ok) {
         throw new Error(`Failed to fetch calendar events: ${response.statusText}`);
       }
@@ -121,34 +101,21 @@ export class GoogleCalendarService {
       const data = await response.json();
       return data.items || [];
     } catch (error) {
-      console.error(`Error fetching Google Calendar events for ${calendarId}:`, error);
-      // Return empty array instead of throwing to prevent blocking Promise.all
-      return [];
+      console.error("Error fetching Google Calendar events:", error);
+      throw error;
     }
   }
 
   public async createEvent(accessToken: string, task: any, calendarId: string = 'primary'): Promise<any> {
     try {
       const isAllDay = task.is_all_day;
-      let start, end;
-
-      if (isAllDay) {
-        let startDateStr = task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0];
-        let endDateStr = task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0];
-
-        // Ensure end date is strictly after start date for all-day events (Google API requirement)
-        if (startDateStr >= endDateStr) {
-             const s = new Date(startDateStr);
-             s.setDate(s.getDate() + 1);
-             endDateStr = s.toISOString().split('T')[0];
-        }
-        
-        start = { date: startDateStr };
-        end = { date: endDateStr };
-      } else {
-        start = { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
-        end = { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
-      }
+      const start = isAllDay 
+        ? { date: task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0] }
+        : { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
+      
+      const end = isAllDay 
+        ? { date: task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0] }
+        : { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
 
       const event = {
         summary: task.title,
@@ -169,40 +136,24 @@ export class GoogleCalendarService {
         }
       );
 
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error("Google Calendar API Error (Create):", errText);
-        throw new Error(`Failed to create Google Calendar event: ${response.statusText} - ${errText}`);
-      }
+      if (!response.ok) throw new Error("Failed to create Google Calendar event");
       return await response.json();
     } catch (error) {
       console.error("Error creating Google Calendar event:", error);
-      throw error;
+      return null;
     }
   }
 
   public async updateEvent(accessToken: string, eventId: string, task: any, calendarId: string = 'primary'): Promise<any> {
     try {
       const isAllDay = task.is_all_day;
-      let start, end;
-
-      if (isAllDay) {
-        let startDateStr = task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0];
-        let endDateStr = task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0];
-
-        // Ensure end date is strictly after start date
-        if (startDateStr >= endDateStr) {
-             const s = new Date(startDateStr);
-             s.setDate(s.getDate() + 1);
-             endDateStr = s.toISOString().split('T')[0];
-        }
-        
-        start = { date: startDateStr };
-        end = { date: endDateStr };
-      } else {
-        start = { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
-        end = { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
-      }
+      const start = isAllDay 
+        ? { date: task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0] }
+        : { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
+      
+      const end = isAllDay 
+        ? { date: task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0] }
+        : { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
 
       const event = {
         summary: task.title,
@@ -223,36 +174,11 @@ export class GoogleCalendarService {
         }
       );
 
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error("Google Calendar API Error (Update):", errText);
-        throw new Error("Failed to update Google Calendar event");
-      }
+      if (!response.ok) throw new Error("Failed to update Google Calendar event");
       return await response.json();
     } catch (error) {
       console.error("Error updating Google Calendar event:", error);
-      throw error;
-    }
-  }
-
-  public async deleteEvent(accessToken: string, eventId: string, calendarId: string = 'primary'): Promise<void> {
-    try {
-      const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok && response.status !== 410) { // 410 is Gone (already deleted)
-         throw new Error(`Failed to delete event: ${response.statusText}`);
-      }
-    } catch (error) {
-      console.error("Error deleting Google Calendar event:", error);
-      throw error;
+      return null;
     }
   }
 }

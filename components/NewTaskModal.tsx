@@ -49,38 +49,30 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
 
-  // Helper untuk parsing ISO string dari DB ke format input HTML (Local Time)
-  const parseToLocalInput = (isoString?: string) => {
-    if (!isoString) return { date: '', time: '09:00' };
-    const dateObj = new Date(isoString);
-    if (isNaN(dateObj.getTime())) return { date: '', time: '09:00' };
-    
-    // Mengambil komponen lokal tahun, bulan, hari, jam, menit
-    const year = dateObj.getFullYear();
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const day = String(dateObj.getDate()).padStart(2, '0');
-    const hours = String(dateObj.getHours()).padStart(2, '0');
-    const minutes = String(dateObj.getMinutes()).padStart(2, '0');
-
-    return {
-        date: `${year}-${month}-${day}`,
-        time: `${hours}:${minutes}`
-    };
-  };
-
   useEffect(() => {
     if (initialData) {
       setTitle(initialData.title || '');
       setDescription(initialData.description || '');
       
-      const startLocal = parseToLocalInput(initialData.start_date);
-      const endLocal = parseToLocalInput(initialData.due_date);
+      let start: Date | null = null;
+      let end: Date | null = null;
+
+      try {
+        if (initialData.start_date) {
+           const d = new Date(initialData.start_date);
+           if (!isNaN(d.getTime())) start = d;
+        }
+        if (initialData.due_date) {
+           const d = new Date(initialData.due_date);
+           if (!isNaN(d.getTime())) end = d;
+        }
+      } catch (e) { console.error(e); }
       
-      setStartDate(startLocal.date);
-      setStartTime(startLocal.time);
-      setEndDate(endLocal.date);
-      setEndTime(endLocal.time);
-      
+      // When reading back, we need to convert the stored UTC time to local components for the input fields
+      setStartDate(start ? start.toLocaleDateString('en-CA') : ''); // en-CA gives YYYY-MM-DD
+      setStartTime(start ? start.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' }) : '09:00');
+      setEndDate(end ? end.toLocaleDateString('en-CA') : '');
+      setEndTime(end ? end.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' }) : '10:00');
       setIsAllDay(initialData.is_all_day ?? true);
       setPriority(initialData.priority || TaskPriority.MEDIUM);
       setTargetId(initialData.workspace_id || '');
@@ -90,13 +82,11 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
     } else {
       setTitle('');
       setDescription('');
-      
-      // Default date logic (Local Time)
-      const now = new Date();
-      const defaultDateStr = defaultDate || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-      
-      setStartDate(defaultDateStr);
-      setEndDate(defaultDateStr);
+      // For new tasks, set default dates
+      const today = new Date();
+      const initialDate = defaultDate || today.toLocaleDateString('en-CA');
+      setStartDate(initialDate);
+      setEndDate(initialDate);
       setStartTime('09:00');
       setEndTime('10:00');
       setIsAllDay(true);
@@ -126,46 +116,43 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // TIMEZONE FIX: 
-    // Konstruksi string tanggal lokal, buat objek Date, lalu convert ke ISOString (UTC)
-    // Ini memastikan jam 10:00 WIB dikirim sebagai 03:00 UTC, bukan 10:00 UTC.
+    // Construct Date objects from local input to ensure correct ISO String conversion
+    let finalStart: string;
+    let finalEnd: string;
     
-    let finalStartISO = null;
-    let finalEndISO = null;
-
-    try {
-        if (startDate) {
-            const startDateTimeStr = isAllDay ? `${startDate}T00:00:00` : `${startDate}T${startTime}:00`;
-            finalStartISO = new Date(startDateTimeStr).toISOString();
-        }
-        
-        if (endDate) {
-            const endDateTimeStr = isAllDay ? `${endDate}T23:59:59` : `${endDate}T${endTime}:00`;
-            finalEndISO = new Date(endDateTimeStr).toISOString();
-        }
-    } catch (err) {
-        console.error("Date conversion error", err);
-        // Fallback safety
-        finalStartISO = new Date().toISOString();
-        finalEndISO = new Date().toISOString();
+    if (!isAllDay) {
+      // Create date from "YYYY-MM-DD" + "HH:MM"
+      // This creates a Date object in the browser's local timezone
+      const sDate = new Date(`${startDate}T${startTime}:00`);
+      const eDate = new Date(`${endDate}T${endTime}:00`);
+      
+      // Convert to ISO string (UTC) for storage. 
+      // Example: Input 10:00 GMT+7 -> 03:00Z stored in DB.
+      // When retrieved, 03:00Z -> 10:00 GMT+7 displayed.
+      finalStart = sDate.toISOString();
+      finalEnd = eDate.toISOString();
+    } else {
+      // For All Day, we typically just want the date part, but `TIMESTAMPTZ` requires full ISO
+      // We set time to 00:00 Local and 23:59:59 Local
+      const sDate = new Date(`${startDate}T00:00:00`);
+      const eDate = new Date(`${endDate}T23:59:59`);
+      
+      finalStart = sDate.toISOString();
+      finalEnd = eDate.toISOString();
     }
-
-    // FIX: Correctly identify if targetId belongs to a Supabase Workspace
-    // Real Supabase IDs are UUIDs, so we check existence in the workspaces list rather than relying on 'ws-' prefix.
-    const isWorkspace = workspaces.some(w => w.id === targetId);
 
     onSave({
       title,
       description,
-      start_date: finalStartISO || undefined,
-      due_date: finalEndISO || undefined,
+      start_date: finalStart,
+      due_date: finalEnd,
       priority,
       is_all_day: isAllDay,
-      workspace_id: isWorkspace ? targetId : (workspaces[0]?.id || ''),
+      workspace_id: targetId.startsWith('ws-') ? targetId : (workspaces[0]?.id || ''),
       parent_id: selectedParentId || null,
       category: category,
       assigned_to: assignedTo || null
-    }, isWorkspace ? undefined : targetId); // Pass targetCalendarId ONLY if it is NOT a workspace
+    }, targetId.startsWith('ws-') ? undefined : targetId);
   };
 
   const isSubTask = !!initialData?.parent_id || !!selectedParentId;
