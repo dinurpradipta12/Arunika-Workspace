@@ -169,9 +169,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   }, [workspace.id, currentUserId]); 
 
   const fetchMembers = async () => {
+    // FIX: Added 'username' to the select query so mentions work correctly
     const { data, count } = await supabase
       .from('workspace_members')
-      .select(`id, role, user_id, users:user_id (id, name, email, avatar_url)`, { count: 'exact' })
+      .select(`id, role, user_id, users:user_id (id, name, email, username, avatar_url)`, { count: 'exact' })
       .eq('workspace_id', workspace.id);
     
     if (data) setMembers(data);
