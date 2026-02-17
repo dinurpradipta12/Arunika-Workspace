@@ -25,13 +25,15 @@ import {
   Key,
   Copy,
   Check,
-  Briefcase
+  Briefcase,
+  MessageSquare // Added
 } from 'lucide-react';
 import { Task, Workspace, TaskStatus, WorkspaceAsset } from '../types';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 import { TaskItem } from './TaskItem';
 import { supabase } from '../lib/supabase';
+import { WorkspaceChat } from './WorkspaceChat'; // IMPORTED
 
 interface WorkspaceViewProps {
   workspace: Workspace;
@@ -59,6 +61,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [modalAnchor, setModalAnchor] = useState<{ top: number, left: number } | null>(null);
   const [members, setMembers] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState<any | null>(null); // Changed to full user object logic
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [memberCount, setMemberCount] = useState(1);
   
@@ -78,13 +81,23 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [isSavingAssets, setIsSavingAssets] = useState(false);
   const [isCodeCopied, setIsCodeCopied] = useState(false);
 
+  // CHAT STATE
+  const [isChatOpen, setIsChatOpen] = useState(false);
+
   const notepadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notepadRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setCurrentUserId(data.user.id);
-    });
+    const fetchUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            setCurrentUserId(user.id);
+            // Fetch full user profile for Chat component
+            const { data } = await supabase.from('users').select('*').eq('id', user.id).single();
+            setCurrentUser(data);
+        }
+    };
+    fetchUser();
   }, []);
 
   const currentUserName = useMemo(() => {
@@ -251,9 +264,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
   const handleCardClick = (e: React.MouseEvent, type: ModalType) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    // Center logic can be adjusted, here we align roughly
     setModalAnchor({ 
-        top: rect.bottom + window.scrollY, // Position below card
+        top: rect.bottom + window.scrollY, 
         left: rect.left + window.scrollX
     });
     setActiveModal(type);
@@ -348,7 +360,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                 className="absolute bg-white border-4 border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 w-72 max-h-[400px] flex flex-col"
                 style={{ 
                     top: modalAnchor.top + 10, 
-                    left: Math.min(modalAnchor.left, window.innerWidth - 320) // Prevent overflow right
+                    left: Math.min(modalAnchor.left, window.innerWidth - 320) 
                 }}
                 onClick={(e) => e.stopPropagation()}
             >
@@ -371,6 +383,26 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     <div className="space-y-8 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
       
       {renderContextualModal()}
+
+      {/* --- OVERLAY CHAT --- */}
+      {isChatOpen && currentUser && (
+          <WorkspaceChat 
+             workspaceId={workspace.id}
+             currentUser={currentUser}
+             members={members}
+             onClose={() => setIsChatOpen(false)}
+          />
+      )}
+
+      {/* --- FLOATING CHAT BUTTON --- */}
+      <div className="fixed bottom-6 right-6 z-[60]">
+          <button 
+             onClick={() => setIsChatOpen(!isChatOpen)}
+             className={`p-4 rounded-2xl border-4 border-slate-800 shadow-pop-active transition-all hover:-translate-y-1 hover:shadow-[8px_8px_0px_0px_#1E293B] active:translate-y-0 active:shadow-none flex items-center justify-center ${isChatOpen ? 'bg-white text-slate-800' : 'bg-accent text-white'}`}
+          >
+             {isChatOpen ? <X size={24} strokeWidth={3} /> : <MessageSquare size={24} strokeWidth={3} />}
+          </button>
+      </div>
 
       {/* --- HEADER --- */}
       <div className="border-b-2 border-slate-100 pb-6">
@@ -447,8 +479,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         </div>
       </div>
 
-      {/* --- STATS GRID (NOW CLICKABLE FOR CONTEXTUAL MODAL) --- */}
+      {/* --- STATS GRID --- */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+        {/* ... stats code remains same ... */}
         <div onClick={(e) => handleCardClick(e, 'all_tasks')} className="bg-white p-4 rounded-2xl border-2 border-slate-800 shadow-pop hover:-translate-y-1 transition-all cursor-pointer group active:translate-y-0 active:shadow-none">
           <div className="flex items-center justify-between mb-2 text-slate-400">
             <div className="flex items-center gap-2"><Layout size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Total Task</span></div>

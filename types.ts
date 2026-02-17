@@ -116,6 +116,25 @@ export interface TaskComment {
   replies?: TaskComment[]; // Nested structure
 }
 
+// --- WORKSPACE CHAT TYPES ---
+export interface WorkspaceMessageRead {
+  message_id: string;
+  user_id: string;
+  read_at: string;
+  users?: { name: string; avatar_url: string };
+}
+
+export interface WorkspaceMessage {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  users?: User;
+  reads?: WorkspaceMessageRead[];
+}
+// ----------------------------
+
 export interface Notification {
   id: string;
   user_id: string;
