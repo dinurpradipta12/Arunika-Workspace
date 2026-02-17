@@ -541,6 +541,21 @@ const App: React.FC = () => {
   const handleDeleteTask = async (taskId: string) => {
     try {
         const taskToDelete = tasks.find(t => t.id === taskId);
+        
+        // --- FIX FOR 400 ERROR ---
+        if (taskId.startsWith('google-')) {
+            // If it's a google task, only delete from Google (if connected)
+            if (taskToDelete) {
+                await deleteGoogleEvent(taskToDelete);
+            }
+            // Remove from local state immediately
+            setGoogleEvents(prev => prev.filter(t => t.id !== taskId));
+            setDetailTask(null);
+            setInspectedTask(null);
+            return; // Do NOT try to delete from Supabase
+        }
+        
+        // Normal Supabase Task
         if (taskToDelete) {
             await deleteGoogleEvent(taskToDelete);
         }

@@ -12,7 +12,9 @@ import {
   Plus,
   Trash2,
   Settings as SettingsIcon,
-  X
+  X,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { Task, TaskStatus, Workspace, TaskPriority } from '../types';
 import { GoogleCalendarService, GoogleCalendar } from '../services/googleCalendarService';
@@ -84,7 +86,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   
   // Calendar Settings Modal
   const [showCalendarSettings, setShowCalendarSettings] = useState(false);
-  const [settingsPos, setSettingsPos] = useState<{top: number, left: number} | null>(null);
+  // Store 'bottom' position relative to viewport to place modal above
+  const [settingsPos, setSettingsPos] = useState<{bottom: number, left: number, alignRight?: boolean} | null>(null);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
 
   // --- HELPER DATE FUNCTIONS ---
@@ -183,11 +186,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       // Fetch user's calendars list
       let calendars = await service.fetchCalendars(googleAccessToken);
       
-      // Merge with manually added calendars that might not be in the primary fetch list
-      // (This handles the manual ID scenario if the API returns them, or if we want to force fetch from them)
-      // Since fetchCalendars returns user's list, manual IDs might need to be appended if they are public calendars
-      // We keep existing manual ones if they are not in the new list (simplified approach)
-      
+      // Merge with manually added calendars
       setGoogleCalendars(prev => {
          const newIds = new Set(calendars.map(c => c.id));
          const manualCals = prev.filter(c => !newIds.has(c.id)); // Keep manuals
@@ -250,7 +249,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     } else {
         if (settingsBtnRef.current) {
             const rect = settingsBtnRef.current.getBoundingClientRect();
-            setSettingsPos({ top: rect.bottom, left: rect.left });
+            // Calculate position ABOVE the button
+            // bottom position relative to viewport height minus the button's top position
+            const spaceFromBottom = window.innerHeight - rect.top;
+            
+            setSettingsPos({ 
+                bottom: spaceFromBottom + 10, // 10px gap above button
+                left: rect.left + (rect.width / 2),
+                alignRight: false
+            });
         }
         setShowCalendarSettings(true);
     }
@@ -435,38 +442,55 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   return (
     <div className="w-full pb-20 animate-in fade-in duration-500 space-y-6 relative">
       
-      {/* Settings Modal (Calendar Management) */}
-      {showCalendarSettings && (
+      {/* Settings Modal (Calendar Management) - POPPING UPWARDS */}
+      {showCalendarSettings && settingsPos && (
         <div className="fixed inset-0 z-[200] bg-slate-900/10 backdrop-blur-[2px]" onClick={() => setShowCalendarSettings(false)}>
             <div 
-                className="absolute bg-white border-4 border-slate-800 rounded-2xl shadow-pop z-[210] w-72 overflow-hidden animate-in zoom-in-95"
+                className="absolute bg-white border-4 border-slate-800 rounded-[28px] shadow-[8px_8px_0px_0px_#1E293B] z-[210] w-72 overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-2 origin-bottom"
                 style={{ 
-                    top: settingsPos ? settingsPos.top + 10 : '50%',
-                    left: settingsPos ? settingsPos.left : '50%',
-                    transform: settingsPos ? 'none' : 'translate(-50%, -50%)'
+                    bottom: settingsPos.bottom,
+                    left: settingsPos.left,
+                    transform: 'translateX(-50%)'
                 }}
                 onClick={(e) => e.stopPropagation()}
             >
-                <div className="p-4 bg-slate-50 border-b-2 border-slate-100 flex justify-between items-center">
-                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-800">Manage Calendars</h3>
-                    <button onClick={() => setShowCalendarSettings(false)} className="p-1 hover:bg-slate-200 rounded"><X size={14}/></button>
+                <div className="p-4 bg-tertiary border-b-4 border-slate-800 flex justify-between items-center relative">
+                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 flex items-center gap-2">
+                        <SettingsIcon size={16} /> Manage
+                    </h3>
+                    <button onClick={() => setShowCalendarSettings(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-slate-900"><X size={18} strokeWidth={3}/></button>
                 </div>
-                <div className="p-4 max-h-[300px] overflow-y-auto scrollbar-hide space-y-2">
-                    {googleCalendars.length === 0 ? <p className="text-xs text-slate-400 italic">Tidak ada kalender terhubung.</p> : googleCalendars.map(gc => (
-                        <div key={gc.id} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-lg">
-                            <div className="flex items-center gap-2 min-w-0">
-                                <div className="w-3 h-3 rounded-full border border-slate-800" style={{backgroundColor: sourceColors[gc.id]}} />
-                                <span className="text-xs font-bold text-slate-700 truncate">{gc.summary}</span>
-                            </div>
-                            <input 
-                                type="checkbox" 
-                                checked={visibleSources.includes(gc.id)} 
-                                onChange={() => toggleVisibility(gc.id)}
-                                className="w-4 h-4 rounded border border-slate-800 checked:bg-secondary cursor-pointer"
-                            />
+                <div className="p-2 max-h-[300px] overflow-y-auto scrollbar-hide space-y-1 bg-white">
+                    {googleCalendars.length === 0 ? (
+                        <div className="p-6 text-center">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tidak ada kalender</p>
                         </div>
-                    ))}
+                    ) : (
+                        googleCalendars.map(gc => (
+                            <label key={gc.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl cursor-pointer group transition-colors">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="w-4 h-4 rounded-full border-2 border-slate-800 shadow-sm" style={{backgroundColor: sourceColors[gc.id]}} />
+                                    <div className="min-w-0">
+                                        <span className="text-xs font-bold text-slate-700 truncate block">{gc.summary}</span>
+                                        <span className="text-[9px] font-bold text-slate-400 truncate block opacity-0 group-hover:opacity-100 transition-opacity">ID: {gc.id.substring(0,10)}...</span>
+                                    </div>
+                                </div>
+                                <div className="relative">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={visibleSources.includes(gc.id)} 
+                                        onChange={() => toggleVisibility(gc.id)}
+                                        className="peer sr-only"
+                                    />
+                                    <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-slate-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-quaternary border-2 border-slate-800"></div>
+                                </div>
+                            </label>
+                        ))
+                    )}
                 </div>
+                
+                {/* Decoration Arrow pointing down */}
+                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 w-5 h-5 bg-white border-b-4 border-r-4 border-slate-800 transform rotate-45 z-[-1]" />
             </div>
         </div>
       )}
@@ -605,7 +629,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     </div>
                     <input type="checkbox" checked={showPersonalTasks} onChange={() => setShowPersonalTasks(!showPersonalTasks)} className="w-4 h-4 rounded border border-slate-800 checked:bg-accent appearance-none cursor-pointer" />
                 </div>
-                {/* Google Calendars List handled by Modal now, but kept here for fallback or main visibility if needed, or we can hide it to reduce clutter as per instruction for modal usage */}
+                {/* Google Calendars List handled by Modal now */}
                 {googleCalendars.slice(0, 3).map(gc => (
                     <div key={gc.id} className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
@@ -619,7 +643,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     </div>
                 ))}
                 {googleCalendars.length > 3 && (
-                    <p className="text-[9px] text-slate-400 italic pl-1">+{googleCalendars.length - 3} lainnya (Lihat Setting)</p>
+                    <p className="text-[9px] text-slate-400 italic pl-1 cursor-pointer hover:underline hover:text-slate-600" onClick={toggleSettingsModal}>+{googleCalendars.length - 3} lainnya (Lihat Setting)</p>
                 )}
               </div>
             </div>
@@ -637,7 +661,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 ref={settingsBtnRef}
                 onClick={toggleSettingsModal}
                 disabled={!googleAccessToken}
-                className="w-12 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all flex items-center justify-center disabled:opacity-50"
+                className="w-12 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all flex items-center justify-center disabled:opacity-50 hover:bg-slate-50"
             >
                 <SettingsIcon size={20} className="text-slate-700" />
             </button>

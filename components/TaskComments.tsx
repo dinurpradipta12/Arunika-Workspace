@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { TaskComment, User, CommentReaction } from '../types';
@@ -40,6 +41,9 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   const [mentionCursorIndex, setMentionCursorIndex] = useState<number | null>(null);
 
   useEffect(() => {
+    // FIX: Do not fetch comments for Google Calendar events (they don't exist in Supabase DB)
+    if (taskId.startsWith('google-')) return;
+
     fetchComments();
     fetchWorkspaceMembers();
     
@@ -61,6 +65,9 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   }, [comments.length]);
 
   const fetchWorkspaceMembers = async () => {
+      // Prevent fetching tasks via UUID logic if ID is google- based string
+      if (taskId.startsWith('google-')) return;
+
       const { data: taskData } = await supabase.from('tasks').select('workspace_id').eq('id', taskId).single();
       if (!taskData) return;
 
@@ -75,6 +82,9 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   };
 
   const fetchComments = async () => {
+    // Prevent fetching comments if ID is google- based string
+    if (taskId.startsWith('google-')) return;
+
     try {
         const { data: commentsData, error } = await supabase
           .from('task_comments')
@@ -186,6 +196,11 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
 
   // --- SEND LOGIC (CORE) ---
   const executeSendMessage = async (finalContent: string) => {
+    if (taskId.startsWith('google-')) {
+        alert("Komentar tidak didukung untuk event Google Calendar saat ini.");
+        return;
+    }
+
     const replyTarget = replyingTo;
     const currentUserId = currentUser.id;
     const senderName = getSafeSenderName();
@@ -531,6 +546,16 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   };
 
   const canSend = content.trim().length > 0;
+
+  if (taskId.startsWith('google-')) {
+      return (
+          <div className="h-full flex flex-col items-center justify-center text-center opacity-50 p-6 bg-slate-50 border-2 border-slate-200 rounded-2xl">
+              <MessageSquare size={32} className="text-slate-300 mb-2" />
+              <p className="text-xs font-bold text-slate-400">Komentar tidak tersedia</p>
+              <p className="text-[10px] text-slate-400 mt-1 max-w-[200px]">Task ini disinkronisasi dari Google Calendar. Fitur komentar dinonaktifkan.</p>
+          </div>
+      );
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 border-2 border-slate-200 rounded-2xl overflow-hidden relative">
