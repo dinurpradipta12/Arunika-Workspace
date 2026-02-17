@@ -410,7 +410,8 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({ workspaceId, curre
                                     </div>
 
                                     {/* Bubble */}
-                                    <div className={`px-4 py-2.5 rounded-2xl border-2 border-slate-800 shadow-sm relative text-sm font-bold leading-relaxed ${isMe ? 'bg-slate-800 text-white rounded-tr-none' : `${getUserColor(msg.user_id)} rounded-tl-none`}`}>
+                                    {/* UPDATED: bg-slate-800 -> bg-accent */}
+                                    <div className={`px-4 py-2.5 rounded-2xl border-2 border-slate-800 shadow-sm relative text-sm font-bold leading-relaxed ${isMe ? 'bg-accent text-white rounded-tr-none' : `${getUserColor(msg.user_id)} rounded-tl-none`}`}>
                                         {renderContent(msg.content)}
                                     </div>
                                 </div>
