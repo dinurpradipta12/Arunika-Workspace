@@ -315,10 +315,23 @@ const App: React.FC = () => {
     }
     try {
       let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
-      const isLegacyAdmin = sessionUser.email === 'arunika@taskplay.com' || sessionUser.user_metadata?.username === 'arunika' || sessionUser.email?.includes('arunika');
+      
+      // LOGIC PENENTU SUPERUSER / ADMIN 'ARUNIKA'
+      // 1. Cek email (jika login by email)
+      // 2. Cek username dari metadata (jika login by username atau metadata ada)
+      // 3. Cek username dari tabel users (jika data ditemukan)
+      
+      const email = sessionUser.email?.toLowerCase() || '';
+      const metaUsername = sessionUser.user_metadata?.username?.toLowerCase() || '';
+      const dbUsername = data?.username?.toLowerCase() || '';
+
+      const isLegacyAdmin = 
+          email.includes('arunika') || 
+          metaUsername === 'arunika' || 
+          dbUsername === 'arunika';
 
       if (error || !data) {
-        const generatedUsername = sessionUser.email?.split('@')[0] || `user_${sessionUser.id.substring(0,6)}`;
+        const generatedUsername = email.split('@')[0] || `user_${sessionUser.id.substring(0,6)}`;
         const newUser = {
           id: sessionUser.id,
           email: sessionUser.email,
@@ -332,6 +345,7 @@ const App: React.FC = () => {
         const { data: createdData } = await supabase.from('users').upsert(newUser).select().single();
         data = createdData || newUser;
       } else if (data && isLegacyAdmin && data.status !== 'Admin') {
+        // FORCE PROMOTE IF ARUNIKA
         await supabase.from('users').update({ status: 'Admin' }).eq('id', sessionUser.id);
         data.status = 'Admin';
       }

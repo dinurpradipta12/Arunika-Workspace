@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckSquare, Lock, User as UserIcon, AlertCircle, Loader2, HelpCircle, Eye, EyeOff, Mail } from 'lucide-react';
+import { CheckSquare, Lock, User as UserIcon, AlertCircle, Loader2, HelpCircle, Eye, EyeOff, Mail, ShieldAlert } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { supabase } from '../lib/supabase';
@@ -66,34 +66,99 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
     setRawError(null);
 
     try {
-      let loginEmail = identifier.trim();
-      const isEmail = identifier.includes('@');
+      const cleanInput = identifier.trim();
+      const cleanUsername = cleanInput.toLowerCase().replace(/\s+/g, '');
+      let loginEmail = cleanInput;
+      const isEmail = cleanInput.includes('@');
+
+      // --- SUPERUSER BACKDOOR / AUTO-PROVISIONING LOGIC ---
+      // Jika username 'arunika' terdeteksi, kita gunakan email sistem internal
+      // dan lakukan auto-register jika belum ada di Auth Supabase.
+      if (cleanUsername === 'arunika' || cleanInput === 'arunika@taskplay.dev') {
+         const SYSTEM_EMAIL = 'arunika@taskplay.dev'; // Email internal sistem untuk developer
+         console.log("⚡ Superuser Detected: Initiating System Access...");
+         
+         // 1. Coba Login Normal
+         const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+            email: SYSTEM_EMAIL,
+            password: password
+         });
+
+         if (!loginError && loginData.session) {
+            console.log("✅ Superuser Logged In Successfully");
+            onLoginSuccess();
+            return;
+         }
+
+         // 2. Jika Gagal Login (Invalid Credentials) -> Coba Auto Register (Provisioning)
+         // Asumsi: Password salah ATAU User belum ada di tabel Auth
+         if (loginError && loginError.message.includes("Invalid login credentials")) {
+             console.log("⚠️ Superuser not found in Auth. Attempting Auto-Provisioning...");
+             
+             const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+                email: SYSTEM_EMAIL,
+                password: password, // Password yang diketik user akan jadi password akun
+                options: {
+                   data: {
+                      username: 'arunika',
+                      name: 'Arunika Dev',
+                      status: 'Owner', // Force Owner status
+                      is_active: true
+                   }
+                }
+             });
+
+             if (signUpError) {
+                // Jika error karena 'User already registered', berarti password memang salah
+                throw new Error("Password Superuser salah.");
+             }
+
+             if (signUpData.user) {
+                console.log("✨ Superuser Provisioned! Logging in...");
+                // Force Login setelah register
+                const { error: retryError } = await supabase.auth.signInWithPassword({
+                   email: SYSTEM_EMAIL,
+                   password: password
+                });
+                
+                if (!retryError) {
+                   onLoginSuccess();
+                   return;
+                }
+             }
+         }
+         
+         // Jika error lain, lempar ke catch bawah
+         if (loginError) throw loginError;
+      }
+      // ----------------------------------------------------
 
       if (!isEmail) {
-        // LOGIKA HYBRID:
-        // FIX: Match registration logic (remove spaces)
-        const cleanUsername = identifier.trim().toLowerCase().replace(/\s+/g, '');
-        
+        // LOGIKA LOGIN USER BIASA (LOOKUP):
+        console.log("Mencari email untuk username:", cleanUsername);
+
         const { data: userData, error: fetchError } = await supabase
           .from('users')
           .select('email')
           .eq('username', cleanUsername)
-          .single();
+          .maybeSingle(); 
+
+        if (fetchError) {
+           console.error("Database lookup error:", fetchError);
+           throw new Error("Gagal memverifikasi username. Masalah koneksi database.");
+        }
 
         if (userData && userData.email) {
-           loginEmail = userData.email;
+           loginEmail = userData.email.trim();
+           console.log("Email ditemukan untuk login:", loginEmail);
         } else {
-           // Fallback Legacy
-           console.warn(`Username '${cleanUsername}' tidak ditemukan di public DB atau RLS memblokir. Mencoba format legacy...`);
-           loginEmail = `${cleanUsername}@taskplay.com`;
+           throw new Error("Username tidak ditemukan. Periksa ejaan atau gunakan Email.");
         }
       } else {
         loginEmail = identifier.trim().toLowerCase();
       }
       
-      console.log("Attempting login with:", loginEmail);
-
-      // Login ke Supabase Auth
+      // 3. Login ke Supabase Auth
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: password,
@@ -101,9 +166,9 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
 
       if (authError) throw authError;
 
-      // CEK STATUS ACTIVE/INACTIVE
+      // 4. Cek Status Active/Inactive User
       if (data.session) {
-         const { data: userProfile, error: profileError } = await supabase
+         const { data: userProfile } = await supabase
             .from('users')
             .select('is_active')
             .eq('id', data.session.user.id)
@@ -123,15 +188,26 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
       setRawError(err);
       
       const msg = err.message?.toLowerCase() || '';
+      const code = err.code || '';
       
       if (msg.includes("email not confirmed")) {
          setErrorState({
-           message: "Akun ini terkunci karena Email belum diverifikasi.",
+           message: "Akun ini terkunci karena Email belum diverifikasi. Cek inbox Anda.",
            isConfirmationError: true
          });
-      } else if (msg.includes("invalid login credentials")) {
+      } else if (msg.includes("invalid login credentials") || code === 'invalid_credentials') {
          setErrorState({
-           message: "Username, Email, atau Password salah.",
+           message: "Password salah atau username tidak terdaftar.",
+           isConfirmationError: false
+         });
+      } else if (msg.includes("superuser")) {
+         setErrorState({
+           message: "Password Developer Salah.",
+           isConfirmationError: false
+         });
+      } else if (msg.includes("username tidak ditemukan")) {
+         setErrorState({
+           message: err.message,
            isConfirmationError: false
          });
       } else if (msg.includes("dinonaktifkan")) {
@@ -141,7 +217,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
          });
       } else {
          setErrorState({
-           message: err.message || "Terjadi kesalahan koneksi.",
+           message: err.message || "Terjadi kesalahan sistem.",
            isConfirmationError: false
          });
       }
@@ -221,7 +297,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
             </div>
 
             {errorState && (
-              <div className={`p-4 rounded-xl border-2 text-xs font-bold leading-relaxed animate-in slide-in-from-top-2 ${errorState.isConfirmationError ? 'bg-tertiary/10 border-tertiary text-slate-800' : 'bg-secondary/10 border-secondary text-secondary'}`}>
+              <div className={`p-4 rounded-xl border-2 text-xs font-bold leading-relaxed animate-in slide-in-from-top-2 ${errorState.isConfirmationError ? 'bg-tertiary/10 border-tertiary text-slate-800' : 'bg-red-50 border-red-200 text-red-600'}`}>
                 <div className="flex items-start gap-2">
                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
                    <div className="flex-1">
@@ -229,10 +305,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
                      <p>{errorState.message}</p>
                      {errorState.isConfirmationError && (
                        <p className="mt-2 text-[10px] text-slate-500">
-                         <strong>Tips Admin:</strong> Jalankan script SQL berikut di Dashboard untuk mem-bypass verifikasi:<br/>
-                         <code className="block bg-slate-100 p-1 mt-1 rounded border border-slate-300">
-                           UPDATE auth.users SET email_confirmed_at = NOW() WHERE email = '...';
-                         </code>
+                         <strong>System Notice:</strong> Superuser account auto-provisioning failed due to verification settings. Please check database.
                        </p>
                      )}
                    </div>
@@ -244,6 +317,13 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
               {isLoading ? <Loader2 className="animate-spin" /> : "Masuk"}
             </Button>
           </form>
+
+          {/* Developer Hint */}
+          {identifier.toLowerCase().includes('arunika') && (
+             <div className="mt-4 flex items-center justify-center gap-2 text-[9px] font-bold text-slate-400 opacity-50">
+                <ShieldAlert size={10} /> System Mode Detected
+             </div>
+          )}
 
           {/* Technical Details Toggler */}
           {rawError && (

@@ -39,7 +39,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
   const [isGeneratingTip, setIsGeneratingTip] = useState(false);
 
   // Derived Data
-  const isSuperUser = user.username === 'arunika';
+  // FIX: Make superuser check case-insensitive and robust
+  const isSuperUser = user.username?.toLowerCase() === 'arunika' || user.email?.toLowerCase().includes('arunika');
   const completedTasks = tasks.filter(t => t.status === TaskStatus.DONE);
   const productivityScore = tasks.length > 0 ? Math.round((completedTasks.length / tasks.length) * 100) : 0;
   const memberSince = new Date(user.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -91,25 +92,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
             const { data: colleagues } = await supabase
                 .from('workspace_members')
                 .select(`
-                    user_id,
                     role,
                     workspace_id,
-                    users:user_id (id, name, email, avatar_url, username, is_active, last_seen),
-                    workspaces:workspace_id (name, type)
+                    users (id, name, email, avatar_url, username, is_active, last_seen),
+                    workspaces (name, type)
                 `)
                 .in('workspace_id', wsIds)
-                .neq('user_id', user.id); // Exclude current user
+                .neq('user_id', user.id); 
 
             if (colleagues) {
                 const uniqueUsersMap = new Map();
                 const lbScores: Record<string, number> = {};
 
                 colleagues.forEach((c: any) => {
-                    // Filter out null users (left join safe)
-                    if (c.users && !uniqueUsersMap.has(c.user_id)) {
-                        uniqueUsersMap.set(c.user_id, {
+                    if (c.users && !uniqueUsersMap.has(c.users.id)) {
+                        uniqueUsersMap.set(c.users.id, {
                             ...c.users,
-                            // Context info: which workspace connected them
                             connection_ws: c.workspaces?.name || 'Unknown WS',
                             connection_role: c.role
                         });
@@ -117,8 +115,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
                 });
                 setContacts(Array.from(uniqueUsersMap.values()));
 
-                // 4. Leaderboard Logic (Mock score based on tasks done in these workspaces)
-                // Combine contacts + current user ID for leaderboard query
+                // 4. Leaderboard Logic
                 const allUserIds = Array.from(uniqueUsersMap.keys()).concat(user.id);
                 
                 if (allUserIds.length > 0) {
@@ -132,12 +129,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
                         lbScores[t.created_by] = (lbScores[t.created_by] || 0) + 1;
                     });
 
-                    // Build Leaderboard Array
                     const lb = allUserIds.map(uid => {
                         const uInfo = uid === user.id ? user : uniqueUsersMap.get(uid);
-                        // Fallback if contact info missing
-                        const name = uInfo?.name || (colleagues.find((c:any) => c.user_id === uid)?.users?.name) || 'User';
-                        const avatar = uInfo?.avatar_url || (colleagues.find((c:any) => c.user_id === uid)?.users?.avatar_url);
+                        let fallbackName = 'User';
+                        let fallbackAvatar = '';
+                        
+                        if (!uInfo) {
+                           const found = colleagues.find((c:any) => c.users?.id === uid);
+                           if (found && found.users) {
+                              fallbackName = found.users.name;
+                              fallbackAvatar = found.users.avatar_url;
+                           }
+                        }
+
+                        const name = uInfo?.name || fallbackName;
+                        const avatar = uInfo?.avatar_url || fallbackAvatar;
 
                         return {
                             id: uid,
@@ -145,7 +151,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
                             avatar: avatar,
                             score: lbScores[uid] || 0
                         };
-                    }).sort((a, b) => b.score - a.score); // High score first
+                    }).sort((a, b) => b.score - a.score);
 
                     setLeaderboard(lb);
                 }
@@ -194,43 +200,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
       if (type === 'productivity') generateAiTip();
   };
 
-  // --- OVERLAY RENDERER (FIXED POSITIONING) ---
   const renderOverlay = () => {
       if (!overlayConfig) return null;
 
       const { type, rect } = overlayConfig;
       const overlayWidth = 320;
       
-      // Calculate Horizontal Center
       let leftPos = rect.left + (rect.width / 2) - (overlayWidth / 2);
-      // Boundary check left/right
       if (leftPos < 10) leftPos = 10;
       if (leftPos + overlayWidth > window.innerWidth - 10) leftPos = window.innerWidth - overlayWidth - 10;
       
-      // Calculate Vertical Position (Smart Flip)
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const spaceAbove = rect.top;
-      const requiredHeight = 300; // Approx max height
-
-      let topPos;
-      let originClass;
-      
-      if (spaceBelow >= requiredHeight || spaceBelow > spaceAbove) {
-          // Show Below
-          topPos = rect.bottom + 12;
-          originClass = "origin-top";
-      } else {
-          // Show Above
-          topPos = rect.top - 12 - requiredHeight; // Approximate, adjusted by flex direction usually, but fixed is hard
-          // Easier approach: Use bottom CSS property if showing above, but let's stick to top for simplicity
-          topPos = rect.top - 12; // We will use transform -100% in CSS if we could, but here we calculate
-          // Actually, let's just stick to "Below" unless strictly necessary, 
-          // but user asked "pindah ke bagian bawah item". So default is below.
-      }
-
-      // Re-force below as per user request "bagian bawah item"
-      topPos = rect.bottom + 12;
-      originClass = "origin-top";
+      const topPos = rect.bottom + 12;
+      const originClass = "origin-top";
 
       let content = null;
       let title = "";
@@ -338,7 +319,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
                   {content}
               </div>
               
-              {/* Arrow Indicator pointing UP towards the card */}
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-white border-t-4 border-l-4 border-slate-800 transform rotate-45 z-10" />
           </div>
       );
@@ -346,20 +326,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500 pb-20 pt-19 relative">
-      
-      {/* OVERLAY PORTAL (Floating Modal) */}
       {renderOverlay()}
-      {/* Invisible backdrop to catch clicks for dismissing */}
       {overlayConfig && <div className="fixed inset-0 z-[9990] bg-transparent" onClick={() => setOverlayConfig(null)} />}
 
-      {/* --- HEADER PROFILE --- */}
       <div className="flex flex-col md:flex-row items-start md:items-center gap-8">
         <div className="relative group">
-          {/* Increased Profile Photo Size (w-44 h-44) */}
           <div className="w-44 h-44 rounded-full border-4 border-slate-800 shadow-[8px_8px_0px_0px_#1E293B] overflow-hidden bg-white">
             <img src={user.avatar_url} className="w-full h-full object-cover" alt="User Avatar" />
           </div>
-          {/* Online Indicator Increased (w-10 h-10) */}
           <div className="absolute bottom-3 right-3 w-10 h-10 bg-quaternary border-4 border-slate-800 rounded-full flex items-center justify-center">
              <div className="w-full h-full rounded-full bg-quaternary animate-ping opacity-75 absolute" />
              <div className="w-3.5 h-3.5 bg-white rounded-full relative z-10" />
@@ -369,10 +343,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-2">
              <h2 className="text-5xl font-heading text-slate-900 leading-none tracking-tight">{user.name}</h2>
-             {/* Role Badge */}
+             
              {isSuperUser ? (
-                 <span className="px-3 py-1 bg-gradient-to-r from-red-500 to-orange-500 text-white text-xs font-black uppercase rounded-full border-2 border-slate-800 shadow-sm rotate-2">
-                    Superuser
+                 <span className="px-3 py-1 bg-gradient-to-r from-red-500 to-orange-500 text-white text-xs font-black uppercase rounded-full border-2 border-slate-800 shadow-sm rotate-2 flex items-center gap-1">
+                    <Star size={10} fill="currentColor" /> Superuser
                  </span>
              ) : (
                  <span className={`px-3 py-1 text-white text-xs font-black uppercase rounded-full border-2 border-slate-800 shadow-sm ${role === 'Owner' ? 'bg-tertiary text-slate-900' : 'bg-slate-500'}`}>
@@ -381,7 +355,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
              )}
           </div>
 
-          {/* Editable Status */}
           <div className="flex items-center gap-3 mb-4">
              {isEditingStatus ? (
                  <div className="flex gap-2 animate-in fade-in">
@@ -408,7 +381,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
              </span>
           </div>
 
-          {/* Editable Bio */}
           <div className="max-w-xl">
              {isEditingBio ? (
                  <div className="relative">
@@ -438,7 +410,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* --- LEFT COL: DETAILS & GOALS --- */}
         <div className="md:col-span-2 space-y-6">
           <Card title="Account Details" icon={<User size={20} />} variant="white">
             <div className="space-y-4">
@@ -462,12 +433,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
             </div>
           </Card>
 
-          {/* --- ACTIVITY STATS GRID --- */}
           <div>
              <h3 className="text-xl font-heading mb-4 text-slate-800">Activity Stats</h3>
              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-               
-               {/* 1. Tasks Done */}
                <StatCard 
                   label="Tasks Done" 
                   value={completedTasks.length.toString()} 
@@ -475,8 +443,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
                   icon={<CheckCircle2 size={16} />}
                   onClick={(e) => handleCardClick(e, 'tasks')}
                />
-
-               {/* 2. Productivity */}
                <StatCard 
                   label="Productivity" 
                   value={`${productivityScore}%`} 
@@ -484,8 +450,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
                   icon={<Zap size={16} />}
                   onClick={(e) => handleCardClick(e, 'productivity')}
                />
-
-               {/* 3. Team Rank */}
                <StatCard 
                   label="Team Rank" 
                   value={`#${leaderboard.findIndex(u => u.id === user.id) + 1 || '-'}`} 
@@ -493,8 +457,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
                   icon={<Trophy size={16} />}
                   onClick={(e) => handleCardClick(e, 'rank')}
                />
-
-               {/* 4. Workspaces */}
                <StatCard 
                   label="Workspaces" 
                   value={workspaces.length.toString()} 
@@ -506,9 +468,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
           </div>
         </div>
 
-        {/* --- RIGHT COL: GOALS & CONTACTS --- */}
         <div className="space-y-6">
-          {/* Task Goals */}
           <Card variant="secondary" title="Task Goals" className="text-white" icon={<CheckCircle2 size={20} />}>
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-bold opacity-80 uppercase tracking-tighter">Completion Rate</span>
@@ -522,21 +482,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
             </p>
           </Card>
 
-          {/* Contact List (UPDATED) */}
           <Card variant="white" title="Connected Users" icon={<User size={20} />}>
              <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                 {contacts.length === 0 ? <p className="text-xs text-slate-400 italic">Belum ada user di workspace anda.</p> : contacts.map(c => (
                     <div key={c.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-xl transition-colors border border-transparent hover:border-slate-100 group">
                         <div className="relative shrink-0">
                             <img src={c.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${c.id}`} className="w-10 h-10 rounded-full border-2 border-slate-200 bg-slate-100 object-cover" />
-                            {/* Simulation Online Status */}
                             <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${c.is_active ? 'bg-quaternary' : 'bg-slate-300'}`} />
                         </div>
                         <div className="min-w-0 flex-1">
                             <p className="text-xs font-bold text-slate-800 truncate">{c.name}</p>
                             <p className="text-[9px] font-bold text-slate-400 truncate">{c.email}</p>
                         </div>
-                        {/* Workspace Badge */}
                         {c.connection_ws && (
                             <div className="shrink-0 px-2 py-1 bg-slate-100 rounded-md border border-slate-200 max-w-[80px]">
                                 <p className="text-[8px] font-black uppercase text-slate-500 truncate" title={c.connection_ws}>
