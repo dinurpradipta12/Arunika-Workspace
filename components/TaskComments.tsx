@@ -1,23 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { TaskComment, User, CommentReaction } from '../types';
-import { Send, MessageSquare, SmilePlus, CornerDownRight, MoreHorizontal, Trash2, X, AtSign } from 'lucide-react';
+import { Send, MessageSquare, SmilePlus, CornerDownRight, MoreHorizontal, Trash2, X, AtSign, Paperclip, Image as ImageIcon } from 'lucide-react';
 
 interface TaskCommentsProps {
   taskId: string;
   currentUser: User;
 }
 
-const EMOJI_LIST = ['👍', '❤️', '😂', '😮', '😢', '🚀', '👀', '✅'];
+const EMOJI_LIST = ['👍', '❤️', '😂', '😮', '😢', '🚀', '👀', '✅', '🔥', '🎉', '🙌', '💯'];
 
 export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser }) => {
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [content, setContent] = useState('');
   const [replyingTo, setReplyingTo] = useState<TaskComment | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Remove loading state for button as we use optimistic UI
   const [activeReactionId, setActiveReactionId] = useState<string | null>(null);
-  const [workspaceMembers, setWorkspaceMembers] = useState<any[]>([]); // Untuk cek mention
+  const [workspaceMembers, setWorkspaceMembers] = useState<any[]>([]); 
+  
+  // UI States
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // MENTION STATE
+  const [showMentionList, setShowMentionList] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionCursorIndex, setMentionCursorIndex] = useState<number | null>(null);
 
   useEffect(() => {
     fetchComments();
@@ -26,6 +37,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     // Subscribe to realtime changes
     const channel = supabase.channel(`comments-${taskId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comments', filter: `task_id=eq.${taskId}` }, (payload) => {
+          // When a new comment comes in (even if it's ours from background sync), fetch or append
           fetchComments();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comment_reactions' }, () => fetchComments())
@@ -49,7 +61,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
       // 2. Get Members
       const { data: members } = await supabase
         .from('workspace_members')
-        .select('user_id, users(id, username, name, email)')
+        .select('user_id, users(id, username, name, email, avatar_url)')
         .eq('workspace_id', taskData.workspace_id);
       
       if (members) {
@@ -122,87 +134,158 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
       return 'Teman Tim Anda'; // Fallback akhir
   };
 
+  // --- MENTION LOGIC ---
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setContent(val);
+
+    const cursorPos = e.target.selectionStart || 0;
+    const textBeforeCursor = val.slice(0, cursorPos);
+    const lastAtPos = textBeforeCursor.lastIndexOf('@');
+
+    if (lastAtPos !== -1) {
+        const textAfterAt = textBeforeCursor.slice(lastAtPos + 1);
+        // Jika tidak ada spasi setelah @, kita asumsikan sedang mengetik username
+        if (!textAfterAt.includes(' ')) {
+            setMentionQuery(textAfterAt);
+            setShowMentionList(true);
+            setMentionCursorIndex(lastAtPos);
+            return;
+        }
+    }
+    
+    // Jika tidak memenuhi kondisi, sembunyikan list
+    setShowMentionList(false);
+    setMentionCursorIndex(null);
+  };
+
+  const insertMention = (username: string) => {
+      if (mentionCursorIndex === null) return;
+
+      const beforeMention = content.slice(0, mentionCursorIndex);
+      const afterCursor = content.slice(inputRef.current?.selectionStart || 0);
+      
+      const newContent = `${beforeMention}@${username} ${afterCursor}`;
+      
+      setContent(newContent);
+      setShowMentionList(false);
+      setMentionQuery('');
+      setMentionCursorIndex(null);
+      
+      // Kembalikan fokus ke input
+      inputRef.current?.focus();
+  };
+
+  // Filter user list
+  const filteredMembers = workspaceMembers.filter(user => {
+      const search = mentionQuery.toLowerCase();
+      return (
+          user.username?.toLowerCase().includes(search) ||
+          user.name?.toLowerCase().includes(search) ||
+          user.email?.toLowerCase().includes(search)
+      );
+  });
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!content.trim()) return;
-    setLoading(true);
+    const contentToSend = content.trim();
+    if (!contentToSend) return;
 
-    try {
-      const senderName = getSafeSenderName();
-      
-      const { error, data: newComment } = await supabase.from('task_comments').insert({
-        task_id: taskId,
-        user_id: currentUser.id,
-        content: content,
-        parent_id: replyingTo?.id || null
-      }).select().single();
+    const replyTarget = replyingTo;
+    const currentUserId = currentUser.id;
+    const senderName = getSafeSenderName();
 
-      if (error) throw error;
-      
-      // 1. Handle Mentions Logic
-      // Regex matches @word
-      const mentionMatches = content.match(/@(\w+)/g);
-      if (mentionMatches && workspaceMembers.length > 0) {
-          const mentionedUsers = new Set<string>();
-          
-          mentionMatches.forEach(match => {
-              const usernameQuery = match.substring(1).toLowerCase(); // remove @
-              // Find user by username or first name
-              const targetUser = workspaceMembers.find(u => 
-                  u.username?.toLowerCase() === usernameQuery || 
-                  u.name?.toLowerCase().split(' ')[0].toLowerCase() === usernameQuery
-              );
+    // OPTIMISTIC UPDATE: Clear input immediately
+    setContent('');
+    setReplyingTo(null);
+    setShowMentionList(false);
 
-              if (targetUser && targetUser.id !== currentUser.id) {
-                  mentionedUsers.add(targetUser.id);
-              }
-          });
+    // Background Process
+    (async () => {
+        try {
+            const { error, data: newComment } = await supabase.from('task_comments').insert({
+                task_id: taskId,
+                user_id: currentUserId,
+                content: contentToSend,
+                parent_id: replyTarget?.id || null
+            }).select().single();
 
-          // Send notifications to mentioned users
-          for (const targetUserId of mentionedUsers) {
-              await supabase.from('notifications').insert({
-                  user_id: targetUserId,
-                  type: 'mention', // Tipe Baru
-                  title: 'Anda di-mention!',
-                  message: `${senderName} menandai Anda di komentar: "${content.substring(0, 30)}..."`,
-                  is_read: false,
-                  metadata: { 
-                      task_id: taskId,
-                      comment_id: newComment.id,
-                      sender_avatar: currentUser.avatar_url, // Include Avatar
-                      sender_name: senderName
-                  }
-              });
-          }
+            if (error) throw error;
+            
+            // 1. Handle Mentions Logic
+            const mentionMatches = contentToSend.match(/@(\w+)/g);
+            if (mentionMatches && workspaceMembers.length > 0) {
+                const mentionedUsers = new Set<string>();
+                
+                mentionMatches.forEach(match => {
+                    const usernameQuery = match.substring(1).toLowerCase(); 
+                    const targetUser = workspaceMembers.find(u => 
+                        u.username?.toLowerCase() === usernameQuery || 
+                        u.name?.toLowerCase().split(' ')[0].toLowerCase() === usernameQuery
+                    );
+
+                    if (targetUser && targetUser.id !== currentUserId) {
+                        mentionedUsers.add(targetUser.id);
+                    }
+                });
+
+                for (const targetUserId of mentionedUsers) {
+                    await supabase.from('notifications').insert({
+                        user_id: targetUserId,
+                        type: 'mention',
+                        title: 'Anda di-mention!',
+                        message: `${senderName} menandai Anda: "${contentToSend.substring(0, 30)}..."`,
+                        is_read: false,
+                        metadata: { 
+                            task_id: taskId,
+                            comment_id: newComment.id,
+                            sender_avatar: currentUser.avatar_url,
+                            sender_name: senderName
+                        }
+                    });
+                }
+            }
+
+            // 2. Handle Reply Notifications
+            if (replyTarget && replyTarget.user_id !== currentUserId) {
+                await supabase.from('notifications').insert({
+                    user_id: replyTarget.user_id,
+                    type: 'comment_reply',
+                    title: 'Balasan Komentar',
+                    message: `${senderName} membalas komentar Anda: "${contentToSend.substring(0, 30)}..."`,
+                    is_read: false,
+                    metadata: { 
+                        task_id: taskId,
+                        comment_id: newComment.id,
+                        sender_avatar: currentUser.avatar_url,
+                        sender_name: senderName
+                    }
+                });
+            }
+            
+            // We rely on Realtime subscription to update the UI with the *real* DB entry
+        } catch (err: any) {
+            console.error("Background send error:", err);
+            alert("Gagal mengirim komentar: " + (err.message || "Unknown error"));
+            // Restore content if failed (optional, simplified here)
+            setContent(contentToSend); 
+        }
+    })();
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files[0]) {
+          const fileName = e.target.files[0].name;
+          alert(`File dipilih: ${fileName}\n(Fitur upload sedang dalam pengembangan, simulasi UI saja)`);
+          // Clear input so same file can be selected again
+          e.target.value = '';
       }
+  };
 
-      // 2. Handle Reply Notifications (jika bukan reply ke diri sendiri)
-      if (replyingTo && replyingTo.user_id !== currentUser.id) {
-          await supabase.from('notifications').insert({
-              user_id: replyingTo.user_id,
-              type: 'comment_reply',
-              title: 'Balasan Komentar',
-              message: `${senderName} membalas komentar Anda: "${content.substring(0, 30)}${content.length > 30 ? '...' : ''}"`,
-              is_read: false,
-              metadata: { 
-                  task_id: taskId,
-                  comment_id: newComment.id,
-                  sender_avatar: currentUser.avatar_url, // Include Avatar
-                  sender_name: senderName
-              }
-          });
-      }
-
-      setContent('');
-      setReplyingTo(null);
-      await fetchComments();
-      
-    } catch (err: any) {
-      console.error(err);
-      alert("Gagal mengirim komentar: " + (err.message || "Unknown error"));
-    } finally {
-      setLoading(false);
-    }
+  const addEmoji = (emoji: string) => {
+      setContent(prev => prev + emoji);
+      setShowEmojiPicker(false);
+      inputRef.current?.focus();
   };
 
   const handleReaction = async (commentId: string, emoji: string) => {
@@ -281,6 +364,17 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
       }
   };
 
+  // Helper untuk me-render teks dengan highlight @mention
+  const renderContentWithMentions = (text: string) => {
+      const parts = text.split(/(@\w+)/g);
+      return parts.map((part, index) => {
+          if (part.startsWith('@')) {
+              return <span key={index} className="text-blue-600 font-bold">{part}</span>;
+          }
+          return part;
+      });
+  };
+
   const CommentCard = ({ comment, isReply = false }: { comment: TaskComment, isReply?: boolean }) => {
     const isOwner = comment.users?.status === 'Owner' || comment.users?.status === 'Admin';
     const isMe = comment.user_id === currentUser.id;
@@ -317,7 +411,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
             </div>
 
             <div className={`p-3 rounded-xl border-2 ${isMe ? 'bg-slate-50 border-slate-200' : 'bg-white border-slate-100'} text-sm text-slate-700 leading-relaxed font-medium relative hover:border-slate-300 transition-colors`}>
-                {comment.content}
+                {renderContentWithMentions(comment.content)}
                 
                 {isMe && (
                     <button onClick={() => handleDelete(comment.id)} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all">
@@ -328,7 +422,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
 
             <div className="flex items-center gap-3 mt-1.5 ml-1">
                 <button 
-                    onClick={() => { setReplyingTo(comment); document.getElementById('comment-input')?.focus(); }}
+                    onClick={() => { setReplyingTo(comment); inputRef.current?.focus(); }}
                     className="text-[10px] font-bold text-slate-400 hover:text-slate-800 flex items-center gap-1 transition-colors"
                 >
                     <MessageSquare size={12} /> Reply
@@ -379,8 +473,10 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     );
   };
 
+  const canSend = content.trim().length > 0;
+
   return (
-    <div className="flex flex-col h-full bg-slate-50 border-2 border-slate-200 rounded-2xl overflow-hidden">
+    <div className="flex flex-col h-full bg-slate-50 border-2 border-slate-200 rounded-2xl overflow-hidden relative">
       <div className="p-4 bg-white border-b-2 border-slate-100 flex items-center justify-between shrink-0">
          <div className="flex items-center gap-2">
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -390,7 +486,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                 {comments.length}
             </span>
          </div>
-         {/* TOMBOL HAPUS SEMUA */}
          {comments.length > 0 && (
              <button 
                 onClick={handleDeleteAll}
@@ -416,7 +511,44 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
          )}
       </div>
 
-      <div className="p-3 bg-white border-t-2 border-slate-200 shrink-0">
+      <div className="p-3 bg-white border-t-2 border-slate-200 shrink-0 relative">
+         {/* MENTION POPUP LIST */}
+         {showMentionList && (
+             <div className="absolute bottom-full left-3 right-3 mb-2 bg-white border-2 border-slate-800 rounded-xl shadow-pop z-50 overflow-hidden max-h-48 overflow-y-auto animate-in fade-in slide-in-from-bottom-2">
+                 {filteredMembers.length > 0 ? (
+                     filteredMembers.map(user => (
+                         <button
+                             key={user.id}
+                             onClick={() => insertMention(user.username || user.email.split('@')[0])}
+                             className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-3 border-b border-slate-100 last:border-0 transition-colors"
+                         >
+                             <img src={user.avatar_url} className="w-6 h-6 rounded-full border border-slate-200" alt="avatar" />
+                             <div>
+                                 <p className="text-xs font-bold text-slate-800">{user.name}</p>
+                                 <p className="text-[10px] text-slate-400">@{user.username || user.email}</p>
+                             </div>
+                         </button>
+                     ))
+                 ) : (
+                     <div className="px-4 py-3 text-xs text-slate-400 font-bold italic text-center">
+                         User tidak ditemukan.
+                     </div>
+                 )}
+             </div>
+         )}
+
+         {/* EMOJI PICKER POPUP */}
+         {showEmojiPicker && (
+             <div className="absolute bottom-full left-0 mb-2 ml-2 bg-white border-2 border-slate-800 rounded-2xl shadow-pop z-50 p-3 grid grid-cols-6 gap-2 w-64 animate-in zoom-in-95">
+                 {EMOJI_LIST.map(emoji => (
+                     <button key={emoji} onClick={() => addEmoji(emoji)} className="text-2xl hover:bg-slate-100 rounded-lg p-1 transition-colors">
+                         {emoji}
+                     </button>
+                 ))}
+                 <button onClick={() => setShowEmojiPicker(false)} className="col-span-6 mt-2 text-[10px] font-bold text-slate-400 hover:text-slate-800 border-t pt-2">Tutup</button>
+             </div>
+         )}
+
          {replyingTo && (
             <div className="flex items-center justify-between bg-slate-100 px-3 py-1.5 rounded-t-lg text-[10px] border-x border-t border-slate-200 -mb-1 relative z-10">
                <span className="flex items-center gap-1 font-bold text-slate-500">
@@ -425,21 +557,35 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                <button onClick={() => setReplyingTo(null)}><X size={12} className="text-slate-400 hover:text-red-500" /></button>
             </div>
          )}
-         <form onSubmit={handleSend} className="flex gap-2 relative z-20">
+         
+         <form onSubmit={handleSend} className="flex gap-2 relative z-20 items-end">
+            <div className="flex gap-1 pb-1">
+                {/* File Input */}
+                <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors">
+                    <Paperclip size={18} />
+                </button>
+                {/* Emoji Trigger */}
+                <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors">
+                    <SmilePlus size={18} />
+                </button>
+            </div>
+
             <input 
+               ref={inputRef}
                id="comment-input"
                className="flex-1 bg-slate-50 border-2 border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold outline-none focus:border-accent focus:bg-white transition-all placeholder:text-slate-300"
                placeholder={replyingTo ? "Tulis balasan..." : "Ketik @ untuk mention..."}
                value={content}
-               onChange={e => setContent(e.target.value)}
+               onChange={handleInputChange}
                autoComplete="off"
             />
             <button 
                type="submit" 
-               disabled={loading || !content.trim()}
-               className="w-10 h-10 bg-slate-800 text-white rounded-xl flex items-center justify-center shadow-pop-active hover:-translate-y-0.5 active:translate-y-0 transition-all disabled:opacity-50 disabled:shadow-none"
+               disabled={!canSend}
+               className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${canSend ? 'bg-[#3B82F6] text-white shadow-pop-active hover:-translate-y-0.5 active:translate-y-0' : 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'}`}
             >
-               {loading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Send size={16} />}
+               <Send size={16} />
             </button>
          </form>
       </div>

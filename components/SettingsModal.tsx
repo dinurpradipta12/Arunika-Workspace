@@ -1,10 +1,9 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, User, Settings, Bell, Calendar, Link2, 
   ChevronDown, Camera, Mail, ShieldCheck, Smartphone, RefreshCw,
   Chrome, CheckCircle2, Unlink, Key, Check, Database, Copy, Terminal,
-  ExternalLink, ZoomIn, ZoomOut, Crop, Move, Palette, Type, Image as ImageIcon, CloudSync
+  ExternalLink, ZoomIn, ZoomOut, Crop, Move, Palette, Type, Image as ImageIcon, CloudSync, Volume2
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -43,6 +42,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   
   // Personal Settings
   const [tempNotifications, setTempNotifications] = useState(false);
+  const [tempSound, setTempSound] = useState('default'); // New Sound State
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -69,8 +69,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setTempFavicon(currentBranding?.app_favicon || '');
       
       setTempNotifications(user.app_settings?.notificationsEnabled ?? true);
+      setTempSound(user.app_settings?.notificationSound || 'default');
     }
-    // Dependency array dikurangi menjadi [isOpen] saja untuk mencegah reset form saat user mengetik jika parent re-render
   }, [isOpen]);
 
   const validateAndReadImage = (file: File, callback: (base64: string) => void) => {
@@ -109,6 +109,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       appLogo: tempAppLogo,
       appFavicon: tempFavicon,
       notificationsEnabled: tempNotifications,
+      notificationSound: tempSound, // Save Sound
       // Persist connection status (boolean) so UI remembers it
       googleConnected: !!googleAccessToken || user.app_settings?.googleConnected,
       googleAccessToken: googleAccessToken || user.app_settings?.googleAccessToken
@@ -294,6 +295,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   >
                     <div className={`absolute top-0.5 w-4 h-4 rounded-full border-2 border-slate-800 bg-white transition-all ${tempNotifications ? 'left-6' : 'left-1'}`} />
                   </button>
+                </div>
+
+                {/* NEW SOUND SECTION */}
+                <div className="space-y-2 pt-2 border-t-2 border-slate-100">
+                   <label className="text-xs font-bold uppercase text-slate-500 flex items-center gap-2">
+                      <Volume2 size={16} /> Bunyi Notifikasi
+                   </label>
+                   <div className="relative">
+                      <select 
+                        value={tempSound}
+                        onChange={(e) => setTempSound(e.target.value)}
+                        className="w-full pl-4 pr-10 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-accent appearance-none transition-all cursor-pointer"
+                      >
+                         <option value="default">Default (Ding)</option>
+                         <option value="chime">Chime</option>
+                         <option value="alert">Alert</option>
+                         <option value="subtle">Subtle</option>
+                         <option value="mute">Mute (Senyap)</option>
+                      </select>
+                      <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                   </div>
                 </div>
               </div>
             )}

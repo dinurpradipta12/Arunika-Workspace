@@ -37,6 +37,7 @@ export interface User {
   app_settings?: {
     // appName, appLogo, appFavicon moved to AppConfig for global sync
     notificationsEnabled?: boolean;
+    notificationSound?: string; // New field for sound preference
     sourceColors?: Record<string, string>;
     visibleSources?: string[];
     googleAccessToken?: string; 
