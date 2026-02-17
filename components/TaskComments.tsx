@@ -93,6 +93,17 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     }
   };
 
+  // Helper untuk mendapatkan nama user yang aman
+  const getSafeSenderName = () => {
+      if (currentUser?.name && currentUser.name !== 'undefined' && currentUser.name.trim() !== '') {
+          return currentUser.name;
+      }
+      if (currentUser?.email) {
+          return currentUser.email.split('@')[0];
+      }
+      return 'Teman Tim Anda'; // Fallback akhir
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
@@ -109,7 +120,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
       if (error) throw error;
       
       if (replyingTo && replyingTo.user_id !== currentUser.id) {
-          const senderName = currentUser.name || currentUser.email?.split('@')[0] || 'Seseorang';
+          const senderName = getSafeSenderName();
           
           await supabase.from('notifications').insert({
               user_id: replyingTo.user_id,
@@ -172,7 +183,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
         }
 
         if (targetComment && targetComment.user_id !== currentUser.id) {
-            const senderName = currentUser.name || currentUser.email?.split('@')[0] || 'Seseorang';
+            const senderName = getSafeSenderName();
             
             await supabase.from('notifications').insert({
                 user_id: targetComment.user_id,

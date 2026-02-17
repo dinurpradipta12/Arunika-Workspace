@@ -11,9 +11,10 @@ interface NotificationSystemProps {
 export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentUser, onNotificationClick }) => {
   const [activePopup, setActivePopup] = useState<Notification | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  
+  // Track ID terakhir yang sudah ditampilkan agar tidak muncul double
   const lastProcessedIdRef = useRef<string | null>(null);
-  const isSubscribedRef = useRef(false);
-
+  
   // Sound effect
   useEffect(() => {
     audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
@@ -45,26 +46,26 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
   useEffect(() => {
     if (!currentUser) return;
 
-    // 1. Initial Fetch to set baseline (don't show popup for old stuff, just mark latest ID)
+    // 1. Initial Fetch: Set baseline ID (ambil notifikasi terbaru yang ada untuk acuan)
+    // Jangan tampilkan popup saat pertama load, hanya simpan ID-nya.
     const initFetch = async () => {
         const { data } = await supabase
             .from('notifications')
             .select('id')
             .eq('user_id', currentUser.id)
             .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
+            .limit(1); // HAPUS .single() UNTUK MENCEGAH 406 ERROR
         
-        if (data) {
-            lastProcessedIdRef.current = data.id;
+        if (data && data.length > 0) {
+            lastProcessedIdRef.current = data[0].id;
         }
     };
     initFetch();
 
-    // 2. Realtime Subscription
-    console.log("Notification System: Subscribing for user", currentUser.id);
+    // 2. Realtime Subscription (WebSocket)
+    // Ini jalur utama. Jika database di-setup benar (REPLICA IDENTITY & PUBLICATION), ini akan instan.
     const channel = supabase
-      .channel(`popup-notif-${currentUser.id}-${Date.now()}`) // Unique channel name
+      .channel(`popup-notif-${currentUser.id}-${Date.now()}`)
       .on(
         'postgres_changes',
         {
@@ -78,34 +79,33 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
           showPopup(payload.new as Notification);
         }
       )
-      .subscribe((status) => {
-          console.log("Notification Subscription Status:", status);
-          isSubscribedRef.current = (status === 'SUBSCRIBED');
-      });
+      .subscribe();
 
-    // 3. Fallback Polling (Every 5 seconds)
-    // Ensures notifications arrive even if WebSocket drops or RLS delays the event
+    // 3. Fast Polling (Fallback) - Interval 2 Detik
+    // Mengatasi jika Realtime macet atau RLS memblokir stream WebSocket.
     const intervalId = setInterval(async () => {
         if (!currentUser) return;
         
-        // Fetch the very latest notification
+        // Fetch notifikasi terbaru yang BELUM DIBACA
+        // Menggunakan .limit(1) tanpa .single() agar return array (kosong [] jika tidak ada data)
+        // Ini memperbaiki error 406 (Not Acceptable)
         const { data, error } = await supabase
             .from('notifications')
             .select('*')
             .eq('user_id', currentUser.id)
-            .eq('is_read', false) // Only unread
+            .eq('is_read', false) 
             .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
+            .limit(1);
 
-        if (data && !error) {
-            // If this is a NEW notification we haven't shown yet
-            if (data.id !== lastProcessedIdRef.current) {
-                console.log("Polling found new notification:", data);
-                showPopup(data as Notification);
+        if (data && data.length > 0) {
+            const latestNotif = data[0];
+            // Jika ID notifikasi beda dengan yang terakhir diproses, berarti ini BARU
+            if (latestNotif.id !== lastProcessedIdRef.current) {
+                console.log("Polling found new notification:", latestNotif);
+                showPopup(latestNotif as Notification);
             }
         }
-    }, 5000); // Check every 5 seconds
+    }, 2000); // Cek setiap 2 detik (Lebih Cepat)
 
     return () => {
       supabase.removeChannel(channel);
