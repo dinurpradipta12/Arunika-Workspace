@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { TaskComment, User, CommentReaction } from '../types';
@@ -99,15 +98,31 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     setLoading(true);
 
     try {
-      const { error } = await supabase.from('task_comments').insert({
+      const { error, data: newComment } = await supabase.from('task_comments').insert({
         task_id: taskId,
         user_id: currentUser.id,
         content: content,
         parent_id: replyingTo?.id || null
-      });
+      }).select().single();
 
       if (error) throw error;
       
+      // --- NOTIFICATION LOGIC FOR REPLY ---
+      // If replying to someone else, send them a notification
+      if (replyingTo && replyingTo.user_id !== currentUser.id) {
+          await supabase.from('notifications').insert({
+              user_id: replyingTo.user_id,
+              type: 'comment_reply',
+              title: 'Balasan Komentar',
+              message: `${currentUser.name} membalas komentar Anda: "${content.substring(0, 30)}${content.length > 30 ? '...' : ''}"`,
+              is_read: false,
+              metadata: { 
+                  task_id: taskId,
+                  comment_id: newComment.id 
+              }
+          });
+      }
+
       setContent('');
       setReplyingTo(null);
       
@@ -135,13 +150,50 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
         .single();
 
       if (existing) {
+        // REMOVE REACTION
         await supabase.from('task_comment_reactions').delete().eq('id', existing.id);
       } else {
+        // ADD REACTION
         await supabase.from('task_comment_reactions').insert({
           comment_id: commentId,
           user_id: currentUser.id,
           emoji
         });
+
+        // --- NOTIFICATION LOGIC FOR REACTION ---
+        // Find the target comment to get the author ID
+        let targetComment: TaskComment | undefined;
+        
+        // Search in root comments
+        targetComment = comments.find(c => c.id === commentId);
+        
+        // If not found, search in replies
+        if (!targetComment) {
+            for (const c of comments) {
+                if (c.replies) {
+                    const foundReply = c.replies.find(r => r.id === commentId);
+                    if (foundReply) {
+                        targetComment = foundReply;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Send notification if commenting on someone else's comment
+        if (targetComment && targetComment.user_id !== currentUser.id) {
+            await supabase.from('notifications').insert({
+                user_id: targetComment.user_id,
+                type: 'reaction',
+                title: 'Reaksi Baru',
+                message: `${currentUser.name} memberikan reaksi ${emoji} pada komentar Anda: "${targetComment.content.substring(0, 25)}${targetComment.content.length > 25 ? '...' : ''}"`,
+                is_read: false,
+                metadata: { 
+                    task_id: taskId,
+                    comment_id: commentId 
+                }
+            });
+        }
       }
       // Optimistic update or fetch
       fetchComments();

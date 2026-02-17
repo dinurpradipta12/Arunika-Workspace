@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
@@ -21,7 +20,9 @@ import {
   MessageSquare,
   Layout,
   Table as TableIcon,
-  ChevronDown
+  ChevronDown,
+  CheckCircle2,
+  ArrowRight
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -426,7 +427,7 @@ const App: React.FC = () => {
       configChannelRef.current = supabase.channel('app-config-live').on('postgres_changes', { event: '*', schema: 'public', table: 'app_config', filter: 'id=eq.1'}, (payload) => { setGlobalBranding(payload.new as AppConfig); }).subscribe();
 
       if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
-      notificationChannelRef.current = supabase.channel(`notifications:${currentUser.id}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}`}, (payload) => { const newNotif = payload.new as Notification; setNotifications(prev => [newNotif, ...prev]); setCurrentNotification(newNotif); setTimeout(() => setCurrentNotification(null), 5000); }).subscribe();
+      notificationChannelRef.current = supabase.channel(`notifications:${currentUser.id}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}`}, (payload) => { const newNotif = payload.new as Notification; setNotifications(prev => [newNotif, ...prev]); setCurrentNotification(newNotif); setTimeout(() => setCurrentNotification(null), 8000); }).subscribe();
 
       if (userStatusChannelRef.current) supabase.removeChannel(userStatusChannelRef.current);
       userStatusChannelRef.current = supabase.channel(`user-status-${currentUser.id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}`}, (payload: any) => { if (payload.new.is_active === false) { setIsAccountLocked(true); setCurrentUser(prev => prev ? { ...prev, is_active: false } : null); } else if (payload.new.is_active === true) { setIsAccountLocked(false); setCurrentUser(prev => prev ? { ...prev, is_active: true } : null); } }).subscribe();
@@ -620,12 +621,48 @@ const App: React.FC = () => {
   };
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
+    const targetTask = tasks.find(t => t.id === id);
+    if (!targetTask) return;
+
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+    
     // If detail modal is open, update its status too
     if (detailTask && detailTask.id === id) {
         setDetailTask(prev => prev ? ({ ...prev, status }) : null);
     }
-    try { await supabase.from('tasks').update({ status }).eq('id', id); } catch (err) { fetchData(); }
+    
+    try { 
+      await supabase.from('tasks').update({ status }).eq('id', id); 
+
+      // BROADCAST NOTIFICATION IF TASK IS DONE
+      if (status === TaskStatus.DONE && currentUser) {
+          // 1. Get Workspace Members
+          const { data: members } = await supabase
+              .from('workspace_members')
+              .select('user_id')
+              .eq('workspace_id', targetTask.workspace_id);
+          
+          if (members && members.length > 0) {
+              const notificationsToInsert = members
+                  .filter(m => m.user_id !== currentUser.id) // Notify everyone except self
+                  .map(m => ({
+                      user_id: m.user_id,
+                      type: 'task_completed',
+                      title: 'Task Selesai ✅',
+                      message: `${currentUser.name} menyelesaikan task: "${targetTask.title}"`,
+                      is_read: false,
+                      metadata: { task_id: id, workspace_id: targetTask.workspace_id }
+                  }));
+
+              if (notificationsToInsert.length > 0) {
+                  await supabase.from('notifications').insert(notificationsToInsert);
+              }
+          }
+      }
+    } catch (err) { 
+      fetchData(); 
+      console.error("Status update error", err);
+    }
   };
 
   const handleBoardDragOver = (e: React.DragEvent, status: TaskStatus) => { e.preventDefault(); setDragOverColumn(status); };
@@ -776,27 +813,31 @@ const App: React.FC = () => {
     // CHANGED: h-full to h-screen to force viewport height and fix sticky scrolling issues
     <div className="h-screen w-full bg-background overflow-hidden flex justify-center">
       
-      {/* --- TOAST NOTIFICATION POPUP --- */}
+      {/* --- DYNAMIC ISLAND NOTIFICATION POPUP --- */}
       {currentNotification && (
         <div 
-          onClick={() => handleNotificationClick(currentNotification)}
-          className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] animate-in slide-in-from-top-4 duration-500 cursor-pointer"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex justify-center w-full pointer-events-none"
         >
-           <div className="bg-white border-4 border-slate-800 rounded-2xl shadow-pop p-4 flex items-start gap-4 max-w-sm transition-transform hover:scale-105">
-              <div className="w-12 h-12 bg-accent rounded-xl border-2 border-slate-800 flex items-center justify-center text-white shrink-0 shadow-sm">
-                 <Bell size={24} />
+           <div 
+             onClick={() => handleNotificationClick(currentNotification)}
+             className="pointer-events-auto cursor-pointer bg-black text-white rounded-full px-6 py-3 shadow-2xl flex items-center gap-4 animate-in slide-in-from-top-4 zoom-in-95 duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] min-w-[320px] max-w-md justify-between hover:scale-105 transition-transform"
+           >
+              <div className="flex items-center gap-3">
+                 <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                    {currentNotification.type === 'task_completed' ? (
+                       <CheckCircle2 size={16} className="text-quaternary" />
+                    ) : (
+                       <Bell size={16} className="text-white" />
+                    )}
+                 </div>
+                 <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-white/60 uppercase tracking-widest leading-none mb-0.5">{currentNotification.title}</span>
+                    <span className="text-xs font-bold text-white truncate max-w-[200px]">{currentNotification.message}</span>
+                 </div>
               </div>
-              <div className="flex-1">
-                 <h4 className="text-sm font-black text-slate-900">{currentNotification.title}</h4>
-                 <p className="text-xs font-bold text-slate-500 mt-1">{currentNotification.message}</p>
-                 <span className="text-[9px] font-black text-accent uppercase tracking-widest mt-2 block">Klik untuk melihat</span>
+              <div className="w-8 h-8 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors" onClick={(e) => { e.stopPropagation(); setCurrentNotification(null); }}>
+                 <X size={14} className="text-white/50" />
               </div>
-              <button 
-                 onClick={(e) => { e.stopPropagation(); setCurrentNotification(null); }} 
-                 className="text-slate-400 hover:text-slate-600 p-1"
-              >
-                 <X size={18} />
-              </button>
            </div>
         </div>
       )}
