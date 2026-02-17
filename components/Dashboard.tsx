@@ -4,8 +4,7 @@ import {
   PieChart, 
   Pie, 
   Cell,
-  Tooltip, 
-  ResponsiveContainer 
+  Tooltip
 } from 'recharts';
 import { 
   Play, 
@@ -737,28 +736,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {/* 4. Chart: Status (Moved Here) */}
             <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-row items-center gap-6 min-h-[180px]">
-                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem]" style={{ width: 144, height: 144 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <Pie
-                                data={statusCounts}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={35} 
-                                outerRadius={65} 
-                                paddingAngle={5}
-                                dataKey="value"
-                            >
-                                {statusCounts.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={STATUS_COLORS[index % STATUS_COLORS.length]} strokeWidth={2} stroke="#1E293B" />
-                                ))}
-                            </Pie>
-                            <Tooltip 
-                                contentStyle={{ borderRadius: '12px', border: '2px solid #1E293B', boxShadow: '4px 4px 0px 0px #1E293B', fontWeight: 'bold' }}
-                                itemStyle={{ fontSize: '10px' }}
-                            />
-                        </PieChart>
-                    </ResponsiveContainer>
+                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem] flex items-center justify-center">
+                    <PieChart width={144} height={144}>
+                        <Pie
+                            data={statusCounts}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={35} 
+                            outerRadius={65} 
+                            paddingAngle={5}
+                            dataKey="value"
+                        >
+                            {statusCounts.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={STATUS_COLORS[index % STATUS_COLORS.length]} strokeWidth={2} stroke="#1E293B" />
+                            ))}
+                        </Pie>
+                        <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: '2px solid #1E293B', boxShadow: '4px 4px 0px 0px #1E293B', fontWeight: 'bold' }}
+                            itemStyle={{ fontSize: '10px' }}
+                        />
+                    </PieChart>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                         <Target size={24} className="text-slate-300" />
                     </div>
@@ -782,28 +779,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {/* 5. Chart: Priority (Moved Here) */}
             <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-row items-center gap-6 min-h-[180px]">
-                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem]" style={{ width: 144, height: 144 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <Pie
-                                data={priorityCounts}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={35} 
-                                outerRadius={65} 
-                                paddingAngle={5}
-                                dataKey="value"
-                            >
-                                {priorityCounts.map((entry, index) => (
-                                    <Cell key={`cell-p-${index}`} fill={PRIORITY_COLORS[index % PRIORITY_COLORS.length]} strokeWidth={2} stroke="#1E293B" />
-                                ))}
-                            </Pie>
-                            <Tooltip 
-                                contentStyle={{ borderRadius: '12px', border: '2px solid #1E293B', boxShadow: '4px 4px 0px 0px #1E293B', fontWeight: 'bold' }}
-                                itemStyle={{ fontSize: '10px' }}
-                            />
-                        </PieChart>
-                    </ResponsiveContainer>
+                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem] flex items-center justify-center">
+                    <PieChart width={144} height={144}>
+                        <Pie
+                            data={priorityCounts}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={35} 
+                            outerRadius={65} 
+                            paddingAngle={5}
+                            dataKey="value"
+                        >
+                            {priorityCounts.map((entry, index) => (
+                                <Cell key={`cell-p-${index}`} fill={PRIORITY_COLORS[index % PRIORITY_COLORS.length]} strokeWidth={2} stroke="#1E293B" />
+                            ))}
+                        </Pie>
+                        <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: '2px solid #1E293B', boxShadow: '4px 4px 0px 0px #1E293B', fontWeight: 'bold' }}
+                            itemStyle={{ fontSize: '10px' }}
+                        />
+                    </PieChart>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                         <Flag size={24} className="text-slate-300" />
                     </div>

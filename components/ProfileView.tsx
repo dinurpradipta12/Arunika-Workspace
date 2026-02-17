@@ -94,8 +94,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, user, role, 
                     user_id,
                     role,
                     workspace_id,
-                    users (id, name, email, avatar_url, username, is_active, last_seen),
-                    workspaces (name, type)
+                    users:user_id (id, name, email, avatar_url, username, is_active, last_seen),
+                    workspaces:workspace_id (name, type)
                 `)
                 .in('workspace_id', wsIds)
                 .neq('user_id', user.id); // Exclude current user
