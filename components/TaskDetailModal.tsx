@@ -152,46 +152,47 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     >
       {/* Outer Flex Container: Increased Padding to px-16 */}
       <div 
-        className="flex h-[85vh] w-full max-w-[98vw] items-center justify-center relative transition-all duration-500 px-4 md:p-16"
+        className="flex h-[85vh] w-full max-w-[98vw] items-center justify-center transition-all duration-500 px-4 md:p-16"
         onClick={(e) => e.stopPropagation()} 
       >
         
-        {/* --- EXTERNAL FLOATING ELEMENTS --- */}
-        
-        {/* 1. Close Button (Top Right Outside) */}
-        <button 
-            onClick={onClose} 
-            className="absolute -top-14 -right-2 z-[70] p-3 bg-white text-slate-800 border-2 border-slate-800 rounded-full hover:bg-slate-800 hover:text-white shadow-pop-active hover:scale-110 transition-all"
-            title="Tutup Modal"
-        >
-            <X size={24} strokeWidth={3} />
-        </button>
+        {/* WRAPPER RELATIVE UTAMA UNTUK MODAL DETAIL (Agar label & close button menempel) */}
+        <div className="relative flex-1 h-full min-w-0 flex flex-col z-30">
+            
+            {/* 1. Close Button (Hugging the Corner) */}
+            <button 
+                onClick={onClose} 
+                className="absolute -top-5 -right-5 z-[70] p-2 bg-white text-slate-800 border-4 border-slate-800 rounded-full hover:bg-slate-800 hover:text-white shadow-pop-active hover:scale-110 transition-all"
+                title="Tutup Modal"
+            >
+                <X size={20} strokeWidth={4} />
+            </button>
 
-        {/* 2. Priority Label (Top Left Outside) */}
-        <div className={`absolute -top-10 left-16 z-[60] px-5 py-2 rounded-t-2xl border-x-2 border-t-2 border-slate-800 ${parentPriorityConfig.bg} text-white shadow-sm flex items-center gap-2`}>
-            <Flag size={14} strokeWidth={3} />
-            <span className="text-xs font-black uppercase tracking-widest">{parentPriorityConfig.text}</span>
-        </div>
+            {/* 2. Priority Label (Tab Style attached to top border) */}
+            <div className={`absolute -top-[38px] left-8 z-[60] px-5 py-2 rounded-t-xl border-x-4 border-t-4 border-b-0 border-slate-800 ${parentPriorityConfig.bg} text-white shadow-none flex items-center gap-2 h-10`}>
+                <Flag size={14} strokeWidth={3} />
+                <span className="text-xs font-black uppercase tracking-widest">{parentPriorityConfig.text}</span>
+            </div>
 
-
-        {/* MAIN MODAL - Task Detail */}
-        <div className="bg-white border-4 border-slate-800 rounded-3xl rounded-tl-none shadow-[16px_16px_0px_0px_#1E293B] h-full flex-1 min-w-0 overflow-hidden flex flex-col animate-in zoom-in-95 duration-500 ease-out relative z-30">
-            <div className="flex-1 overflow-y-auto p-6 md:p-8">
-                <TaskDetailView 
-                    parentTask={parentTask}
-                    subTasks={subTasks}
-                    currentUser={currentUser} // Pass passed prop
-                    onBack={onClose} 
-                    onStatusChange={onStatusChange}
-                    onAddTask={onAddTask}
-                    onEditTask={onEditTask}
-                    onArchiveTask={onArchiveTask}
-                    onDeleteTask={onDeleteTask}
-                    priorityFilter="all"
-                    onPriorityFilterChange={() => {}}
-                    onInspectTask={handleInternalInspect} 
-                    onRescheduleTask={onRescheduleTask}
-                />
+            {/* MAIN MODAL - Task Detail */}
+            <div className="bg-white border-4 border-slate-800 rounded-3xl rounded-tl-none shadow-[16px_16px_0px_0px_#1E293B] h-full overflow-hidden flex flex-col animate-in zoom-in-95 duration-500 ease-out relative">
+                <div className="flex-1 overflow-y-auto p-6 md:p-8 pt-10">
+                    <TaskDetailView 
+                        parentTask={parentTask}
+                        subTasks={subTasks}
+                        currentUser={currentUser} // Pass passed prop
+                        onBack={onClose} 
+                        onStatusChange={onStatusChange}
+                        onAddTask={onAddTask}
+                        onEditTask={onEditTask}
+                        onArchiveTask={onArchiveTask}
+                        onDeleteTask={onDeleteTask}
+                        priorityFilter="all"
+                        onPriorityFilterChange={() => {}}
+                        onInspectTask={handleInternalInspect} 
+                        onRescheduleTask={onRescheduleTask}
+                    />
+                </div>
             </div>
         </div>
 

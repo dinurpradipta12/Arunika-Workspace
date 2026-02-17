@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { TaskComment, User, CommentReaction } from '../types';
-import { Send, MessageSquare, SmilePlus, CornerDownRight, MoreHorizontal, Trash2, X, AtSign, Paperclip, Image as ImageIcon } from 'lucide-react';
+import { Send, MessageSquare, SmilePlus, CornerDownRight, MoreHorizontal, Trash2, X, AtSign, Paperclip, Image as ImageIcon, Download, ExternalLink } from 'lucide-react';
 
 interface TaskCommentsProps {
   taskId: string;
@@ -14,7 +14,16 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [content, setContent] = useState('');
   const [replyingTo, setReplyingTo] = useState<TaskComment | null>(null);
-  // Remove loading state for button as we use optimistic UI
+  
+  // Image Upload State
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [imageCaption, setImageCaption] = useState('');
+  const [isSendingImage, setIsSendingImage] = useState(false);
+
+  // Image Viewer State (Lightbox)
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
+
   const [activeReactionId, setActiveReactionId] = useState<string | null>(null);
   const [workspaceMembers, setWorkspaceMembers] = useState<any[]>([]); 
   
@@ -37,7 +46,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     // Subscribe to realtime changes
     const channel = supabase.channel(`comments-${taskId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comments', filter: `task_id=eq.${taskId}` }, (payload) => {
-          // When a new comment comes in (even if it's ours from background sync), fetch or append
           fetchComments();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comment_reactions' }, () => fetchComments())
@@ -47,18 +55,15 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   }, [taskId]);
 
   useEffect(() => {
-    // Auto scroll to bottom when new comments arrive
     if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [comments.length]);
 
   const fetchWorkspaceMembers = async () => {
-      // 1. Get Workspace ID from Task
       const { data: taskData } = await supabase.from('tasks').select('workspace_id').eq('id', taskId).single();
       if (!taskData) return;
 
-      // 2. Get Members
       const { data: members } = await supabase
         .from('workspace_members')
         .select('user_id, users(id, username, name, email, avatar_url)')
@@ -73,17 +78,11 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     try {
         const { data: commentsData, error } = await supabase
           .from('task_comments')
-          .select(`
-            *,
-            users (id, name, email, avatar_url, status)
-          `)
+          .select(`*, users (id, name, email, avatar_url, status)`)
           .eq('task_id', taskId)
           .order('created_at', { ascending: true });
 
-        if (error) {
-          console.error("Error fetching comments:", error);
-          return;
-        }
+        if (error) return;
 
         if (!commentsData || commentsData.length === 0) {
           setComments([]);
@@ -123,7 +122,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     }
   };
 
-  // Helper untuk mendapatkan nama user yang aman
   const getSafeSenderName = () => {
       if (currentUser?.name && currentUser.name !== 'undefined' && currentUser.name.trim() !== '') {
           return currentUser.name;
@@ -131,7 +129,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
       if (currentUser?.email) {
           return currentUser.email.split('@')[0];
       }
-      return 'Teman Tim Anda'; // Fallback akhir
+      return 'Teman Tim Anda'; 
   };
 
   // --- MENTION LOGIC ---
@@ -145,7 +143,6 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
 
     if (lastAtPos !== -1) {
         const textAfterAt = textBeforeCursor.slice(lastAtPos + 1);
-        // Jika tidak ada spasi setelah @, kita asumsikan sedang mengetik username
         if (!textAfterAt.includes(' ')) {
             setMentionQuery(textAfterAt);
             setShowMentionList(true);
@@ -154,29 +151,22 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
         }
     }
     
-    // Jika tidak memenuhi kondisi, sembunyikan list
     setShowMentionList(false);
     setMentionCursorIndex(null);
   };
 
   const insertMention = (username: string) => {
       if (mentionCursorIndex === null) return;
-
       const beforeMention = content.slice(0, mentionCursorIndex);
       const afterCursor = content.slice(inputRef.current?.selectionStart || 0);
-      
       const newContent = `${beforeMention}@${username} ${afterCursor}`;
-      
       setContent(newContent);
       setShowMentionList(false);
       setMentionQuery('');
       setMentionCursorIndex(null);
-      
-      // Kembalikan fokus ke input
       inputRef.current?.focus();
   };
 
-  // Filter user list
   const filteredMembers = workspaceMembers.filter(user => {
       const search = mentionQuery.toLowerCase();
       return (
@@ -186,19 +176,30 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
       );
   });
 
+  // --- SEND LOGIC (TEXT) ---
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const contentToSend = content.trim();
     if (!contentToSend) return;
+    executeSendMessage(contentToSend);
+  };
 
+  // --- SEND LOGIC (CORE) ---
+  const executeSendMessage = async (finalContent: string) => {
     const replyTarget = replyingTo;
     const currentUserId = currentUser.id;
     const senderName = getSafeSenderName();
 
-    // OPTIMISTIC UPDATE: Clear input immediately
+    // Reset UI State immediately (Optimistic)
     setContent('');
     setReplyingTo(null);
     setShowMentionList(false);
+    
+    // Reset Image State if any
+    setPreviewUrl(null);
+    setSelectedFile(null);
+    setImageCaption('');
+    setIsSendingImage(false);
 
     // Background Process
     (async () => {
@@ -206,24 +207,22 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
             const { error, data: newComment } = await supabase.from('task_comments').insert({
                 task_id: taskId,
                 user_id: currentUserId,
-                content: contentToSend,
+                content: finalContent,
                 parent_id: replyTarget?.id || null
             }).select().single();
 
             if (error) throw error;
             
             // 1. Handle Mentions Logic
-            const mentionMatches = contentToSend.match(/@(\w+)/g);
+            const mentionMatches = finalContent.match(/@(\w+)/g);
             if (mentionMatches && workspaceMembers.length > 0) {
                 const mentionedUsers = new Set<string>();
-                
                 mentionMatches.forEach(match => {
                     const usernameQuery = match.substring(1).toLowerCase(); 
                     const targetUser = workspaceMembers.find(u => 
                         u.username?.toLowerCase() === usernameQuery || 
                         u.name?.toLowerCase().split(' ')[0].toLowerCase() === usernameQuery
                     );
-
                     if (targetUser && targetUser.id !== currentUserId) {
                         mentionedUsers.add(targetUser.id);
                     }
@@ -234,7 +233,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                         user_id: targetUserId,
                         type: 'mention',
                         title: 'Anda di-mention!',
-                        message: `${senderName} menandai Anda: "${contentToSend.substring(0, 30)}..."`,
+                        message: `${senderName} menandai Anda: "${finalContent.substring(0, 30)}..."`,
                         is_read: false,
                         metadata: { 
                             task_id: taskId,
@@ -252,7 +251,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                     user_id: replyTarget.user_id,
                     type: 'comment_reply',
                     title: 'Balasan Komentar',
-                    message: `${senderName} membalas komentar Anda: "${contentToSend.substring(0, 30)}..."`,
+                    message: `${senderName} membalas komentar Anda: "${finalContent.substring(0, 30)}..."`,
                     is_read: false,
                     metadata: { 
                         task_id: taskId,
@@ -262,24 +261,64 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                     }
                 });
             }
-            
-            // We rely on Realtime subscription to update the UI with the *real* DB entry
         } catch (err: any) {
             console.error("Background send error:", err);
             alert("Gagal mengirim komentar: " + (err.message || "Unknown error"));
-            // Restore content if failed (optional, simplified here)
-            setContent(contentToSend); 
         }
     })();
   };
 
+  // --- IMAGE HANDLING ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0]) {
-          const fileName = e.target.files[0].name;
-          alert(`File dipilih: ${fileName}\n(Fitur upload sedang dalam pengembangan, simulasi UI saja)`);
-          // Clear input so same file can be selected again
+          const file = e.target.files[0];
+          
+          // Validate Image
+          if (!file.type.startsWith('image/')) {
+              alert("Mohon pilih file gambar.");
+              return;
+          }
+
+          setSelectedFile(file);
+          
+          // Create Preview URL
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              setPreviewUrl(reader.result as string);
+          };
+          reader.readAsDataURL(file);
+          
+          // Reset file input value so same file can be selected again if cancelled
           e.target.value = '';
       }
+  };
+
+  const cancelImageUpload = () => {
+      setSelectedFile(null);
+      setPreviewUrl(null);
+      setImageCaption('');
+  };
+
+  const confirmSendImage = () => {
+      if (!previewUrl) return;
+      setIsSendingImage(true);
+      
+      // Construct content with embedded image (Markdown style for simplicity in this demo)
+      // In production, upload to Storage bucket -> get URL -> send URL.
+      // Here we simulate by embedding base64 (Note: large base64 might hit limits, suitable for small demo images)
+      const imageMarkdown = `![image](${previewUrl})`;
+      const finalContent = imageCaption.trim() ? `${imageMarkdown}\n${imageCaption}` : imageMarkdown;
+      
+      executeSendMessage(finalContent);
+  };
+
+  const downloadImage = (url: string) => {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `task-image-${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
   };
 
   const addEmoji = (emoji: string) => {
@@ -308,36 +347,25 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
           emoji
         });
 
-        let targetComment: TaskComment | undefined;
-        targetComment = comments.find(c => c.id === commentId);
-        
+        // Reaction Notification Logic (Simplified)
+        let targetComment = comments.find(c => c.id === commentId);
         if (!targetComment) {
             for (const c of comments) {
                 if (c.replies) {
-                    const foundReply = c.replies.find(r => r.id === commentId);
-                    if (foundReply) {
-                        targetComment = foundReply;
-                        break;
-                    }
+                    const r = c.replies.find(r => r.id === commentId);
+                    if (r) { targetComment = r; break; }
                 }
             }
         }
-
         if (targetComment && targetComment.user_id !== currentUser.id) {
             const senderName = getSafeSenderName();
-            
             await supabase.from('notifications').insert({
                 user_id: targetComment.user_id,
                 type: 'reaction',
                 title: 'Reaksi Baru',
-                message: `${senderName} memberikan reaksi ${emoji} pada komentar Anda`,
+                message: `${senderName} mereaksi ${emoji}`,
                 is_read: false,
-                metadata: { 
-                    task_id: taskId,
-                    comment_id: commentId,
-                    sender_avatar: currentUser.avatar_url,
-                    sender_name: senderName
-                }
+                metadata: { task_id: taskId, comment_id: commentId, sender_avatar: currentUser.avatar_url, sender_name: senderName }
             });
         }
       }
@@ -364,15 +392,44 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
       }
   };
 
-  // Helper untuk me-render teks dengan highlight @mention
-  const renderContentWithMentions = (text: string) => {
-      const parts = text.split(/(@\w+)/g);
-      return parts.map((part, index) => {
+  // Helper to Render Content (Handling Images and Mentions)
+  const renderCommentContent = (text: string) => {
+      // 1. Check for Image Markdown: ![image](url)
+      const imageRegex = /!\[image\]\((.*?)\)/;
+      const match = text.match(imageRegex);
+      
+      let imagePart = null;
+      let textPart = text;
+
+      if (match) {
+          const imageUrl = match[1];
+          imagePart = (
+              <div className="mb-2 rounded-xl overflow-hidden border-2 border-slate-200 hover:border-slate-800 transition-colors cursor-pointer relative group" onClick={() => setViewingImage(imageUrl)}>
+                  <img src={imageUrl} alt="Attachment" className="max-h-48 w-full object-cover" />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                      <ExternalLink className="text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md" size={24} />
+                  </div>
+              </div>
+          );
+          // Remove image markdown from text to show caption only
+          textPart = text.replace(match[0], '').trim();
+      }
+
+      // 2. Process Mentions in Text Part
+      const parts = textPart.split(/(@\w+)/g);
+      const renderedText = parts.map((part, index) => {
           if (part.startsWith('@')) {
               return <span key={index} className="text-blue-600 font-bold">{part}</span>;
           }
           return part;
       });
+
+      return (
+          <>
+              {imagePart}
+              {textPart && <div>{renderedText}</div>}
+          </>
+      );
   };
 
   const CommentCard = ({ comment, isReply = false }: { comment: TaskComment, isReply?: boolean }) => {
@@ -411,7 +468,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
             </div>
 
             <div className={`p-3 rounded-xl border-2 ${isMe ? 'bg-slate-50 border-slate-200' : 'bg-white border-slate-100'} text-sm text-slate-700 leading-relaxed font-medium relative hover:border-slate-300 transition-colors`}>
-                {renderContentWithMentions(comment.content)}
+                {renderCommentContent(comment.content)}
                 
                 {isMe && (
                     <button onClick={() => handleDelete(comment.id)} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all">
@@ -477,6 +534,80 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
 
   return (
     <div className="flex flex-col h-full bg-slate-50 border-2 border-slate-200 rounded-2xl overflow-hidden relative">
+      
+      {/* --- IMAGE VIEWER LIGHTBOX --- */}
+      {viewingImage && (
+          <div className="fixed inset-0 z-[200] bg-slate-900/90 backdrop-blur-sm flex flex-col items-center justify-center p-4 animate-in fade-in duration-300">
+              <button 
+                  onClick={() => setViewingImage(null)} 
+                  className="absolute top-6 right-6 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors"
+              >
+                  <X size={24} strokeWidth={3} />
+              </button>
+              
+              <div className="relative max-w-4xl max-h-[80vh] w-full flex items-center justify-center">
+                  <img src={viewingImage} className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl border-4 border-slate-800 bg-white" alt="Full Preview" />
+              </div>
+
+              <div className="mt-6 flex gap-4">
+                  <button 
+                      onClick={() => downloadImage(viewingImage)}
+                      className="px-6 py-3 bg-white text-slate-900 font-bold rounded-xl shadow-pop flex items-center gap-2 hover:translate-y-[-2px] active:translate-y-0 transition-all border-2 border-slate-800"
+                  >
+                      <Download size={18} strokeWidth={3} /> Save Gambar
+                  </button>
+                  <button 
+                      onClick={() => setViewingImage(null)}
+                      className="px-6 py-3 bg-slate-800 text-white font-bold rounded-xl shadow-pop flex items-center gap-2 hover:translate-y-[-2px] active:translate-y-0 transition-all border-2 border-white"
+                  >
+                      <X size={18} strokeWidth={3} /> Close
+                  </button>
+              </div>
+          </div>
+      )}
+
+      {/* --- IMAGE PREVIEW MODAL (UPLOAD) --- */}
+      {previewUrl && (
+          <div className="absolute inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300">
+              <div className="bg-white rounded-[24px] p-5 w-full max-w-sm shadow-[8px_8px_0px_0px_#1E293B] border-4 border-slate-800 flex flex-col gap-4 animate-in zoom-in-95">
+                  <div className="flex justify-between items-center border-b-2 border-slate-100 pb-3">
+                      <h3 className="text-lg font-heading text-slate-900">Preview Upload</h3>
+                      <button onClick={cancelImageUpload} className="p-1 hover:bg-slate-100 rounded-full transition-colors"><X size={20} strokeWidth={3}/></button>
+                  </div>
+                  
+                  <div className="rounded-xl overflow-hidden border-4 border-slate-800 bg-slate-100 max-h-60 flex items-center justify-center relative">
+                      <div className="absolute inset-0 bg-slate-200 pattern-dots opacity-20 pointer-events-none" />
+                      <img src={previewUrl} alt="Preview" className="w-full h-full object-contain relative z-10" />
+                  </div>
+
+                  <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Deskripsi Gambar</label>
+                      <input 
+                          autoFocus
+                          className="w-full px-4 py-3 bg-white border-2 border-slate-200 rounded-xl text-sm font-bold text-slate-900 outline-none focus:border-accent focus:shadow-pop transition-all placeholder:text-slate-300"
+                          placeholder="Tulis sesuatu tentang gambar ini..."
+                          value={imageCaption}
+                          onChange={(e) => setImageCaption(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && confirmSendImage()}
+                      />
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                      <button onClick={cancelImageUpload} className="flex-1 py-3 text-xs font-black uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl transition-colors border-2 border-transparent">
+                          Batal
+                      </button>
+                      <button 
+                          onClick={confirmSendImage} 
+                          disabled={isSendingImage}
+                          className="flex-1 py-3 bg-accent text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-pop border-2 border-slate-800 active:shadow-none active:translate-y-0.5 transition-all flex items-center justify-center gap-2 hover:-translate-y-0.5"
+                      >
+                          {isSendingImage ? 'Mengirim...' : <><Send size={14} strokeWidth={3} /> Kirim</>}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       <div className="p-4 bg-white border-b-2 border-slate-100 flex items-center justify-between shrink-0">
          <div className="flex items-center gap-2">
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -561,9 +692,9 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
          <form onSubmit={handleSend} className="flex gap-2 relative z-20 items-end">
             <div className="flex gap-1 pb-1">
                 {/* File Input */}
-                <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} />
                 <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors">
-                    <Paperclip size={18} />
+                    <ImageIcon size={18} />
                 </button>
                 {/* Emoji Trigger */}
                 <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors">
