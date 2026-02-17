@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, CheckCircle2, MessageSquare, X } from 'lucide-react';
+import { Bell, CheckCircle2, MessageSquare, X, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Notification, User } from '../types';
 
@@ -37,24 +37,23 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
 
     setActivePopup(notif);
 
-    // Auto hide after 6 seconds
+    // Auto hide after 10 seconds (extended duration)
     setTimeout(() => {
       setActivePopup((prev) => (prev?.id === notif.id ? null : prev));
-    }, 6000);
+    }, 10000);
   };
 
   useEffect(() => {
     if (!currentUser) return;
 
-    // 1. Initial Fetch: Set baseline ID (ambil notifikasi terbaru yang ada untuk acuan)
-    // Jangan tampilkan popup saat pertama load, hanya simpan ID-nya.
+    // 1. Initial Fetch: Set baseline ID
     const initFetch = async () => {
         const { data } = await supabase
             .from('notifications')
             .select('id')
             .eq('user_id', currentUser.id)
             .order('created_at', { ascending: false })
-            .limit(1); // HAPUS .single() UNTUK MENCEGAH 406 ERROR
+            .limit(1); 
         
         if (data && data.length > 0) {
             lastProcessedIdRef.current = data[0].id;
@@ -62,8 +61,7 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
     };
     initFetch();
 
-    // 2. Realtime Subscription (WebSocket)
-    // Ini jalur utama. Jika database di-setup benar (REPLICA IDENTITY & PUBLICATION), ini akan instan.
+    // 2. Realtime Subscription
     const channel = supabase
       .channel(`popup-notif-${currentUser.id}-${Date.now()}`)
       .on(
@@ -75,21 +73,16 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
           filter: `user_id=eq.${currentUser.id}`,
         },
         (payload) => {
-          console.log("Realtime Notification Received:", payload.new);
           showPopup(payload.new as Notification);
         }
       )
       .subscribe();
 
-    // 3. Fast Polling (Fallback) - Interval 2 Detik
-    // Mengatasi jika Realtime macet atau RLS memblokir stream WebSocket.
+    // 3. Fast Polling (Fallback)
     const intervalId = setInterval(async () => {
         if (!currentUser) return;
         
-        // Fetch notifikasi terbaru yang BELUM DIBACA
-        // Menggunakan .limit(1) tanpa .single() agar return array (kosong [] jika tidak ada data)
-        // Ini memperbaiki error 406 (Not Acceptable)
-        const { data, error } = await supabase
+        const { data } = await supabase
             .from('notifications')
             .select('*')
             .eq('user_id', currentUser.id)
@@ -99,13 +92,11 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
 
         if (data && data.length > 0) {
             const latestNotif = data[0];
-            // Jika ID notifikasi beda dengan yang terakhir diproses, berarti ini BARU
             if (latestNotif.id !== lastProcessedIdRef.current) {
-                console.log("Polling found new notification:", latestNotif);
                 showPopup(latestNotif as Notification);
             }
         }
-    }, 2000); // Cek setiap 2 detik (Lebih Cepat)
+    }, 2000); 
 
     return () => {
       supabase.removeChannel(channel);
@@ -115,43 +106,55 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
 
   if (!activePopup) return null;
 
+  // Determine Icon & Color Theme
+  let icon = <Bell size={20} />;
+  let colorClass = "bg-slate-800 text-white"; // Default
+
+  if (activePopup.type === 'task_completed') {
+      icon = <CheckCircle2 size={20} />;
+      colorClass = "bg-[#34D399] text-slate-900"; // Quaternary (Green)
+  } else if (activePopup.type === 'comment_reply') {
+      icon = <MessageSquare size={20} />;
+      colorClass = "bg-[#8B5CF6] text-white"; // Accent (Purple)
+  } else if (activePopup.type === 'reaction') {
+      icon = <Zap size={20} />;
+      colorClass = "bg-[#F472B6] text-white"; // Secondary (Pink)
+  }
+
   return (
-    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex justify-center w-full pointer-events-none">
+    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col items-end pointer-events-none w-full max-w-sm px-4 md:px-0">
       <div
         onClick={() => {
             onNotificationClick(activePopup);
             setActivePopup(null);
         }}
-        className="pointer-events-auto cursor-pointer bg-black text-white rounded-full px-5 py-3 shadow-2xl flex items-center gap-4 animate-in slide-in-from-top-4 zoom-in-95 duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] min-w-[320px] max-w-md justify-between hover:scale-105 transition-transform border border-white/10"
+        className="pointer-events-auto cursor-pointer bg-white border-2 border-slate-800 rounded-2xl p-4 shadow-[6px_6px_0px_0px_#1E293B] flex gap-4 animate-in slide-in-from-right-full duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] w-full hover:-translate-y-1 hover:shadow-[8px_8px_0px_0px_#1E293B] transition-all"
       >
-        <div className="flex items-center gap-3 overflow-hidden">
-          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm shrink-0">
-            {activePopup.type === 'task_completed' ? (
-              <CheckCircle2 size={20} className="text-quaternary" />
-            ) : activePopup.type === 'comment_reply' || activePopup.type === 'reaction' ? (
-              <MessageSquare size={20} className="text-blue-400" />
-            ) : (
-              <Bell size={20} className="text-white" />
-            )}
-          </div>
-          <div className="flex flex-col min-w-0">
-            <span className="text-[10px] font-bold text-white/60 uppercase tracking-widest leading-none mb-1 truncate">
-              {activePopup.title}
-            </span>
-            <span className="text-xs font-bold text-white truncate max-w-[200px] leading-tight">
-              {activePopup.message}
-            </span>
-          </div>
+        {/* Icon Box */}
+        <div className={`w-12 h-12 rounded-xl border-2 border-slate-800 flex items-center justify-center shrink-0 shadow-sm ${colorClass}`}>
+           {icon}
         </div>
-        <button
-          className="w-8 h-8 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors shrink-0"
-          onClick={(e) => {
-            e.stopPropagation();
-            setActivePopup(null);
-          }}
-        >
-          <X size={16} className="text-white/50" />
-        </button>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
+            <div className="flex justify-between items-start">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+                  {activePopup.title}
+                </span>
+                <button
+                  className="w-6 h-6 -mr-2 -mt-2 rounded-lg hover:bg-slate-100 flex items-center justify-center transition-colors text-slate-400 hover:text-slate-800"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActivePopup(null);
+                  }}
+                >
+                  <X size={16} />
+                </button>
+            </div>
+            <p className="text-xs md:text-sm font-bold text-slate-800 leading-snug line-clamp-4">
+              {activePopup.message}
+            </p>
+        </div>
       </div>
     </div>
   );
