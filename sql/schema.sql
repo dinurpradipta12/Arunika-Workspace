@@ -1,6 +1,6 @@
 
 -- ==========================================
--- SCRIPT PERBAIKAN TOTAL PERMISSIONS (FIX TYPE MISMATCH)
+-- SCRIPT PERBAIKAN TOTAL PERMISSIONS (FIX TYPE MISMATCH & CHAT FEATURES)
 -- Jalankan script ini di SQL Editor Supabase
 -- ==========================================
 
@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS public.workspace_messages (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     workspace_id TEXT NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    parent_id UUID REFERENCES public.workspace_messages(id) ON DELETE SET NULL, -- Added for Reply
     content TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -53,6 +54,16 @@ CREATE TABLE IF NOT EXISTS public.workspace_message_reads (
     UNIQUE(message_id, user_id)
 );
 
+-- Added for Workspace Chat Reactions
+CREATE TABLE IF NOT EXISTS public.workspace_message_reactions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    message_id UUID NOT NULL REFERENCES public.workspace_messages(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(message_id, user_id, emoji)
+);
+
 -- 2. HARD RESET GRANTS (Kunci Perbaikan Permissions)
 GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role;
 
@@ -62,6 +73,7 @@ GRANT ALL ON TABLE public.users TO postgres, anon, authenticated, service_role;
 GRANT ALL ON TABLE public.notifications TO postgres, anon, authenticated, service_role;
 GRANT ALL ON TABLE public.workspace_messages TO postgres, anon, authenticated, service_role;
 GRANT ALL ON TABLE public.workspace_message_reads TO postgres, anon, authenticated, service_role;
+GRANT ALL ON TABLE public.workspace_message_reactions TO postgres, anon, authenticated, service_role;
 
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO postgres, anon, authenticated, service_role;
 
@@ -72,6 +84,7 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspace_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspace_message_reads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.workspace_message_reactions ENABLE ROW LEVEL SECURITY;
 
 -- Reset Policies for Comments
 DROP POLICY IF EXISTS "Allow all for task_comments" ON public.task_comments;
@@ -114,6 +127,9 @@ CREATE POLICY "Allow all for workspace_messages" ON public.workspace_messages FO
 DROP POLICY IF EXISTS "Allow all for workspace_message_reads" ON public.workspace_message_reads;
 CREATE POLICY "Allow all for workspace_message_reads" ON public.workspace_message_reads FOR ALL USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Allow all for workspace_message_reactions" ON public.workspace_message_reactions;
+CREATE POLICY "Allow all for workspace_message_reactions" ON public.workspace_message_reactions FOR ALL USING (true) WITH CHECK (true);
+
 -- Ensure Users are readable
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.users;
 CREATE POLICY "Public profiles are viewable by everyone" ON public.users FOR SELECT USING (true);
@@ -121,7 +137,7 @@ CREATE POLICY "Public profiles are viewable by everyone" ON public.users FOR SEL
 -- 4. ENABLE REALTIME (CRITICAL FOR POPUP TO APPEAR WITHOUT REFRESH)
 BEGIN;
   DROP PUBLICATION IF EXISTS supabase_realtime;
-  CREATE PUBLICATION supabase_realtime FOR TABLE public.tasks, public.task_comments, public.task_comment_reactions, public.notifications, public.workspace_members, public.workspace_messages, public.workspace_message_reads;
+  CREATE PUBLICATION supabase_realtime FOR TABLE public.tasks, public.task_comments, public.task_comment_reactions, public.notifications, public.workspace_members, public.workspace_messages, public.workspace_message_reads, public.workspace_message_reactions;
 COMMIT;
 
 -- 5. Refresh API Cache
