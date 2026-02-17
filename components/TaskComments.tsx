@@ -382,7 +382,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   };
 
   const handleDeleteAll = async () => {
-      if(!confirm("⚠️ Yakin ingin menghapus SEMUA komentar di task ini? Tindakan ini tidak bisa dibatalkan.")) return;
+      if(!confirm("⚠️ PERINGATAN GLOBAL: Yakin ingin menghapus SEMUA komentar di task ini?\n\n• Tindakan ini menghapus data secara permanen dari database.\n• Riwayat diskusi akan hilang untuk SEMUA USER di workspace ini.\n\nLanjutkan?")) return;
       try {
           const { error } = await supabase.from('task_comments').delete().eq('task_id', taskId);
           if (error) throw error;
