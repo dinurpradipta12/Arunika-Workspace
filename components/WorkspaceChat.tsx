@@ -305,12 +305,17 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({ workspaceId, curre
   };
 
   // Helper render content with robust Mention Highlighting
-  const renderContent = (text: string) => {
+  const renderContent = (text: string, isMe: boolean) => {
       if (!text) return null;
       const parts = text.split(/(@[\w\d_]+)/g);
       return parts.map((part, i) => {
           if (part.startsWith('@') && part.length > 1) {
-              return <span key={i} className="text-blue-600 font-bold">{part}</span>;
+              // Custom Color Logic based on Sender (Me/Other)
+              const mentionStyle = isMe 
+                ? "text-tertiary font-black" // If me (Purple BG) -> Yellow Text
+                : "text-purple-700 bg-white/40 px-1 rounded font-black border border-purple-200/50"; // If other (Pastel BG) -> Purple Text with white bg
+              
+              return <span key={i} className={mentionStyle}>{part}</span>;
           }
           return part;
       });
@@ -412,7 +417,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({ workspaceId, curre
                                     {/* Bubble */}
                                     {/* UPDATED: bg-slate-800 -> bg-accent */}
                                     <div className={`px-4 py-2.5 rounded-2xl border-2 border-slate-800 shadow-sm relative text-sm font-bold leading-relaxed ${isMe ? 'bg-accent text-white rounded-tr-none' : `${getUserColor(msg.user_id)} rounded-tl-none`}`}>
-                                        {renderContent(msg.content)}
+                                        {renderContent(msg.content, isMe)}
                                     </div>
                                 </div>
 
