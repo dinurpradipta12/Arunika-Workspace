@@ -150,6 +150,10 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
         finalEndISO = new Date().toISOString();
     }
 
+    // FIX: Correctly identify if targetId belongs to a Supabase Workspace
+    // Real Supabase IDs are UUIDs, so we check existence in the workspaces list rather than relying on 'ws-' prefix.
+    const isWorkspace = workspaces.some(w => w.id === targetId);
+
     onSave({
       title,
       description,
@@ -157,11 +161,11 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
       due_date: finalEndISO || undefined,
       priority,
       is_all_day: isAllDay,
-      workspace_id: targetId.startsWith('ws-') ? targetId : (workspaces[0]?.id || ''),
+      workspace_id: isWorkspace ? targetId : (workspaces[0]?.id || ''),
       parent_id: selectedParentId || null,
       category: category,
       assigned_to: assignedTo || null
-    }, targetId.startsWith('ws-') ? undefined : targetId);
+    }, isWorkspace ? undefined : targetId); // Pass targetCalendarId ONLY if it is NOT a workspace
   };
 
   const isSubTask = !!initialData?.parent_id || !!selectedParentId;

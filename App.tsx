@@ -23,7 +23,9 @@ import {
   Table as TableIcon,
   ChevronDown,
   CheckCircle2,
-  ArrowRight
+  ArrowRight,
+  MoreHorizontal,
+  Circle
 } from 'lucide-react';
 import { Button } from './components/ui/Button';
 import { Sidebar } from './components/Sidebar';
@@ -121,7 +123,15 @@ const App: React.FC = () => {
   const defaultCategories = ['General', 'Meeting', 'Design', 'Development'];
   const [categories, setCategories] = useState<string[]>(defaultCategories); 
   const [activeCategories, setActiveCategories] = useState<string[]>(defaultCategories);
-  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
+  
+  // FIX: Initialize category colors correctly
+  const [categoryColors, setCategoryColors] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    defaultCategories.forEach((cat, idx) => {
+      initial[cat] = UI_PALETTE[idx % UI_PALETTE.length];
+    });
+    return initial;
+  });
   
   const [googleEvents, setGoogleEvents] = useState<Task[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
@@ -155,6 +165,17 @@ const App: React.FC = () => {
   useEffect(() => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
+
+  // Click outside listener for Notification Dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(event.target as Node)) {
+        setIsNotifDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // --- PERSIST GOOGLE TOKEN ON LOAD (CRITICAL FIX) ---
   useEffect(() => {
@@ -256,6 +277,10 @@ const App: React.FC = () => {
 
             const { data: tasksData } = await supabase.from('tasks').select('*');
             if (tasksData) setTasks(tasksData as Task[]);
+
+            // Fetch Notifications
+            const { data: notifData } = await supabase.from('notifications').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(20);
+            if (notifData) setNotifications(notifData as Notification[]);
 
             // Fetch Branding
             const { data: brandingData } = await supabase.from('app_config').select('*').single();
@@ -473,6 +498,8 @@ const App: React.FC = () => {
              }
              // Mark as read
              supabase.from('notifications').update({ is_read: true }).eq('id', n.id).then();
+             // Local update
+             setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, is_read: true } : notif));
          }}
       />
 
@@ -515,10 +542,68 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-4">
+               {/* Online Indicator */}
                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border ${getConnectionStatus().color} bg-white border-slate-200`}>
                   {getConnectionStatus().icon} {getConnectionStatus().label}
                </div>
                
+               {/* Notification Bell */}
+               <div className="relative" ref={notifDropdownRef}>
+                   <button 
+                      onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)} 
+                      className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500 relative"
+                   >
+                      <Bell size={20} />
+                      {notifications.some(n => !n.is_read) && (
+                          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white" />
+                      )}
+                   </button>
+                   {isNotifDropdownOpen && (
+                       <div className="absolute top-full right-0 mt-2 w-80 bg-white border-2 border-slate-800 rounded-xl shadow-pop z-50 overflow-hidden animate-in fade-in zoom-in-95">
+                           <div className="p-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                               <span className="text-xs font-bold text-slate-700">Notifikasi</span>
+                               <button 
+                                  onClick={() => {
+                                      const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
+                                      // Optimistic update
+                                      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+                                      // Backend update
+                                      supabase.from('notifications').update({ is_read: true }).in('id', unreadIds).then();
+                                  }} 
+                                  className="text-[10px] text-accent font-bold hover:underline"
+                               >
+                                  Tandai Dibaca
+                               </button>
+                           </div>
+                           <div className="max-h-64 overflow-y-auto scrollbar-hide">
+                               {notifications.length === 0 ? (
+                                   <div className="p-4 text-center text-slate-400 text-xs italic">Tidak ada notifikasi baru.</div>
+                               ) : (
+                                   notifications.map(n => (
+                                       <div 
+                                          key={n.id} 
+                                          onClick={() => {
+                                              if(n.metadata?.task_id) {
+                                                  const t = tasks.find(t => t.id === n.metadata.task_id);
+                                                  if(t) setInspectedTask(t);
+                                              }
+                                              setIsNotifDropdownOpen(false);
+                                          }}
+                                          className={`p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer ${!n.is_read ? 'bg-blue-50/50' : ''}`}
+                                       >
+                                           <div className="flex justify-between items-start">
+                                              <p className="text-xs font-bold text-slate-800">{n.title}</p>
+                                              <span className="text-[9px] text-slate-400">{new Date(n.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                           </div>
+                                           <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2">{n.message}</p>
+                                       </div>
+                                   ))
+                               )}
+                           </div>
+                       </div>
+                   )}
+               </div>
+
                <button onClick={() => setIsSettingsModalOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500 relative">
                   <Settings size={20} />
                </button>
@@ -527,7 +612,8 @@ const App: React.FC = () => {
                   <div className="flex items-center gap-3 pl-4 border-l-2 border-slate-100 cursor-pointer" onClick={() => setActiveTab('profile')}>
                      <div className="text-right hidden md:block">
                         <p className="text-xs font-bold text-slate-900">{currentUser.name}</p>
-                        <p className="text-[10px] font-medium text-slate-400">{accountRole}</p>
+                        {/* Display Full Email without truncation */}
+                        <p className="text-[10px] font-medium text-slate-400">{currentUser.email}</p>
                      </div>
                      <img src={currentUser.avatar_url} className="w-9 h-9 rounded-full border-2 border-white shadow-sm object-cover bg-slate-200" />
                   </div>
@@ -547,27 +633,70 @@ const App: React.FC = () => {
             )}
 
             {activeTab === 'tasks' && (
-               <div className="max-w-5xl mx-auto space-y-6">
-                  <div className="flex items-center justify-between">
-                     <h2 className="text-3xl font-heading">My Tasks</h2>
+               <div className="h-full flex flex-col gap-6">
+                  <div className="flex items-center justify-between shrink-0">
+                     <h2 className="text-3xl font-heading">My Board</h2>
                      <Button variant="primary" onClick={() => { setIsNewTaskModalOpen(true); setEditingTask(null); }}>
                         <Plus size={18} className="mr-2" strokeWidth={3} /> New Task
                      </Button>
                   </div>
-                  {/* Task List */}
-                  <div className="space-y-3">
-                     {tasks.filter(t => !t.is_archived && !t.parent_id).map(task => (
-                        <TaskItem 
-                           key={task.id} 
-                           task={task} 
-                           onStatusChange={handleStatusChange} 
-                           onClick={(t) => setInspectedTask(t)}
-                           onDelete={handleDeleteTask}
-                           onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
-                           onReschedule={(t) => setReschedulingTask(t)}
-                           workspaceName={workspaces.find(w => w.id === task.workspace_id)?.name}
-                        />
-                     ))}
+                  
+                  {/* Kanban Board View */}
+                  <div className="flex gap-6 overflow-x-auto pb-4 h-full items-start">
+                     {[TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DONE].map(status => {
+                        const columnTasks = tasks.filter(t => t.status === status && !t.is_archived && !t.parent_id);
+                        
+                        let colColor = "bg-slate-200";
+                        let colTitle = "Todo";
+                        if (status === TaskStatus.IN_PROGRESS) { colColor = "bg-blue-200"; colTitle = "In Progress"; }
+                        if (status === TaskStatus.IN_REVIEW) { colColor = "bg-pink-200"; colTitle = "In Review"; }
+                        if (status === TaskStatus.DONE) { colColor = "bg-emerald-200"; colTitle = "Done"; }
+
+                        return (
+                           <div 
+                              key={status} 
+                              className="min-w-[300px] w-[300px] flex flex-col h-full bg-slate-100/50 rounded-2xl border-2 border-slate-200"
+                              onDragOver={(e) => { e.preventDefault(); setDragOverColumn(status); }}
+                              onDrop={async (e) => {
+                                 e.preventDefault();
+                                 setDragOverColumn(null);
+                                 const taskId = e.dataTransfer.getData('taskId');
+                                 if (taskId) {
+                                    handleStatusChange(taskId, status);
+                                 }
+                              }}
+                           >
+                              <div className={`p-4 border-b-2 border-slate-200 flex justify-between items-center rounded-t-2xl ${dragOverColumn === status ? 'bg-white' : ''}`}>
+                                 <div className="flex items-center gap-2">
+                                    <div className={`w-3 h-3 rounded-full ${colColor}`} />
+                                    <span className="text-xs font-black uppercase tracking-widest text-slate-600">{colTitle}</span>
+                                 </div>
+                                 <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded text-slate-400">{columnTasks.length}</span>
+                              </div>
+                              
+                              <div className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-hide">
+                                 {columnTasks.map(task => (
+                                    <TaskItem 
+                                       key={task.id} 
+                                       task={task} 
+                                       onStatusChange={handleStatusChange} 
+                                       onClick={(t) => setInspectedTask(t)}
+                                       onDelete={handleDeleteTask}
+                                       onEdit={(t) => { setEditingTask(t); setIsNewTaskModalOpen(true); }}
+                                       onReschedule={(t) => setReschedulingTask(t)}
+                                       onDragStart={(e) => { e.dataTransfer.setData('taskId', task.id); }}
+                                       workspaceName={workspaces.find(w => w.id === task.workspace_id)?.name}
+                                    />
+                                 ))}
+                                 {columnTasks.length === 0 && (
+                                    <div className="h-20 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 text-xs font-bold uppercase tracking-widest">
+                                       Kosong
+                                    </div>
+                                 )}
+                              </div>
+                           </div>
+                        );
+                     })}
                   </div>
                </div>
             )}
@@ -589,9 +718,11 @@ const App: React.FC = () => {
                   googleCalendars={googleCalendars}
                   setGoogleCalendars={setGoogleCalendars}
                   categories={categories}
+                  setCategories={setCategories}
                   activeCategories={activeCategories}
                   setActiveCategories={setActiveCategories}
                   categoryColors={categoryColors}
+                  setCategoryColors={setCategoryColors}
                />
             )}
 
@@ -636,6 +767,13 @@ const App: React.FC = () => {
          workspaces={workspaces}
          googleCalendars={googleCalendars}
          categories={categories}
+         onAddCategory={(cat) => {
+             if (!categories.includes(cat)) {
+                 setCategories(prev => [...prev, cat]);
+                 setActiveCategories(prev => [...prev, cat]);
+                 setCategoryColors(prev => ({ ...prev, [cat]: UI_PALETTE[categories.length % UI_PALETTE.length] }));
+             }
+         }}
       />
 
       <TaskInspectModal 

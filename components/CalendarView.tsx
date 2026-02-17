@@ -150,9 +150,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const handleAddCategory = () => {
     if (newCategoryName.trim()) {
       const cat = newCategoryName.trim();
-      setCategories(prev => [...prev, cat]);
-      setActiveCategories(prev => [...prev, cat]);
-      setCategoryColors(prev => ({...prev, [cat]: UI_PALETTE[categories.length % UI_PALETTE.length]}));
+      if (!categories.includes(cat)) {
+          setCategories(prev => [...prev, cat]);
+          setActiveCategories(prev => [...prev, cat]); // Auto active
+          // Auto assign color
+          setCategoryColors(prev => ({...prev, [cat]: UI_PALETTE[categories.length % UI_PALETTE.length]}));
+      }
       setNewCategoryName('');
       setIsAddingCategory(false);
     }
@@ -161,6 +164,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const handleDeleteCategory = (catToDelete: string) => {
     setCategories(prev => prev.filter(c => c !== catToDelete));
     setActiveCategories(prev => prev.filter(c => c !== catToDelete));
+    // Optional: Remove color from map to clean up, but not strictly necessary
   };
 
   const toggleCategory = (cat: string) => {
@@ -654,7 +658,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   <div key={cat} className="flex items-center justify-between group">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: categoryColors[cat] || '#ccc' }} onClick={() => {
-                          const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(categoryColors[cat]) + 1) % UI_PALETTE.length];
+                          const currentColor = categoryColors[cat] || UI_PALETTE[0];
+                          const currentIndex = UI_PALETTE.indexOf(currentColor);
+                          const nextIndex = (currentIndex + 1) % UI_PALETTE.length;
+                          const nextColor = UI_PALETTE[nextIndex === -1 ? 0 : nextIndex];
                           setCategoryColors(prev => ({ ...prev, [cat]: nextColor }));
                       }} />
                       <span className="text-[11px] font-black uppercase text-slate-700 truncate">{cat}</span>
@@ -674,7 +681,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   <div key={ws.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: sourceColors[ws.id] }} onClick={() => {
-                          const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(sourceColors[ws.id]) + 1) % UI_PALETTE.length];
+                          const currentColor = sourceColors[ws.id] || UI_PALETTE[0];
+                          const currentIndex = UI_PALETTE.indexOf(currentColor);
+                          const nextIndex = (currentIndex + 1) % UI_PALETTE.length;
+                          const nextColor = UI_PALETTE[nextIndex === -1 ? 0 : nextIndex];
                           setSourceColors(prev => ({ ...prev, [ws.id]: nextColor }));
                       }} />
                       <span className="text-[11px] font-bold text-slate-700 truncate max-w-[120px]">{ws.name}</span>
@@ -687,7 +697,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: sourceColors['personal-subtasks'] }} onClick={() => {
-                          const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(sourceColors['personal-subtasks']) + 1) % UI_PALETTE.length];
+                          const currentColor = sourceColors['personal-subtasks'] || UI_PALETTE[0];
+                          const currentIndex = UI_PALETTE.indexOf(currentColor);
+                          const nextIndex = (currentIndex + 1) % UI_PALETTE.length;
+                          const nextColor = UI_PALETTE[nextIndex === -1 ? 0 : nextIndex];
                           setSourceColors(prev => ({ ...prev, 'personal-subtasks': nextColor }));
                       }} />
                       <span className="text-[11px] font-black uppercase text-slate-700">Sub-Tasks</span>
@@ -729,7 +742,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     <div key={gc.id} className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
                         <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: sourceColors[gc.id] }} onClick={() => {
-                            const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(sourceColors[gc.id]) + 1) % UI_PALETTE.length];
+                            const currentColor = sourceColors[gc.id] || UI_PALETTE[0];
+                            const currentIndex = UI_PALETTE.indexOf(currentColor);
+                            const nextIndex = (currentIndex + 1) % UI_PALETTE.length;
+                            const nextColor = UI_PALETTE[nextIndex === -1 ? 0 : nextIndex];
                             setSourceColors(prev => ({ ...prev, [gc.id]: nextColor }));
                         }} />
                         <span className="text-[11px] font-bold text-slate-700 truncate max-w-[120px]" title={gc.summary}>{gc.summary}</span>

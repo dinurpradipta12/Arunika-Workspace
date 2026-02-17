@@ -130,13 +130,25 @@ export class GoogleCalendarService {
   public async createEvent(accessToken: string, task: any, calendarId: string = 'primary'): Promise<any> {
     try {
       const isAllDay = task.is_all_day;
-      const start = isAllDay 
-        ? { date: task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0] }
-        : { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
-      
-      const end = isAllDay 
-        ? { date: task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0] }
-        : { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
+      let start, end;
+
+      if (isAllDay) {
+        let startDateStr = task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0];
+        let endDateStr = task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0];
+
+        // Ensure end date is strictly after start date for all-day events (Google API requirement)
+        if (startDateStr >= endDateStr) {
+             const s = new Date(startDateStr);
+             s.setDate(s.getDate() + 1);
+             endDateStr = s.toISOString().split('T')[0];
+        }
+        
+        start = { date: startDateStr };
+        end = { date: endDateStr };
+      } else {
+        start = { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
+        end = { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
+      }
 
       const event = {
         summary: task.title,
@@ -157,24 +169,40 @@ export class GoogleCalendarService {
         }
       );
 
-      if (!response.ok) throw new Error("Failed to create Google Calendar event");
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("Google Calendar API Error (Create):", errText);
+        throw new Error(`Failed to create Google Calendar event: ${response.statusText} - ${errText}`);
+      }
       return await response.json();
     } catch (error) {
       console.error("Error creating Google Calendar event:", error);
-      return null;
+      throw error;
     }
   }
 
   public async updateEvent(accessToken: string, eventId: string, task: any, calendarId: string = 'primary'): Promise<any> {
     try {
       const isAllDay = task.is_all_day;
-      const start = isAllDay 
-        ? { date: task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0] }
-        : { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
-      
-      const end = isAllDay 
-        ? { date: task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0] }
-        : { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
+      let start, end;
+
+      if (isAllDay) {
+        let startDateStr = task.start_date ? task.start_date.split('T')[0] : new Date().toISOString().split('T')[0];
+        let endDateStr = task.due_date ? task.due_date.split('T')[0] : new Date().toISOString().split('T')[0];
+
+        // Ensure end date is strictly after start date
+        if (startDateStr >= endDateStr) {
+             const s = new Date(startDateStr);
+             s.setDate(s.getDate() + 1);
+             endDateStr = s.toISOString().split('T')[0];
+        }
+        
+        start = { date: startDateStr };
+        end = { date: endDateStr };
+      } else {
+        start = { dateTime: task.start_date ? new Date(task.start_date).toISOString() : new Date().toISOString() };
+        end = { dateTime: task.due_date ? new Date(task.due_date).toISOString() : new Date(Date.now() + 3600000).toISOString() };
+      }
 
       const event = {
         summary: task.title,
@@ -195,11 +223,15 @@ export class GoogleCalendarService {
         }
       );
 
-      if (!response.ok) throw new Error("Failed to update Google Calendar event");
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("Google Calendar API Error (Update):", errText);
+        throw new Error("Failed to update Google Calendar event");
+      }
       return await response.json();
     } catch (error) {
       console.error("Error updating Google Calendar event:", error);
-      return null;
+      throw error;
     }
   }
 
