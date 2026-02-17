@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { TaskComment, User, CommentReaction } from '../types';
-import { Send, MessageSquare, SmilePlus, CornerDownRight, MoreHorizontal, Trash2, X } from 'lucide-react';
+import { Send, MessageSquare, SmilePlus, CornerDownRight, MoreHorizontal, Trash2, X, AtSign } from 'lucide-react';
 
 interface TaskCommentsProps {
   taskId: string;
@@ -16,10 +16,12 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   const [replyingTo, setReplyingTo] = useState<TaskComment | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeReactionId, setActiveReactionId] = useState<string | null>(null);
+  const [workspaceMembers, setWorkspaceMembers] = useState<any[]>([]); // Untuk cek mention
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchComments();
+    fetchWorkspaceMembers();
     
     // Subscribe to realtime changes
     const channel = supabase.channel(`comments-${taskId}`)
@@ -38,6 +40,22 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [comments.length]);
+
+  const fetchWorkspaceMembers = async () => {
+      // 1. Get Workspace ID from Task
+      const { data: taskData } = await supabase.from('tasks').select('workspace_id').eq('id', taskId).single();
+      if (!taskData) return;
+
+      // 2. Get Members
+      const { data: members } = await supabase
+        .from('workspace_members')
+        .select('user_id, users(id, username, name, email)')
+        .eq('workspace_id', taskData.workspace_id);
+      
+      if (members) {
+          setWorkspaceMembers(members.map((m: any) => m.users).filter(Boolean));
+      }
+  };
 
   const fetchComments = async () => {
     try {
@@ -110,6 +128,8 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
     setLoading(true);
 
     try {
+      const senderName = getSafeSenderName();
+      
       const { error, data: newComment } = await supabase.from('task_comments').insert({
         task_id: taskId,
         user_id: currentUser.id,
@@ -119,9 +139,45 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
 
       if (error) throw error;
       
-      if (replyingTo && replyingTo.user_id !== currentUser.id) {
-          const senderName = getSafeSenderName();
+      // 1. Handle Mentions Logic
+      // Regex matches @word
+      const mentionMatches = content.match(/@(\w+)/g);
+      if (mentionMatches && workspaceMembers.length > 0) {
+          const mentionedUsers = new Set<string>();
           
+          mentionMatches.forEach(match => {
+              const usernameQuery = match.substring(1).toLowerCase(); // remove @
+              // Find user by username or first name
+              const targetUser = workspaceMembers.find(u => 
+                  u.username?.toLowerCase() === usernameQuery || 
+                  u.name?.toLowerCase().split(' ')[0].toLowerCase() === usernameQuery
+              );
+
+              if (targetUser && targetUser.id !== currentUser.id) {
+                  mentionedUsers.add(targetUser.id);
+              }
+          });
+
+          // Send notifications to mentioned users
+          for (const targetUserId of mentionedUsers) {
+              await supabase.from('notifications').insert({
+                  user_id: targetUserId,
+                  type: 'mention', // Tipe Baru
+                  title: 'Anda di-mention!',
+                  message: `${senderName} menandai Anda di komentar: "${content.substring(0, 30)}..."`,
+                  is_read: false,
+                  metadata: { 
+                      task_id: taskId,
+                      comment_id: newComment.id,
+                      sender_avatar: currentUser.avatar_url, // Include Avatar
+                      sender_name: senderName
+                  }
+              });
+          }
+      }
+
+      // 2. Handle Reply Notifications (jika bukan reply ke diri sendiri)
+      if (replyingTo && replyingTo.user_id !== currentUser.id) {
           await supabase.from('notifications').insert({
               user_id: replyingTo.user_id,
               type: 'comment_reply',
@@ -130,7 +186,9 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
               is_read: false,
               metadata: { 
                   task_id: taskId,
-                  comment_id: newComment.id 
+                  comment_id: newComment.id,
+                  sender_avatar: currentUser.avatar_url, // Include Avatar
+                  sender_name: senderName
               }
           });
       }
@@ -189,11 +247,13 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                 user_id: targetComment.user_id,
                 type: 'reaction',
                 title: 'Reaksi Baru',
-                message: `${senderName} memberikan reaksi ${emoji} pada komentar Anda: "${targetComment.content.substring(0, 25)}${targetComment.content.length > 25 ? '...' : ''}"`,
+                message: `${senderName} memberikan reaksi ${emoji} pada komentar Anda`,
                 is_read: false,
                 metadata: { 
                     task_id: taskId,
-                    comment_id: commentId 
+                    comment_id: commentId,
+                    sender_avatar: currentUser.avatar_url,
+                    sender_name: senderName
                 }
             });
         }
@@ -208,6 +268,17 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
         await supabase.from('task_comments').delete().eq('id', commentId);
         fetchComments();
       } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteAll = async () => {
+      if(!confirm("⚠️ Yakin ingin menghapus SEMUA komentar di task ini? Tindakan ini tidak bisa dibatalkan.")) return;
+      try {
+          const { error } = await supabase.from('task_comments').delete().eq('task_id', taskId);
+          if (error) throw error;
+          setComments([]);
+      } catch(err: any) {
+          alert("Gagal menghapus: " + err.message);
+      }
   };
 
   const CommentCard = ({ comment, isReply = false }: { comment: TaskComment, isReply?: boolean }) => {
@@ -311,12 +382,24 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   return (
     <div className="flex flex-col h-full bg-slate-50 border-2 border-slate-200 rounded-2xl overflow-hidden">
       <div className="p-4 bg-white border-b-2 border-slate-100 flex items-center justify-between shrink-0">
-         <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
-            <MessageSquare size={16} className="text-accent" /> Diskusi & Updates
-         </h3>
-         <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-500">
-            {comments.length} Diskusi
-         </span>
+         <div className="flex items-center gap-2">
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                <MessageSquare size={16} className="text-accent" /> Diskusi
+            </h3>
+            <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-500">
+                {comments.length}
+            </span>
+         </div>
+         {/* TOMBOL HAPUS SEMUA */}
+         {comments.length > 0 && (
+             <button 
+                onClick={handleDeleteAll}
+                className="text-slate-400 hover:text-red-500 transition-colors p-1.5 hover:bg-red-50 rounded-lg"
+                title="Hapus Semua Komentar"
+             >
+                <Trash2 size={16} />
+             </button>
+         )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 scrollbar-hide" ref={scrollRef}>
@@ -326,7 +409,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
                   <MessageSquare size={20} className="text-slate-400" />
                </div>
                <p className="text-xs font-bold text-slate-400">Belum ada diskusi.</p>
-               <p className="text-[10px] text-slate-300">Mulai percakapan tentang task ini.</p>
+               <p className="text-[10px] text-slate-300">Mulai percakapan dengan @mention teman tim.</p>
             </div>
          ) : (
             comments.map(c => <CommentCard key={c.id} comment={c} />)
@@ -346,7 +429,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
             <input 
                id="comment-input"
                className="flex-1 bg-slate-50 border-2 border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold outline-none focus:border-accent focus:bg-white transition-all placeholder:text-slate-300"
-               placeholder={replyingTo ? "Tulis balasan..." : "Tulis komentar..."}
+               placeholder={replyingTo ? "Tulis balasan..." : "Ketik @ untuk mention..."}
                value={content}
                onChange={e => setContent(e.target.value)}
                autoComplete="off"

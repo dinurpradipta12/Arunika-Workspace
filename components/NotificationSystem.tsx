@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, CheckCircle2, MessageSquare, X, Zap } from 'lucide-react';
+import { Bell, CheckCircle2, MessageSquare, X, Zap, AtSign } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Notification, User } from '../types';
 
@@ -10,9 +10,10 @@ interface NotificationSystemProps {
 
 export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentUser, onNotificationClick }) => {
   const [activePopup, setActivePopup] = useState<Notification | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [stackedUsers, setStackedUsers] = useState<{avatar: string, name: string}[]>([]);
+  const [dynamicMessage, setDynamicMessage] = useState<string | null>(null);
   
-  // Track ID terakhir yang sudah ditampilkan agar tidak muncul double
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const lastProcessedIdRef = useRef<string | null>(null);
   
   // Sound effect
@@ -21,23 +22,88 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
     audioRef.current.volume = 0.5;
   }, []);
 
-  // Function to handle showing the popup
-  const showPopup = (notif: Notification) => {
-    // Prevent duplicate popups for the same ID
+  // Function to handle showing the popup with Grouping Logic
+  const showPopup = async (notif: Notification) => {
     if (lastProcessedIdRef.current === notif.id) return;
-    
-    console.log("SHOWING POPUP:", notif);
     lastProcessedIdRef.current = notif.id;
     
+    console.log("SHOWING POPUP:", notif);
+
+    // Default values
+    let displayNotif = { ...notif };
+    let usersStack: {avatar: string, name: string}[] = [];
+    
+    if (notif.metadata?.sender_avatar) {
+        usersStack.push({
+            avatar: notif.metadata.sender_avatar,
+            name: notif.metadata.sender_name || 'User'
+        });
+    }
+
+    // --- LOGIKA GROUPING / STACKING ---
+    // Cek apakah ada notifikasi lain yang BELUM DIBACA pada task yang sama
+    if (notif.metadata?.task_id && currentUser) {
+        const { data: otherNotifs } = await supabase
+            .from('notifications')
+            .select('metadata')
+            .eq('user_id', currentUser.id)
+            .eq('is_read', false)
+            // Filter metadata yang JSONB agak tricky, kita filter manual task_id nya sama
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+        if (otherNotifs) {
+            const sameTaskNotifs = otherNotifs.filter(n => 
+                n.metadata?.task_id === notif.metadata.task_id && 
+                n.metadata?.sender_name && 
+                n.metadata?.sender_name !== notif.metadata.sender_name // Hindari duplikat user yang sama berkali-kali
+            );
+
+            // Jika ada notifikasi lain dari user berbeda di task yang sama
+            if (sameTaskNotifs.length > 0) {
+                // Tambahkan user lain ke stack
+                sameTaskNotifs.forEach(n => {
+                    if (usersStack.length < 3 && !usersStack.find(u => u.name === n.metadata.sender_name)) {
+                        usersStack.push({
+                            avatar: n.metadata.sender_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${n.metadata.sender_name}`,
+                            name: n.metadata.sender_name
+                        });
+                    }
+                });
+
+                // Buat Pesan Dinamis: "(User A), (User B) dan +X lainnya..."
+                const totalOthers = sameTaskNotifs.length;
+                const userA = usersStack[0]?.name.split(' ')[0];
+                const userB = usersStack[1]?.name.split(' ')[0];
+                
+                let groupMsg = "";
+                if (usersStack.length === 2) {
+                    groupMsg = `${userA} dan ${userB} berkomentar di task ini.`;
+                } else if (usersStack.length > 2) {
+                    groupMsg = `${userA}, ${userB} dan +${totalOthers - 1} lainnya berkomentar.`;
+                } else {
+                    groupMsg = displayNotif.message; // Fallback
+                }
+                
+                setDynamicMessage(groupMsg);
+            } else {
+                setDynamicMessage(null); // Reset jika single user
+            }
+        }
+    } else {
+        setDynamicMessage(null);
+    }
+
+    setStackedUsers(usersStack);
+    setActivePopup(displayNotif);
+
     // Play sound
     if (audioRef.current) {
         audioRef.current.currentTime = 0;
         audioRef.current.play().catch(() => {});
     }
 
-    setActivePopup(notif);
-
-    // Auto hide after 10 seconds (extended duration)
+    // Auto hide after 10 seconds
     setTimeout(() => {
       setActivePopup((prev) => (prev?.id === notif.id ? null : prev));
     }, 10000);
@@ -46,7 +112,7 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
   useEffect(() => {
     if (!currentUser) return;
 
-    // 1. Initial Fetch: Set baseline ID
+    // 1. Initial Fetch
     const initFetch = async () => {
         const { data } = await supabase
             .from('notifications')
@@ -112,13 +178,16 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
 
   if (activePopup.type === 'task_completed') {
       icon = <CheckCircle2 size={20} />;
-      colorClass = "bg-[#34D399] text-slate-900"; // Quaternary (Green)
+      colorClass = "bg-[#34D399] text-slate-900"; // Quaternary
   } else if (activePopup.type === 'comment_reply') {
       icon = <MessageSquare size={20} />;
-      colorClass = "bg-[#8B5CF6] text-white"; // Accent (Purple)
+      colorClass = "bg-[#8B5CF6] text-white"; // Accent
   } else if (activePopup.type === 'reaction') {
       icon = <Zap size={20} />;
-      colorClass = "bg-[#F472B6] text-white"; // Secondary (Pink)
+      colorClass = "bg-[#F472B6] text-white"; // Secondary
+  } else if (activePopup.type === 'mention') {
+      icon = <AtSign size={20} />;
+      colorClass = "bg-[#FBBF24] text-slate-900"; // Tertiary
   }
 
   return (
@@ -130,19 +199,34 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
         }}
         className="pointer-events-auto cursor-pointer bg-white border-2 border-slate-800 rounded-2xl p-4 shadow-[6px_6px_0px_0px_#1E293B] flex gap-4 animate-in slide-in-from-right-full duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] w-full hover:-translate-y-1 hover:shadow-[8px_8px_0px_0px_#1E293B] transition-all"
       >
-        {/* Icon Box */}
-        <div className={`w-12 h-12 rounded-xl border-2 border-slate-800 flex items-center justify-center shrink-0 shadow-sm ${colorClass}`}>
-           {icon}
+        {/* Left Side: Avatar Stack OR Icon */}
+        <div className="shrink-0 flex items-center justify-center">
+            {stackedUsers.length > 0 ? (
+                <div className="flex -space-x-3">
+                    {stackedUsers.map((u, idx) => (
+                        <img 
+                            key={idx}
+                            src={u.avatar} 
+                            className={`w-12 h-12 rounded-full border-2 border-slate-800 object-cover bg-white ${idx > 0 ? 'scale-90 opacity-90' : 'z-10'}`} 
+                            alt={u.name}
+                        />
+                    ))}
+                </div>
+            ) : (
+                <div className={`w-12 h-12 rounded-xl border-2 border-slate-800 flex items-center justify-center shadow-sm ${colorClass}`}>
+                   {icon}
+                </div>
+            )}
         </div>
 
         {/* Content */}
         <div className="flex-1 min-w-0 flex flex-col justify-center">
             <div className="flex justify-between items-start">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 truncate pr-2">
                   {activePopup.title}
                 </span>
                 <button
-                  className="w-6 h-6 -mr-2 -mt-2 rounded-lg hover:bg-slate-100 flex items-center justify-center transition-colors text-slate-400 hover:text-slate-800"
+                  className="w-6 h-6 -mr-2 -mt-2 rounded-lg hover:bg-slate-100 flex items-center justify-center transition-colors text-slate-400 hover:text-slate-800 shrink-0"
                   onClick={(e) => {
                     e.stopPropagation();
                     setActivePopup(null);
@@ -152,7 +236,7 @@ export const NotificationSystem: React.FC<NotificationSystemProps> = ({ currentU
                 </button>
             </div>
             <p className="text-xs md:text-sm font-bold text-slate-800 leading-snug line-clamp-4">
-              {activePopup.message}
+              {dynamicMessage || activePopup.message}
             </p>
         </div>
       </div>
