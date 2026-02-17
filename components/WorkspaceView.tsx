@@ -84,9 +84,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   // CHAT STATE
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  
+  // Refs for Realtime Logic (Avoid stale closures without re-subscribing)
+  const isChatOpenRef = useRef(isChatOpen);
+  const currentUserIdRef = useRef(currentUserId);
 
   const notepadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notepadRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    isChatOpenRef.current = isChatOpen;
+  }, [isChatOpen]);
+
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -118,29 +130,20 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
   // --- UNREAD CHAT COUNT LOGIC ---
   const fetchUnreadChatCount = async () => {
-    if (!currentUserId) return;
+    if (!currentUserIdRef.current) return;
     
-    // 1. Get total messages count in this workspace (not sent by me)
-    const { count: totalMsg, error: msgError } = await supabase
-        .from('workspace_messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('workspace_id', workspace.id)
-        .neq('user_id', currentUserId);
-
-    // 2. Get count of messages I have read
-    // Note: Ideally we filter read receipts by message workspace_id, but here we do a simple approximation or fetch ids
-    // Optimasi: Ambil ID pesan yang belum dibaca secara spesifik
+    // Ambil pesan yang belum dibaca user ini
     const { data: unreadMessages, error } = await supabase
         .from('workspace_messages')
         .select('id, reads:workspace_message_reads(user_id)')
         .eq('workspace_id', workspace.id)
-        .neq('user_id', currentUserId);
+        .neq('user_id', currentUserIdRef.current); // Pesan orang lain
         
     if (unreadMessages) {
         // Filter pesan dimana TIDAK ada read receipt dari user ini
         const unread = unreadMessages.filter((msg: any) => {
             const readReceipts = msg.reads || [];
-            return !readReceipts.some((r: any) => r.user_id === currentUserId);
+            return !readReceipts.some((r: any) => r.user_id === currentUserIdRef.current);
         });
         setUnreadChatCount(unread.length);
     }
@@ -170,8 +173,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           }
         }
       )
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workspace_messages', filter: `workspace_id=eq.${workspace.id}`}, () => {
-          if (!isChatOpen) fetchUnreadChatCount();
+      // --- REALTIME CHAT BADGE LOGIC (Optimistic Update) ---
+      .on('postgres_changes', { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'workspace_messages', 
+          filter: `workspace_id=eq.${workspace.id}`
+      }, (payload) => {
+          const newMsg = payload.new;
+          const myId = currentUserIdRef.current;
+          
+          // Jika pesan dari orang lain DAN chat sedang tertutup
+          if (myId && newMsg.user_id !== myId && !isChatOpenRef.current) {
+              // Langsung update state tanpa fetch ulang (INSTANT)
+              setUnreadChatCount(prev => prev + 1);
+          }
       })
       .on('broadcast', { event: 'typing' }, (payload) => {
           const typerName = payload.payload.user;
@@ -201,7 +217,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       supabase.removeChannel(channel); 
       channelRef.current = null;
     };
-  }, [workspace.id, currentUserId, isChatOpen]); 
+  }, [workspace.id, currentUserId]); // Removed isChatOpen from dependency to prevent reconnects
 
   // Reset count when chat opens
   useEffect(() => {
@@ -209,6 +225,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           setUnreadChatCount(0);
           // Optional: Mark all as read logic is handled inside WorkspaceChat component
       } else {
+          // Ketika chat ditutup, pastikan hitungan sinkron dengan DB (untuk akurasi)
           fetchUnreadChatCount();
       }
   }, [isChatOpen]);
