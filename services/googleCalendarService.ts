@@ -71,7 +71,17 @@ export class GoogleCalendarService {
         }
       );
 
-      if (!response.ok) throw new Error("Failed to fetch calendar list");
+      if (response.status === 401) {
+        console.warn("Google Calendar Token Expired or Invalid");
+        return [];
+      }
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error(`Failed to fetch calendars (${response.status}):`, errText);
+        throw new Error(`Failed to fetch calendar list: ${response.statusText}`);
+      }
+
       const data = await response.json();
       
       // Filter kalender yang bisa dibaca (accessRole !== "none")
@@ -86,7 +96,7 @@ export class GoogleCalendarService {
   public async fetchEvents(accessToken: string, calendarId: string = 'primary'): Promise<GoogleCalendarEvent[]> {
     try {
       const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?timeMin=${new Date().toISOString()}`,
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?timeMin=${new Date().toISOString()}&maxResults=250&singleEvents=true`,
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -94,6 +104,16 @@ export class GoogleCalendarService {
         }
       );
       
+      if (response.status === 401) {
+        console.warn(`Google Calendar Token Expired when fetching events for ${calendarId}`);
+        return [];
+      }
+
+      if (response.status === 404) {
+        console.warn(`Calendar not found or not accessible: ${calendarId}`);
+        return [];
+      }
+
       if (!response.ok) {
         throw new Error(`Failed to fetch calendar events: ${response.statusText}`);
       }
@@ -101,8 +121,9 @@ export class GoogleCalendarService {
       const data = await response.json();
       return data.items || [];
     } catch (error) {
-      console.error("Error fetching Google Calendar events:", error);
-      throw error;
+      console.error(`Error fetching Google Calendar events for ${calendarId}:`, error);
+      // Return empty array instead of throwing to prevent blocking Promise.all
+      return [];
     }
   }
 

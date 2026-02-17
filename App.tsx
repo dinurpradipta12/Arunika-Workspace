@@ -300,10 +300,7 @@ const App: React.FC = () => {
       
       if (wsData) {
         setWorkspaces(wsData as Workspace[]);
-        // Fix: Don't overwrite visibleSources if already set (persisted or changed)
-        if (visibleSources.length === 0) {
-          setVisibleSources((wsData as Workspace[]).map(ws => ws.id));
-        }
+        // FIX: Remove logic that resets visibleSources here to prevent filters resetting on save
       }
       if (tData) setTasks(tData as Task[]);
       if (bData) setGlobalBranding(bData as AppConfig);
@@ -559,21 +556,46 @@ const App: React.FC = () => {
       }
 
       if (editingTask && editingTask.id) {
-        setTasks(prevTasks => prevTasks.map(t => 
-            t.id === editingTask.id ? { ...t, ...payload } : t
-        ));
+        // --- HANDLE GOOGLE EVENT UPDATE ---
+        if (editingTask.id.startsWith('google-')) {
+            const googleToken = googleAccessToken || currentUser.app_settings?.googleAccessToken;
+            if (googleToken) {
+               const service = new GoogleCalendarService(() => {});
+               const eventId = editingTask.id.replace('google-', '');
+               // Note: taskData.workspace_id typically holds the calendar ID in our merged logic
+               // but NewTaskModal sets it based on selection.
+               // We need to trust the taskData or editingTask properties.
+               const calendarId = taskData.workspace_id || 'primary';
+               
+               await service.updateEvent(googleToken, eventId, {
+                   ...editingTask,
+                   ...payload // Overlay new data
+               }, calendarId);
+               
+               // Optimistic local update for UI smoothness
+               setGoogleEvents(prev => prev.map(t => t.id === editingTask.id ? { ...t, ...payload } : t));
+            } else {
+               alert("Koneksi Google terputus. Mohon sambungkan kembali di Profile.");
+            }
+        } else {
+            // --- HANDLE SUPABASE UPDATE ---
+            setTasks(prevTasks => prevTasks.map(t => 
+                t.id === editingTask.id ? { ...t, ...payload } : t
+            ));
 
-        if (detailTask && detailTask.id === editingTask.id) {
-            setDetailTask(prev => prev ? ({ ...prev, ...payload }) : null);
-        }
-        if (inspectedTask && inspectedTask.id === editingTask.id) {
-            setInspectedTask(prev => prev ? ({ ...prev, ...payload }) : null);
-        }
+            if (detailTask && detailTask.id === editingTask.id) {
+                setDetailTask(prev => prev ? ({ ...prev, ...payload }) : null);
+            }
+            if (inspectedTask && inspectedTask.id === editingTask.id) {
+                setInspectedTask(prev => prev ? ({ ...prev, ...payload }) : null);
+            }
 
-        const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
-        if (error) throw error;
+            const { error } = await supabase.from('tasks').update(payload).eq('id', editingTask.id);
+            if (error) throw error;
+        }
 
       } else {
+        // --- NEW TASK ---
         payload.created_at = new Date().toISOString();
         const { data: newTaskData, error } = await supabase.from('tasks').insert(payload).select().single();
         if (error) throw error;
@@ -655,6 +677,14 @@ const App: React.FC = () => {
   };
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
+    // SKIP SUPABASE UPDATE FOR GOOGLE TASKS
+    if (id.startsWith('google-')) {
+        // Optionally update Google state local only or implement delete logic
+        // For now, we update local state to reflect UI change but don't call Supabase
+        setGoogleEvents(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+        return;
+    }
+
     const targetTask = tasks.find(t => t.id === id);
     if (!targetTask) return;
 

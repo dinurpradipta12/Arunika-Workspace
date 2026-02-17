@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -10,7 +10,12 @@ import {
   Palette,
   Check,
   Plus,
-  Trash2
+  Trash2,
+  Settings,
+  Link as LinkIcon,
+  X,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { Task, TaskStatus, Workspace, TaskPriority } from '../types';
 import { GoogleCalendarService, GoogleCalendar } from '../services/googleCalendarService';
@@ -55,7 +60,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   onTaskClick, 
   userEmail, 
   googleAccessToken, 
-  onDayClick,
+  onDayClick, 
   sourceColors,
   setSourceColors,
   visibleSources,
@@ -76,6 +81,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [showPersonalTasks, setShowPersonalTasks] = useState(true);
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+
+  // --- NEW STATES FOR GOOGLE CALENDAR MANAGEMENT ---
+  const [isManageSyncOpen, setIsManageSyncOpen] = useState(false);
+  const [syncSettingsAnchor, setSyncSettingsAnchor] = useState<{top: number, left: number} | null>(null);
+  const [isAddingManualCal, setIsAddingManualCal] = useState(false);
+  const [manualCalId, setManualCalId] = useState('');
+  
+  // List of calendar IDs that user chose to HIDE from the filter list completely
+  const [hiddenCalendarIds, setHiddenCalendarIds] = useState<string[]>([]); 
 
   // --- HELPER DATE FUNCTIONS ---
   const formatDate = (date: Date | string) => {
@@ -121,6 +135,16 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     });
   }, [workspaces, googleCalendars]);
 
+  // --- DEDUPLICATION & MERGING LOGIC ---
+  const mergedTasks = useMemo(() => {
+    const localGoogleIds = new Set(tasks.map(t => t.google_event_id).filter(Boolean));
+    const uniqueGoogleEvents = googleEvents.filter(ge => {
+       const googleId = ge.id.replace('google-', '');
+       return !localGoogleIds.has(googleId);
+    });
+    return [...tasks, ...uniqueGoogleEvents];
+  }, [tasks, googleEvents]);
+
   // --- HANDLERS ---
   const handleAddCategory = () => {
     if (newCategoryName.trim()) {
@@ -146,19 +170,28 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setVisibleSources(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
+  const toggleHiddenCalendar = (id: string) => {
+    setHiddenCalendarIds(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
+  };
+
   const handleSync = useCallback(async () => {
     if (!googleAccessToken) return;
     setIsSyncing(true);
     try {
       const service = new GoogleCalendarService(() => {});
-      const calendars = await service.fetchCalendars(googleAccessToken);
-      setGoogleCalendars(calendars);
+      
+      let fetchedCalendars = await service.fetchCalendars(googleAccessToken);
+      
+      // Preserve manually added calendars that might not be in the main list
+      const existingManuals = googleCalendars.filter(gc => gc.id.includes('@') && !fetchedCalendars.find(fc => fc.id === gc.id));
+      const combinedCalendars = [...fetchedCalendars, ...existingManuals];
+      
+      setGoogleCalendars(combinedCalendars);
 
-      const allEventsPromises = calendars.map(async (cal) => {
+      const allEventsPromises = combinedCalendars.map(async (cal) => {
         try {
           const events = await service.fetchEvents(googleAccessToken, cal.id);
           return events.map(event => {
-            // FIX: Google Calendar All-Day Events Exclusive End Date Issue
             let finalDueDate = event.end.dateTime || event.end.date || new Date().toISOString();
             if (event.end.date) {
                const endDateObj = new Date(event.end.date);
@@ -186,12 +219,17 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       const flattenedEvents = results.flat();
       setGoogleEvents(flattenedEvents);
       
-      const calIds = calendars.map(c => c.id);
-      setVisibleSources(prev => [...new Set([...prev, ...calIds])]);
+      // FIX: Only append new IDs to visibleSources, do not reset existing ones
+      const calIds = combinedCalendars.map(c => c.id);
+      setVisibleSources(prev => {
+          const newIds = calIds.filter(id => !prev.includes(id));
+          return [...prev, ...newIds];
+      });
+
     } catch(err) {
       console.error("Sync Error:", err);
     } finally { setIsSyncing(false); }
-  }, [googleAccessToken, setGoogleCalendars, setGoogleEvents, setVisibleSources]);
+  }, [googleAccessToken, setGoogleCalendars, setGoogleEvents, setVisibleSources, googleCalendars]); 
 
   // Initial Sync on load if token exists
   useEffect(() => {
@@ -200,28 +238,121 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     }
   }, [googleAccessToken]);
 
+  const handleManualAddCalendar = async () => {
+      if (!manualCalId.trim() || !googleAccessToken) return;
+      setIsSyncing(true);
+      try {
+          const service = new GoogleCalendarService(() => {});
+          await service.fetchEvents(googleAccessToken, manualCalId);
+          
+          const newCal: GoogleCalendar = {
+              id: manualCalId,
+              summary: manualCalId, 
+              backgroundColor: UI_PALETTE[googleCalendars.length % UI_PALETTE.length]
+          };
+          
+          setGoogleCalendars(prev => [...prev, newCal]);
+          setVisibleSources(prev => [...prev, newCal.id]);
+          
+          await handleSync();
+          
+          setManualCalId('');
+          setIsAddingManualCal(false);
+      } catch (err) {
+          alert("Gagal menambahkan kalender. Pastikan ID benar.");
+      } finally {
+          setIsSyncing(false);
+      }
+  };
+
   const handlePrevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
   const handleNextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
 
   const handleDrop = useCallback(async (e: React.DragEvent, date: Date) => {
     e.preventDefault();
     const taskId = e.dataTransfer.getData('taskId');
-    if (!taskId || taskId.startsWith('google-')) return;
+    if (!taskId) return;
 
-    try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({ 
-          due_date: date.toISOString(),
-          start_date: date.toISOString() 
-        })
-        .eq('id', taskId);
-      
-      if (error) throw error;
-    } catch (err) {
-      console.error("Gagal memindahkan agenda:", err);
+    // FIND THE ORIGINAL TASK
+    const task = mergedTasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    // CALCULATE NEW TIME (PRESERVING HOURS/MINUTES CORRECTLY)
+    const originalStart = new Date(task.start_date || new Date().toISOString());
+    const originalDue = new Date(task.due_date || new Date().toISOString());
+    const duration = originalDue.getTime() - originalStart.getTime();
+
+    // 'date' is 00:00 Local Time of the cell
+    const newStart = new Date(date); 
+    
+    // Only if not all-day, preserve the original time components
+    // FIX: Ensure we don't accidentally set 00:00 if original was parsed as UTC midnight
+    if (!task.is_all_day) {
+        newStart.setHours(originalStart.getHours(), originalStart.getMinutes(), 0, 0);
     }
-  }, []);
+
+    const newDue = new Date(newStart.getTime() + duration);
+
+    if (taskId.startsWith('google-')) {
+       // --- HANDLE GOOGLE EVENT DROP ---
+       if (!googleAccessToken) {
+           alert("Mohon sambungkan akun Google untuk mengubah jadwal event ini.");
+           return;
+       }
+
+       // Optimistic Update
+       setGoogleEvents(prev => prev.map(t => {
+           if (t.id === taskId) {
+               return { 
+                   ...t, 
+                   start_date: newStart.toISOString(), 
+                   due_date: newDue.toISOString() 
+               };
+           }
+           return t;
+       }));
+
+       try {
+           const service = new GoogleCalendarService(() => {});
+           const eventId = taskId.replace('google-', '');
+           const calendarId = task.workspace_id || 'primary'; 
+           
+           await service.updateEvent(googleAccessToken, eventId, {
+               ...task,
+               start_date: newStart.toISOString(),
+               due_date: newDue.toISOString(),
+               is_all_day: task.is_all_day // CRITICAL: Keep original is_all_day status
+           }, calendarId);
+       } catch (err) {
+           console.error("Google Update Failed:", err);
+           alert("Gagal update ke Google Calendar.");
+           handleSync(); // Revert
+       }
+
+    } else {
+       // --- HANDLE SUPABASE TASK DROP ---
+       try {
+        const { error } = await supabase
+            .from('tasks')
+            .update({ 
+                due_date: newDue.toISOString(),
+                start_date: newStart.toISOString() 
+            })
+            .eq('id', taskId);
+        
+        if (error) throw error;
+        } catch (err) {
+            console.error("Gagal memindahkan agenda:", err);
+        }
+    }
+  }, [googleAccessToken, mergedTasks, handleSync]);
+
+  const handleSettingsClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      setSyncSettingsAnchor({ top: rect.bottom, left: rect.left });
+      setIsManageSyncOpen(true);
+  };
 
   // --- CALENDAR GRID GENERATION ---
   const calendarDays = useMemo(() => {
@@ -252,20 +383,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     return weeks;
   }, [calendarDays]);
 
-  // --- DEDUPLICATION & MERGING LOGIC ---
-  const mergedTasks = useMemo(() => {
-    // 1. Identify local tasks that have been synced to Google (have a google_event_id)
-    const localGoogleIds = new Set(tasks.map(t => t.google_event_id).filter(Boolean));
-    
-    // 2. Filter out Google Events that are already present as local tasks
-    const uniqueGoogleEvents = googleEvents.filter(ge => {
-       const googleId = ge.id.replace('google-', '');
-       return !localGoogleIds.has(googleId);
-    });
-
-    return [...tasks, ...uniqueGoogleEvents];
-  }, [tasks, googleEvents]);
-
   const todayAgenda = useMemo(() => {
     const todayStr = formatDate(new Date());
     return mergedTasks.filter(t => {
@@ -294,10 +411,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         if (!activeCategories.includes(taskCat)) return false;
         if (t.parent_id && !showPersonalTasks) return false;
         
-        // VISIBILITY LOGIC FIX:
-        // Tasks from workspaces must match visibleSources.
-        // Google events must match visibleSources (calendar IDs).
-        // Personal subtasks handled separately.
+        // Ensure not hidden by "Manage Sync" logic AND is checked in sidebar
         if (!t.parent_id && !visibleSources.includes(t.workspace_id)) return false;
         
         if (t.is_archived) return false;
@@ -313,11 +427,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     weekTasks.sort((a, b) => {
         const startA = new Date(a.start_date || a.due_date!).getTime();
         const startB = new Date(b.start_date || b.due_date!).getTime();
-        if (startA !== startB) return startA - startB; // Earlier start first
+        if (startA !== startB) return startA - startB; 
 
         const durA = new Date(a.due_date!).getTime() - startA;
         const durB = new Date(b.due_date!).getTime() - startB;
-        if (durA !== durB) return durB - durA; // Longer duration first (top)
+        if (durA !== durB) return durB - durA; 
 
         return (a.title || '').localeCompare(b.title || '');
     });
@@ -373,8 +487,41 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   })();
 
   return (
-    <div className="w-full pb-20 animate-in fade-in duration-500 space-y-6">
+    <div className="w-full pb-20 animate-in fade-in duration-500 space-y-6 relative">
       
+      {/* --- MANAGE SYNC MODAL POPOVER --- */}
+      {isManageSyncOpen && (
+          <div className="fixed inset-0 z-[100] bg-slate-900/10 backdrop-blur-sm" onClick={() => setIsManageSyncOpen(false)}>
+              <div 
+                className="absolute z-[101] w-72 bg-white border-4 border-slate-800 rounded-2xl shadow-pop animate-in zoom-in-95 origin-top-left"
+                style={{ 
+                    top: syncSettingsAnchor?.top ?? 100, 
+                    left: syncSettingsAnchor?.left ?? 100 
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                  <div className="p-3 bg-slate-50 border-b-2 border-slate-100 flex justify-between items-center">
+                      <h3 className="text-xs font-black uppercase text-slate-800">Atur Kalender</h3>
+                      <button onClick={() => setIsManageSyncOpen(false)} className="p-1 hover:bg-slate-200 rounded"><X size={14} /></button>
+                  </div>
+                  <div className="p-3 max-h-60 overflow-y-auto space-y-2">
+                      <p className="text-[9px] text-slate-400 font-bold mb-2">Pilih kalender yang ingin ditampilkan di filter:</p>
+                      {googleCalendars.map(cal => (
+                          <div key={cal.id} className="flex items-center justify-between p-2 rounded border border-slate-100 bg-white">
+                              <span className="text-[10px] font-bold truncate flex-1 pr-2 text-slate-700">{cal.summary}</span>
+                              <button 
+                                onClick={() => toggleHiddenCalendar(cal.id)}
+                                className={`p-1.5 rounded transition-colors ${hiddenCalendarIds.includes(cal.id) ? 'bg-slate-100 text-slate-300' : 'bg-quaternary/20 text-quaternary'}`}
+                              >
+                                  {hiddenCalendarIds.includes(cal.id) ? <EyeOff size={12} /> : <Eye size={12} />}
+                              </button>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* Header */}
       <div>
          <h2 className="text-4xl font-heading text-slate-900 tracking-tight">Calendar View Task</h2>
@@ -444,7 +591,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             <div className="space-y-4">
               {isAddingCategory && (
                 <div className="flex gap-2 animate-in slide-in-from-top-2">
-                  <input autoFocus className="w-full text-[10px] font-bold px-3 py-2 border-2 border-slate-800 rounded-xl outline-none" placeholder="Kategori..." value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()} />
+                  {/* STYLE UPDATE: WHITE INPUT WITH BLACK TEXT */}
+                  <input 
+                    autoFocus 
+                    className="w-full text-[10px] font-bold px-3 py-2 bg-white border-2 border-slate-800 rounded-xl outline-none text-slate-900" 
+                    placeholder="Kategori..." 
+                    value={newCategoryName} 
+                    onChange={(e) => setNewCategoryName(e.target.value)} 
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()} 
+                  />
                   <button onClick={handleAddCategory} className="px-3 bg-slate-800 text-white rounded-xl text-[10px]"><Check size={14} /></button>
                 </div>
               )}
@@ -467,6 +622,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   </div>
                 ))}
               </div>
+              
               {/* Workspaces & Google */}
               <div className="space-y-2 pt-2 border-t border-slate-100">
                 <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest px-1">Sumber Task</p>
@@ -482,6 +638,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     <input type="checkbox" checked={visibleSources.includes(ws.id)} onChange={() => toggleVisibility(ws.id)} className="w-4 h-4 rounded border border-slate-800 checked:bg-accent appearance-none cursor-pointer" />
                   </div>
                 ))}
+                
                 {/* Personal Subtasks */}
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
@@ -493,15 +650,45 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     </div>
                     <input type="checkbox" checked={showPersonalTasks} onChange={() => setShowPersonalTasks(!showPersonalTasks)} className="w-4 h-4 rounded border border-slate-800 checked:bg-accent appearance-none cursor-pointer" />
                 </div>
-                {/* Google Calendars */}
-                {googleCalendars.map(gc => (
+
+                {/* Google Calendars Header with Manual Add */}
+                <div className="flex items-center justify-between px-1 mt-2">
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Google Calendars</p>
+                    <button 
+                        onClick={() => setIsAddingManualCal(!isAddingManualCal)} 
+                        className="text-[8px] font-bold bg-slate-100 hover:bg-accent hover:text-white px-1.5 py-0.5 rounded transition-colors flex items-center gap-1"
+                    >
+                        <Plus size={8} strokeWidth={3} /> Add ID
+                    </button>
+                </div>
+
+                {/* Manual Add Input */}
+                {isAddingManualCal && (
+                    <div className="flex gap-1 animate-in fade-in slide-in-from-top-1">
+                        {/* STYLE UPDATE: WHITE INPUT WITH BLACK TEXT */}
+                        <input 
+                            autoFocus 
+                            placeholder="Calendar ID..." 
+                            className="flex-1 text-[9px] font-bold bg-white border-2 border-slate-800 rounded-lg px-2 py-1 outline-none text-slate-900"
+                            value={manualCalId}
+                            onChange={(e) => setManualCalId(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleManualAddCalendar()}
+                        />
+                        <button onClick={handleManualAddCalendar} className="bg-slate-800 text-white rounded-lg px-2 border-2 border-slate-800"><Check size={10} strokeWidth={3} /></button>
+                    </div>
+                )}
+
+                {/* Filtered Google Calendars */}
+                {googleCalendars
+                    .filter(gc => !hiddenCalendarIds.includes(gc.id))
+                    .map(gc => (
                     <div key={gc.id} className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
                         <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: sourceColors[gc.id] }} onClick={() => {
                             const nextColor = UI_PALETTE[(UI_PALETTE.indexOf(sourceColors[gc.id]) + 1) % UI_PALETTE.length];
                             setSourceColors(prev => ({ ...prev, [gc.id]: nextColor }));
                         }} />
-                        <span className="text-[11px] font-bold text-slate-700 truncate max-w-[120px]">{gc.summary}</span>
+                        <span className="text-[11px] font-bold text-slate-700 truncate max-w-[120px]" title={gc.summary}>{gc.summary}</span>
                       </div>
                       <input type="checkbox" checked={visibleSources.includes(gc.id)} onChange={() => toggleVisibility(gc.id)} className="w-4 h-4 rounded border border-slate-800 checked:bg-secondary appearance-none cursor-pointer" />
                     </div>
@@ -511,13 +698,31 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </div>
 
           <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop p-3">
-            <button onClick={handleSync} disabled={!googleAccessToken || isSyncing} className="w-full group flex items-center justify-between p-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all disabled:opacity-50">
-              <div className="flex items-center gap-2">
-                <div className={`w-8 h-8 ${gStatus.bg} rounded-lg flex items-center justify-center ${gStatus.color}`}><Chrome size={16} strokeWidth={3} /></div>
-                <div className="text-left"><p className="text-[8px] font-black uppercase text-slate-400">Google Sync</p><p className={`text-[9px] font-bold ${gStatus.color}`}>{gStatus.label}</p></div>
-              </div>
-              <RefreshCw size={12} className={`text-slate-300 transition-all ${isSyncing ? 'animate-spin text-accent' : ''}`} />
-            </button>
+            {/* UPDATED LAYOUT: 80% Sync, 20% Settings */}
+            <div className="flex gap-2">
+                <button 
+                    onClick={handleSync} 
+                    disabled={!googleAccessToken || isSyncing} 
+                    className="flex-[4] group flex items-center justify-between p-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all disabled:opacity-50"
+                >
+                    <div className="flex items-center gap-2">
+                        <div className={`w-8 h-8 ${gStatus.bg} rounded-lg flex items-center justify-center ${gStatus.color}`}><Chrome size={16} strokeWidth={3} /></div>
+                        <div className="text-left leading-none">
+                            <p className="text-[8px] font-black uppercase text-slate-400">Google Sync</p>
+                            <p className={`text-[9px] font-bold ${gStatus.color} mt-0.5`}>{gStatus.label}</p>
+                        </div>
+                    </div>
+                    <RefreshCw size={12} className={`text-slate-300 transition-all ${isSyncing ? 'animate-spin text-accent' : ''}`} />
+                </button>
+
+                <button 
+                    onClick={handleSettingsClick}
+                    className="flex-[1] flex items-center justify-center p-2 rounded-xl border-2 border-slate-800 bg-slate-50 hover:bg-slate-100 shadow-sm transition-all text-slate-600"
+                    title="Atur Kalender"
+                >
+                    <Settings size={18} />
+                </button>
+            </div>
           </div>
         </aside>
 
@@ -589,10 +794,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                 const timeLabel = (!task.is_all_day && task.start_date) ? getTimeString(task.start_date) : '';
                                 const label = timeLabel ? `${timeLabel} - ${task.title}` : task.title;
 
+                                // Allow drag for both regular and Google tasks
                                 return (
                                     <button
                                         key={`${task.id}-w${weekIdx}`}
-                                        draggable={!task.id.startsWith('google-')}
+                                        draggable
                                         onDragStart={(e) => {
                                             e.dataTransfer.setData('taskId', task.id);
                                             e.dataTransfer.effectAllowed = 'move';

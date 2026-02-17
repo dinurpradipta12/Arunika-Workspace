@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { TaskComment, User, CommentReaction } from '../types';
-import { Send, MessageSquare, SmilePlus, CornerDownRight, MoreHorizontal, Trash2, X, AtSign, Paperclip, Image as ImageIcon, Download, ExternalLink } from 'lucide-react';
+import { Send, MessageSquare, SmilePlus, CornerDownRight, MoreHorizontal, Trash2, X, AtSign, Paperclip, Image as ImageIcon, Download, ExternalLink, Lock } from 'lucide-react';
 
 interface TaskCommentsProps {
   taskId: string;
@@ -39,7 +40,12 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionCursorIndex, setMentionCursorIndex] = useState<number | null>(null);
 
+  // Helper to check if task is external (Google)
+  const isExternalTask = taskId.startsWith('google-');
+
   useEffect(() => {
+    if (isExternalTask) return; // SKIP FETCHING FOR GOOGLE TASKS
+
     fetchComments();
     fetchWorkspaceMembers();
     
@@ -61,6 +67,8 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   }, [comments.length]);
 
   const fetchWorkspaceMembers = async () => {
+      if (isExternalTask) return;
+      
       const { data: taskData } = await supabase.from('tasks').select('workspace_id').eq('id', taskId).single();
       if (!taskData) return;
 
@@ -75,6 +83,8 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   };
 
   const fetchComments = async () => {
+    if (isExternalTask) return;
+
     try {
         const { data: commentsData, error } = await supabase
           .from('task_comments')
@@ -179,6 +189,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   // --- SEND LOGIC (TEXT) ---
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isExternalTask) return;
     const contentToSend = content.trim();
     if (!contentToSend) return;
     executeSendMessage(contentToSend);
@@ -186,6 +197,8 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
 
   // --- SEND LOGIC (CORE) ---
   const executeSendMessage = async (finalContent: string) => {
+    if (isExternalTask) return;
+
     const replyTarget = replyingTo;
     const currentUserId = currentUser.id;
     const senderName = getSafeSenderName();
@@ -531,6 +544,16 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, currentUser 
   };
 
   const canSend = content.trim().length > 0;
+
+  if (isExternalTask) {
+      return (
+          <div className="flex flex-col h-full bg-slate-50 border-2 border-slate-200 rounded-2xl overflow-hidden relative items-center justify-center text-center p-6 opacity-60">
+              <Lock size={32} className="text-slate-400 mb-3" />
+              <h3 className="text-sm font-black text-slate-600 uppercase tracking-widest">Komentar Dikunci</h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-[200px]">Fitur diskusi tidak tersedia untuk task dari Google Calendar.</p>
+          </div>
+      );
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 border-2 border-slate-200 rounded-2xl overflow-hidden relative">
