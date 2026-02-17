@@ -99,10 +99,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
   // --- INITIALIZATION ---
   useEffect(() => {
+    // Force visibleSources to contain all workspaces initially if empty
     if (visibleSources.length === 0 && workspaces.length > 0) {
       setVisibleSources(workspaces.map(ws => ws.id));
     }
-  }, [workspaces, visibleSources, setVisibleSources]);
+  }, [workspaces]); 
 
   useEffect(() => {
     const allIds = [...workspaces.map(ws => ws.id), ...googleCalendars.map(gc => gc.id), 'personal-subtasks'];
@@ -118,7 +119,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       });
       return changed ? next : prev;
     });
-  }, [workspaces, googleCalendars, setSourceColors]);
+  }, [workspaces, googleCalendars]);
 
   // --- HANDLERS ---
   const handleAddCategory = () => {
@@ -158,7 +159,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           const events = await service.fetchEvents(googleAccessToken, cal.id);
           return events.map(event => {
             // FIX: Google Calendar All-Day Events Exclusive End Date Issue
-            // If it is all day (has event.end.date), subtract 1 day from end date for display
             let finalDueDate = event.end.dateTime || event.end.date || new Date().toISOString();
             if (event.end.date) {
                const endDateObj = new Date(event.end.date);
@@ -183,11 +183,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         } catch (e) { return []; }
       });
       const results = await Promise.all(allEventsPromises);
-      setGoogleEvents(results.flat());
+      const flattenedEvents = results.flat();
+      setGoogleEvents(flattenedEvents);
+      
       const calIds = calendars.map(c => c.id);
       setVisibleSources(prev => [...new Set([...prev, ...calIds])]);
+    } catch(err) {
+      console.error("Sync Error:", err);
     } finally { setIsSyncing(false); }
   }, [googleAccessToken, setGoogleCalendars, setGoogleEvents, setVisibleSources]);
+
+  // Initial Sync on load if token exists
+  useEffect(() => {
+    if (googleAccessToken && googleEvents.length === 0) {
+      handleSync();
+    }
+  }, [googleAccessToken]);
 
   const handlePrevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
   const handleNextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
@@ -224,7 +235,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     return days;
   }, [currentDate]);
 
-  // Group days into weeks (Rows)
   const calendarWeeks = useMemo(() => {
     const weeks: (Date | null)[][] = [];
     let currentWeek: (Date | null)[] = [];
@@ -232,7 +242,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     calendarDays.forEach((day, index) => {
         currentWeek.push(day);
         if ((index + 1) % 7 === 0 || index === calendarDays.length - 1) {
-            // Fill remaining days if last week is incomplete
             while (currentWeek.length < 7) {
                 currentWeek.push(null);
             }
@@ -243,20 +252,31 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     return weeks;
   }, [calendarDays]);
 
-  // --- DATA PREPARATION FOR OVERLAY RENDERING ---
+  // --- DEDUPLICATION & MERGING LOGIC ---
+  const mergedTasks = useMemo(() => {
+    // 1. Identify local tasks that have been synced to Google (have a google_event_id)
+    const localGoogleIds = new Set(tasks.map(t => t.google_event_id).filter(Boolean));
+    
+    // 2. Filter out Google Events that are already present as local tasks
+    const uniqueGoogleEvents = googleEvents.filter(ge => {
+       const googleId = ge.id.replace('google-', '');
+       return !localGoogleIds.has(googleId);
+    });
+
+    return [...tasks, ...uniqueGoogleEvents];
+  }, [tasks, googleEvents]);
+
   const todayAgenda = useMemo(() => {
     const todayStr = formatDate(new Date());
-    const allTasks = [...tasks, ...googleEvents];
-    return allTasks.filter(t => {
+    return mergedTasks.filter(t => {
       if (t.is_archived) return false;
       const taskCat = t.category || 'General';
       if (!activeCategories.includes(taskCat)) return false;
       const dDate = t.due_date ? formatDate(t.due_date) : null;
       return dDate && dDate === todayStr;
     });
-  }, [tasks, googleEvents, activeCategories]);
+  }, [mergedTasks, activeCategories]);
 
-  // Calculate layout for each week
   const getWeekLayout = (weekDays: (Date | null)[]) => {
     if (weekDays.every(d => d === null)) return { tasks: [], maxRow: 0 };
 
@@ -269,18 +289,23 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     const weekEndStr = formatDate(weekEnd);
 
     // 1. Filter tasks visible in this week
-    const weekTasks = [...tasks, ...googleEvents].filter(t => {
+    const weekTasks = mergedTasks.filter(t => {
         const taskCat = t.category || 'General';
         if (!activeCategories.includes(taskCat)) return false;
         if (t.parent_id && !showPersonalTasks) return false;
+        
+        // VISIBILITY LOGIC FIX:
+        // Tasks from workspaces must match visibleSources.
+        // Google events must match visibleSources (calendar IDs).
+        // Personal subtasks handled separately.
         if (!t.parent_id && !visibleSources.includes(t.workspace_id)) return false;
+        
         if (t.is_archived) return false;
 
         const tStart = formatDate(t.start_date || t.due_date!);
         const tEnd = formatDate(t.due_date!);
         if (!tStart || !tEnd) return false;
 
-        // Overlap logic: Task ends after week starts AND starts before week ends
         return tEnd >= weekStartStr && tStart <= weekEndStr;
     });
 
@@ -297,8 +322,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         return (a.title || '').localeCompare(b.title || '');
     });
 
-    // 3. Assign Visual Slots (0, 1, 2...)
-    // occupied[rowIndex] = [true, false, true, ...] (7 days)
+    // 3. Assign Visual Slots
     const occupied: boolean[][] = [];
     const layout: { task: Task, row: number, startCol: number, colSpan: number }[] = [];
 
@@ -306,28 +330,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         const tStart = formatDate(task.start_date || task.due_date!);
         const tEnd = formatDate(task.due_date!);
 
-        // Determine Start Column (0-6)
         let startCol = 0;
         let endCol = 6;
 
-        // If task starts inside this week, find which day index
         if (tStart >= weekStartStr) {
             const startIndex = weekDays.findIndex(d => d && formatDate(d) === tStart);
             if (startIndex !== -1) startCol = startIndex;
         }
 
-        // If task ends inside this week
         if (tEnd <= weekEndStr) {
             const endIndex = weekDays.findIndex(d => d && formatDate(d) === tEnd);
             if (endIndex !== -1) endCol = endIndex;
         }
 
-        // Check slots for these columns
         let rowIndex = 0;
         while (true) {
             if (!occupied[rowIndex]) occupied[rowIndex] = Array(7).fill(false);
-            
-            // Check collision in the required columns
             let collision = false;
             for (let i = startCol; i <= endCol; i++) {
                 if (occupied[rowIndex][i]) {
@@ -337,16 +355,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             }
 
             if (!collision) {
-                // Book it
-                for (let i = startCol; i <= endCol; i++) {
-                    occupied[rowIndex][i] = true;
-                }
-                layout.push({
-                    task,
-                    row: rowIndex,
-                    startCol,
-                    colSpan: endCol - startCol + 1
-                });
+                for (let i = startCol; i <= endCol; i++) occupied[rowIndex][i] = true;
+                layout.push({ task, row: rowIndex, startCol, colSpan: endCol - startCol + 1 });
                 break;
             }
             rowIndex++;

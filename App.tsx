@@ -156,6 +156,13 @@ const App: React.FC = () => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
 
+  // --- PERSIST GOOGLE TOKEN ON LOAD ---
+  useEffect(() => {
+    if (currentUser?.app_settings?.googleAccessToken) {
+      setGoogleAccessToken(currentUser.app_settings.googleAccessToken);
+    }
+  }, [currentUser]);
+
   // --- GLOBAL ESC KEY HANDLER (STACK LOGIC) ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -293,6 +300,7 @@ const App: React.FC = () => {
       
       if (wsData) {
         setWorkspaces(wsData as Workspace[]);
+        // Fix: Don't overwrite visibleSources if already set (persisted or changed)
         if (visibleSources.length === 0) {
           setVisibleSources((wsData as Workspace[]).map(ws => ws.id));
         }
@@ -307,7 +315,7 @@ const App: React.FC = () => {
     } finally {
       setIsFetching(false);
     }
-  }, [currentUser?.id, visibleSources.length]);
+  }, [currentUser?.id]); // Removed visibleSources from dependency to prevent loop
 
   const fetchOrCreateUser = useCallback(async (sessionUser: any) => {
     if (!currentUserRef.current) {
@@ -315,11 +323,6 @@ const App: React.FC = () => {
     }
     try {
       let { data, error } = await supabase.from('users').select('*').eq('id', sessionUser.id).single();
-      
-      // LOGIC PENENTU SUPERUSER / ADMIN 'ARUNIKA'
-      // 1. Cek email (jika login by email)
-      // 2. Cek username dari metadata (jika login by username atau metadata ada)
-      // 3. Cek username dari tabel users (jika data ditemukan)
       
       const email = sessionUser.email?.toLowerCase() || '';
       const metaUsername = sessionUser.user_metadata?.username?.toLowerCase() || '';
@@ -425,8 +428,6 @@ const App: React.FC = () => {
       if (configChannelRef.current) supabase.removeChannel(configChannelRef.current);
       configChannelRef.current = supabase.channel('app-config-live').on('postgres_changes', { event: '*', schema: 'public', table: 'app_config', filter: 'id=eq.1'}, (payload) => { setGlobalBranding(payload.new as AppConfig); }).subscribe();
 
-      // NOTIFICATION LISTENER FOR BELL ICON COUNT ONLY
-      // Popup logic moved to NotificationSystem
       if (notificationChannelRef.current) supabase.removeChannel(notificationChannelRef.current);
       notificationChannelRef.current = supabase
         .channel(`notifications-list-${currentUser.id}`)
@@ -552,6 +553,11 @@ const App: React.FC = () => {
       }
       const payload: any = { title: taskData.title, description: taskData.description || null, status: taskData.status || TaskStatus.TODO, priority: taskData.priority || TaskPriority.MEDIUM, workspace_id: targetWorkspaceId, parent_id: taskData.parent_id || null, due_date: taskData.due_date || null, start_date: taskData.start_date || null, is_all_day: taskData.is_all_day ?? true, is_archived: taskData.is_archived ?? false, category: taskData.category || 'General', created_by: currentUser.id, assigned_to: taskData.assigned_to || null };
       
+      // AUTO ADD TO VISIBLE SOURCES if not already
+      if (targetWorkspaceId && !visibleSources.includes(targetWorkspaceId)) {
+          setVisibleSources(prev => [...prev, targetWorkspaceId]);
+      }
+
       if (editingTask && editingTask.id) {
         setTasks(prevTasks => prevTasks.map(t => 
             t.id === editingTask.id ? { ...t, ...payload } : t
@@ -576,21 +582,27 @@ const App: React.FC = () => {
             setTasks(prev => [newTaskData as Task, ...prev]);
 
             // --- AUTO SYNC TO GOOGLE CALENDAR ---
-            // Cek apakah user terkoneksi ke Google Calendar
             const isGoogleConnected = currentUser.app_settings?.googleConnected;
+            // Prefer token from State (refreshed from DB on load), fallback to DB user obj
             const googleToken = googleAccessToken || currentUser.app_settings?.googleAccessToken;
 
             if (isGoogleConnected && googleToken) {
                // Jangan sync sub-task (opsional) atau task yang bukan workspace kalender
                if (!newTaskData.parent_id) {
                   const googleService = new GoogleCalendarService(() => {});
-                  const event = await googleService.createEvent(googleToken, newTaskData);
-                  
-                  if (event && event.id) {
-                     // Simpan Google Event ID kembali ke database
-                     await supabase.from('tasks').update({ 
-                       google_event_id: event.id 
-                     }).eq('id', newTaskData.id);
+                  try {
+                    const event = await googleService.createEvent(googleToken, newTaskData);
+                    if (event && event.id) {
+                       await supabase.from('tasks').update({ 
+                         google_event_id: event.id 
+                       }).eq('id', newTaskData.id);
+                       
+                       // Optimistic update for UI
+                       setTasks(prev => prev.map(t => t.id === newTaskData.id ? { ...t, google_event_id: event.id } : t));
+                    }
+                  } catch (syncErr) {
+                    console.error("Google Sync Failed:", syncErr);
+                    // Optionally alert user or silent fail
                   }
                }
             }
@@ -611,11 +623,18 @@ const App: React.FC = () => {
   const handleUpdateProfile = async (profileData: Partial<User>, newRole: string, settingsUpdate: any) => {
     if (!currentUser) return;
     try {
-        const personalSettings = { notificationsEnabled: settingsUpdate.notificationsEnabled, googleConnected: settingsUpdate.googleConnected, sourceColors: currentUser.app_settings?.sourceColors, visibleSources: currentUser.app_settings?.visibleSources, googleAccessToken: settingsUpdate.googleAccessToken || currentUser.app_settings?.googleAccessToken };
+        const personalSettings = { 
+            notificationsEnabled: settingsUpdate.notificationsEnabled, 
+            googleConnected: settingsUpdate.googleConnected, 
+            sourceColors: currentUser.app_settings?.sourceColors, 
+            visibleSources: currentUser.app_settings?.visibleSources, 
+            googleAccessToken: settingsUpdate.googleAccessToken || currentUser.app_settings?.googleAccessToken 
+        };
         const updates = { ...profileData, status: newRole, app_settings: personalSettings };
         
         setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
         
+        // Update DB
         const { error } = await supabase.from('users').update(updates).eq('id', currentUser.id);
         if (error) throw error;
         
@@ -847,6 +866,7 @@ const App: React.FC = () => {
           members={activeWorkspaceMembers} 
         />
         
+        {/* ... Rest of the components (NewWorkspaceModal, JoinWorkspaceModal, Sidebar, etc.) same as before ... */}
         <NewWorkspaceModal 
           isOpen={isNewWorkspaceModalOpen}
           onClose={() => { setIsNewWorkspaceModalOpen(false); setEditingWorkspace(null); }}
@@ -1112,8 +1132,10 @@ const App: React.FC = () => {
               />
             )}
             
+            {/* ... (Existing Task Board Code) ... */}
             {activeTab === 'tasks' && (
               <div className="space-y-8 pb-20">
+                {/* ... existing header ... */}
                 <div className="flex justify-between items-end">
                   <div>
                     <h2 className="text-4xl font-heading tracking-tighter">My Board</h2>

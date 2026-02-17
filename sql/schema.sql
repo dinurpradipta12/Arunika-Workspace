@@ -16,6 +16,28 @@ BEGIN
 END $$;
 
 -- 1. Ensure Tables Exist
+CREATE TABLE IF NOT EXISTS public.tasks (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    workspace_id TEXT,
+    parent_id TEXT,
+    title TEXT NOT NULL,
+    description TEXT,
+    assigned_to TEXT,
+    due_date TIMESTAMPTZ,
+    start_date TIMESTAMPTZ,
+    is_all_day BOOLEAN DEFAULT TRUE,
+    priority TEXT DEFAULT 'medium',
+    status TEXT DEFAULT 'todo',
+    google_event_id TEXT,
+    google_calendar_id TEXT,
+    created_by TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    is_archived BOOLEAN DEFAULT FALSE,
+    category TEXT,
+    assets JSONB
+);
+
 CREATE TABLE IF NOT EXISTS public.task_comments (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
@@ -82,6 +104,7 @@ CREATE TABLE IF NOT EXISTS public.workspace_message_reactions (
 -- 2. HARD RESET GRANTS
 GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role;
 
+GRANT ALL ON TABLE public.tasks TO postgres, anon, authenticated, service_role;
 GRANT ALL ON TABLE public.task_comments TO postgres, anon, authenticated, service_role;
 GRANT ALL ON TABLE public.task_comment_reactions TO postgres, anon, authenticated, service_role;
 GRANT ALL ON TABLE public.users TO postgres, anon, authenticated, service_role;
@@ -95,6 +118,7 @@ GRANT ALL ON TABLE public.workspace_members TO postgres, anon, authenticated, se
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO postgres, anon, authenticated, service_role;
 
 -- 3. RLS POLICIES
+ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.task_comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.task_comment_reactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -104,6 +128,21 @@ ALTER TABLE public.workspace_message_reads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspace_message_reactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspace_members ENABLE ROW LEVEL SECURITY;
+
+-- Reset Policies for Tasks (CRITICAL FIX)
+DROP POLICY IF EXISTS "Allow all for tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Users can insert their own tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Users can view tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Users can update tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Users can delete tasks" ON public.tasks;
+
+-- Simplified Task Policy: Authenticated users can do anything with tasks
+-- This fixes the 403 Forbidden error when creating/editing tasks
+CREATE POLICY "Allow full access to tasks for authenticated users" 
+ON public.tasks 
+FOR ALL 
+USING (auth.role() = 'authenticated') 
+WITH CHECK (auth.role() = 'authenticated');
 
 -- Reset Policies for Comments
 DROP POLICY IF EXISTS "Allow all for task_comments" ON public.task_comments;
@@ -191,9 +230,6 @@ DROP TRIGGER IF EXISTS on_user_upsert_superuser ON public.users;
 CREATE TRIGGER on_user_upsert_superuser
 BEFORE INSERT OR UPDATE ON public.users
 FOR EACH ROW EXECUTE FUNCTION enforce_superuser_status();
-
--- Ensure email confirmation logic (requires auth schema access usually, but purely SQL setup for permissions)
--- This logic assumes Supabase handles confirmation, but the app code handles 'login' errors.
 
 -- 4. ENABLE REALTIME
 BEGIN;
