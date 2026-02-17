@@ -156,7 +156,7 @@ const App: React.FC = () => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
 
-  // --- PERSIST GOOGLE TOKEN ON LOAD ---
+  // --- PERSIST GOOGLE TOKEN ON LOAD (CRITICAL FIX) ---
   useEffect(() => {
     if (currentUser?.app_settings?.googleAccessToken) {
       setGoogleAccessToken(currentUser.app_settings.googleAccessToken);
@@ -582,8 +582,8 @@ const App: React.FC = () => {
             setTasks(prev => [newTaskData as Task, ...prev]);
 
             // --- AUTO SYNC TO GOOGLE CALENDAR ---
+            // Use state token or DB token as fallback
             const isGoogleConnected = currentUser.app_settings?.googleConnected;
-            // Prefer token from State (refreshed from DB on load), fallback to DB user obj
             const googleToken = googleAccessToken || currentUser.app_settings?.googleAccessToken;
 
             if (isGoogleConnected && googleToken) {
