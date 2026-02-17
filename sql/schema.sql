@@ -1,61 +1,64 @@
 
 -- ==========================================
--- SCRIPT MIGRASI AMAN (SAFE MIGRATION)
+-- SCRIPT PERBAIKAN PERMISSIONS FINAL (FIX 42501)
 -- Jalankan script ini di SQL Editor Supabase
--- Data lama TIDAK AKAN HILANG.
 -- ==========================================
 
--- 1. Tambahkan kolom 'assets' ke tabel 'tasks' jika belum ada
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='assets') THEN
-        ALTER TABLE public.tasks ADD COLUMN assets JSONB DEFAULT '[]'::jsonb;
-    END IF;
-END $$;
+-- 1. Ensure Tables Exist (Idempotent)
+CREATE TABLE IF NOT EXISTS public.task_comments (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    task_id UUID NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    parent_id UUID REFERENCES public.task_comments(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
--- 2. Tambahkan kolom 'logo_url' ke tabel 'workspaces' jika belum ada (FIX ERROR: PGRST204)
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='workspaces' AND column_name='logo_url') THEN
-        ALTER TABLE public.workspaces ADD COLUMN logo_url TEXT;
-    END IF;
-END $$;
+CREATE TABLE IF NOT EXISTS public.task_comment_reactions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    comment_id UUID NOT NULL REFERENCES public.task_comments(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(comment_id, user_id, emoji)
+);
 
--- 3. Fungsi untuk Menangani Notifikasi saat Task Di-Assign
-CREATE OR REPLACE FUNCTION public.handle_task_assignment()
-RETURNS TRIGGER AS $$
-DECLARE
-  assigner_name TEXT;
-BEGIN
-  -- Cek jika assigned_to diisi (INSERT) atau berubah (UPDATE)
-  IF (TG_OP = 'INSERT' AND NEW.assigned_to IS NOT NULL) OR
-     (TG_OP = 'UPDATE' AND NEW.assigned_to IS NOT NULL AND (OLD.assigned_to IS NULL OR OLD.assigned_to <> NEW.assigned_to)) THEN
-     
-     -- Jangan kirim notifikasi jika assign ke diri sendiri
-     IF NEW.assigned_to <> NEW.created_by THEN
-        -- Ambil nama pembuat task (assigner)
-        SELECT name INTO assigner_name FROM public.users WHERE id = NEW.created_by;
-        
-        -- Masukkan notifikasi ke database (Supabase Realtime akan menangkap INSERT ini)
-        INSERT INTO public.notifications (user_id, type, title, message, metadata)
-        VALUES (
-          NEW.assigned_to,
-          'assignment',
-          'Tugas Baru Diberikan',
-          COALESCE(assigner_name, 'Seseorang') || ' menugaskan Anda: ' || NEW.title,
-          jsonb_build_object('task_id', NEW.id, 'workspace_id', NEW.workspace_id)
-        );
-     END IF;
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+-- 2. EXPLICIT GRANTS (Fix Permission Denied at Table Level)
+-- Ini penting karena kadang RLS aktif tapi role tidak punya izin 'USAGE' atau 'ALL'
+GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role;
 
--- 4. Pasang Trigger ke tabel Tasks
-DROP TRIGGER IF EXISTS on_task_assigned ON public.tasks;
-CREATE TRIGGER on_task_assigned
-  AFTER INSERT OR UPDATE ON public.tasks
-  FOR EACH ROW EXECUTE PROCEDURE public.handle_task_assignment();
+GRANT ALL ON TABLE public.task_comments TO postgres, anon, authenticated, service_role;
+GRANT ALL ON TABLE public.task_comment_reactions TO postgres, anon, authenticated, service_role;
+GRANT ALL ON TABLE public.users TO postgres, anon, authenticated, service_role; -- Ensure users can be joined
 
--- 5. Force Schema Cache Reload (Agar API langsung mengenali kolom baru)
+-- 3. RLS POLICIES (Fix Permission Denied at Row Level)
+ALTER TABLE public.task_comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.task_comment_reactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+
+-- Policy for Comments: Allow EVERYTHING for ANYONE
+-- USING(true) WITH CHECK(true) artinya "Bolehkan semua baris"
+DROP POLICY IF EXISTS "Allow all for task_comments" ON public.task_comments;
+CREATE POLICY "Allow all for task_comments" 
+ON public.task_comments 
+FOR ALL 
+USING (true) 
+WITH CHECK (true);
+
+-- Policy for Reactions
+DROP POLICY IF EXISTS "Allow all for task_comment_reactions" ON public.task_comment_reactions;
+CREATE POLICY "Allow all for task_comment_reactions" 
+ON public.task_comment_reactions 
+FOR ALL 
+USING (true) 
+WITH CHECK (true);
+
+-- Policy for Users (Agar bisa join nama user di komentar)
+DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.users;
+CREATE POLICY "Public profiles are viewable by everyone" 
+ON public.users 
+FOR SELECT 
+USING (true);
+
+-- 4. Refresh API Cache
 NOTIFY pgrst, 'reload config';

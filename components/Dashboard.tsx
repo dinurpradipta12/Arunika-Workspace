@@ -21,17 +21,13 @@ import {
   Lightbulb,
   X,
   Target,
-  RefreshCw,
-  BookOpen,
-  Video,
-  Flag,
   GripVertical,
-  ChevronRight,
   Plus,
   Trash2,
   CheckSquare,
   Clock,
-  Layout
+  Layout,
+  Flag
 } from 'lucide-react';
 import { Task, Workspace, User, TaskStatus, WorkspaceType, TaskPriority } from '../types';
 import { Button } from './ui/Button';
@@ -743,7 +739,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {/* 4. Chart: Status (Moved Here) */}
             <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-row items-center gap-6 min-h-[180px]">
-                <div className="h-36 w-36 relative shrink-0">
+                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem]">
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                             <Pie
@@ -788,7 +784,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {/* 5. Chart: Priority (Moved Here) */}
             <div className="bg-white border-2 border-slate-800 rounded-[32px] p-6 shadow-pop flex flex-row items-center gap-6 min-h-[180px]">
-                <div className="h-36 w-36 relative shrink-0">
+                <div className="h-36 w-36 relative shrink-0 min-w-[9rem] min-h-[9rem]">
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                             <Pie
@@ -859,7 +855,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                            <div className="flex justify-between items-start mb-1">
                                <div className="flex items-center gap-2">
                                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center bg-slate-50 text-slate-400 group-hover:text-slate-800 group-hover:bg-slate-200 transition-colors`}>
-                                       {rem.id === 'effect' ? <BookOpen size={12} /> : rem.priority === 'High' ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+                                       {rem.id === 'effect' ? <Lightbulb size={12} /> : rem.priority === 'High' ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
                                    </div>
                                    <h4 className="text-xs font-bold text-slate-800 truncate">{rem.title}</h4>
                                </div>

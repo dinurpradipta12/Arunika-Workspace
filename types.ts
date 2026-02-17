@@ -95,6 +95,26 @@ export interface Task {
   assets?: WorkspaceAsset[]; // NEW FIELD: Task specific assets
 }
 
+export interface CommentReaction {
+  id: string;
+  comment_id: string;
+  user_id: string;
+  emoji: string;
+  users?: { name: string }; // Joined data
+}
+
+export interface TaskComment {
+  id: string;
+  task_id: string;
+  user_id: string;
+  parent_id?: string;
+  content: string;
+  created_at: string;
+  users?: User; // Sender profile
+  reactions?: CommentReaction[];
+  replies?: TaskComment[]; // Nested structure
+}
+
 export interface Notification {
   id: string;
   user_id: string;

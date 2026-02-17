@@ -19,6 +19,37 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [rawError, setRawError] = useState<any>(null);
 
+  // BRANDING STATE
+  const [branding, setBranding] = useState<{ name: string; logo: string }>({ 
+    name: 'TaskPlay', 
+    logo: '' 
+  });
+
+  // Fetch Global Branding on Mount
+  useEffect(() => {
+    const fetchBranding = async () => {
+      try {
+        const { data, error } = await supabase.from('app_config').select('app_name, app_logo, app_favicon').single();
+        if (data && !error) {
+          setBranding({
+            name: data.app_name || 'TaskPlay',
+            logo: data.app_logo || ''
+          });
+          // Update Tab Title & Favicon for Login Page
+          if (data.app_name) document.title = data.app_name;
+          if (data.app_favicon) {
+            let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+            if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+            link.href = data.app_favicon;
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load branding on login:", err);
+      }
+    };
+    fetchBranding();
+  }, []);
+
   useEffect(() => {
     if (initialMessage) {
       setErrorState({
@@ -127,10 +158,24 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, initialMessage }) 
 
       <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-500">
         <div className="flex flex-col items-center mb-10">
-          <div className="w-16 h-16 bg-accent rounded-2xl border-4 border-slate-800 shadow-pop flex items-center justify-center text-white mb-4 rotate-3">
-            <CheckSquare size={32} strokeWidth={3} />
-          </div>
-          <h1 className="text-4xl font-heading tracking-tight text-slate-900">TaskPlay</h1>
+          {branding.logo ? (
+            <div className="mb-6 relative group">
+               <div className="absolute inset-0 bg-white/50 rounded-2xl blur-lg transform group-hover:scale-110 transition-transform" />
+               <img 
+                 src={branding.logo} 
+                 alt="App Logo" 
+                 className="w-24 h-24 object-contain relative z-10 drop-shadow-xl" 
+               />
+            </div>
+          ) : (
+            <div className="w-16 h-16 bg-accent rounded-2xl border-4 border-slate-800 shadow-pop flex items-center justify-center text-white mb-4 rotate-3">
+              <CheckSquare size={32} strokeWidth={3} />
+            </div>
+          )}
+          
+          <h1 className="text-4xl font-heading tracking-tight text-slate-900 text-center leading-tight">
+            {branding.name}
+          </h1>
           <p className="text-mutedForeground font-bold uppercase tracking-widest text-[10px] mt-2 text-center leading-relaxed">
             Sistem Manajemen Task & Penjadwalan <br/>
             <span className="text-accent">Personal Productivity</span>
