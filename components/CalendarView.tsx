@@ -16,7 +16,8 @@ import {
   Link2,
   Globe,
   Loader2,
-  CheckCircle2
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { Task, TaskStatus, Workspace, TaskPriority } from '../types';
 import { GoogleCalendarService, GoogleCalendar } from '../services/googleCalendarService';
@@ -161,6 +162,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setVisibleSources(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
+  const handleRemoveCalendar = (id: string) => {
+    setGoogleCalendars(prev => prev.filter(c => c.id !== id));
+    setVisibleSources(prev => prev.filter(s => s !== id));
+    setGoogleEvents(prev => prev.filter(e => e.workspace_id !== id));
+  };
+
   const parseCalendarId = (input: string) => {
     const decoded = decodeURIComponent(input);
     
@@ -232,7 +239,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         if (err.message === 'UNAUTHORIZED') {
             console.warn("Token expired, stopping sync.");
             localStorage.removeItem('google_access_token');
-            // Optionally notify parent to clear token state, but avoiding complex prop drill for this fix
             setIsSyncing(false);
             return;
         }
@@ -242,17 +248,16 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       // Merge with manually added calendars
       setGoogleCalendars(prev => {
          const newIds = new Set(calendars.map(c => c.id));
+         // Keep manual calendars that aren't in the fetched list
          const manualCals = prev.filter(c => !newIds.has(c.id)); 
          return [...calendars, ...manualCals];
       });
 
       // Combine for event fetching
-      // Note: We use the *updated* set of calendars including manually added ones
-      // Since setState is async, we construct the list manually here for immediate use
-      const updatedManuals = googleCalendars.filter(c => !calendars.find(k => k.id === c.id));
-      const currentCalendars = [...calendars, ...updatedManuals];
+      const currentManuals = googleCalendars.filter(c => !calendars.find(k => k.id === c.id));
+      const allToSync = [...calendars, ...currentManuals];
 
-      const allEventsPromises = currentCalendars.map(async (cal) => {
+      const allEventsPromises = allToSync.map(async (cal) => {
         try {
           const events = await service.fetchEvents(googleAccessToken, cal.id);
           return events.map(event => {
@@ -280,7 +285,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             } as Task;
           });
         } catch (e) { 
-            // Ignore 404s for individual calendars to prevent failing others
+            // Ignore 404s/Errors for individual calendars to prevent failing others
             return []; 
         }
       });
@@ -288,9 +293,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       const results = await Promise.all(allEventsPromises);
       setGoogleEvents(results.flat());
       
-      // Auto-add new calendars to visible sources if not present
-      const calIds = currentCalendars.map(c => c.id);
-      setVisibleSources(prev => [...new Set([...prev, ...calIds])]);
+      // Ensure manuals are visible
+      const manualIds = currentManuals.map(c => c.id);
+      setVisibleSources(prev => [...new Set([...prev, ...manualIds])]);
       
     } catch (globalErr) {
         console.error("Critical Sync Error:", globalErr);
@@ -573,8 +578,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         googleCalendars.map(gc => {
                             const isVisible = visibleSources.includes(gc.id);
                             return (
-                                <label key={gc.id} className={`flex items-center justify-between p-3 rounded-xl cursor-pointer group transition-all border-2 ${isVisible ? 'bg-slate-50 border-slate-200' : 'bg-white border-transparent hover:bg-slate-50'}`}>
-                                    <div className="flex items-center gap-3 min-w-0">
+                                <div key={gc.id} className="flex items-center gap-2 p-3 bg-white hover:bg-slate-50 border-2 border-transparent hover:border-slate-200 rounded-xl group transition-all">
+                                    <label className="flex-1 flex items-center gap-3 cursor-pointer min-w-0">
                                         <div className={`w-8 h-8 rounded-lg border-2 border-slate-800 flex items-center justify-center text-xs font-black shadow-sm shrink-0`} style={{backgroundColor: sourceColors[gc.id] || '#ccc', color: '#fff'}}>
                                             {gc.summary.substring(0, 1).toUpperCase()}
                                         </div>
@@ -582,17 +587,24 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                             <span className={`text-xs font-bold truncate block ${isVisible ? 'text-slate-800' : 'text-slate-400'}`}>{gc.summary}</span>
                                             <span className="text-[9px] font-bold text-slate-300 truncate block">ID: {gc.id.substring(0, 8)}...</span>
                                         </div>
-                                    </div>
-                                    <div className={`w-5 h-5 rounded border-2 border-slate-800 flex items-center justify-center transition-colors ${isVisible ? 'bg-quaternary' : 'bg-white'}`}>
-                                        {isVisible && <Check size={12} className="text-slate-900" strokeWidth={4} />}
-                                    </div>
-                                    <input 
-                                        type="checkbox" 
-                                        checked={isVisible} 
-                                        onChange={() => toggleVisibility(gc.id)}
-                                        className="sr-only"
-                                    />
-                                </label>
+                                        <input 
+                                            type="checkbox" 
+                                            checked={isVisible} 
+                                            onChange={() => toggleVisibility(gc.id)}
+                                            className="sr-only"
+                                        />
+                                        <div className={`ml-auto w-5 h-5 rounded border-2 border-slate-800 flex items-center justify-center transition-colors ${isVisible ? 'bg-quaternary' : 'bg-white'}`}>
+                                            {isVisible && <Check size={12} className="text-slate-900" strokeWidth={4} />}
+                                        </div>
+                                    </label>
+                                    <button 
+                                        onClick={() => handleRemoveCalendar(gc.id)}
+                                        className="p-1.5 text-slate-300 hover:text-white hover:bg-red-500 rounded-lg transition-colors"
+                                        title="Hapus Kalender"
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                </div>
                             );
                         })
                     )}
