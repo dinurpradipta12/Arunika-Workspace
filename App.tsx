@@ -542,21 +542,34 @@ const App: React.FC = () => {
     try {
         const taskToDelete = tasks.find(t => t.id === taskId);
         
-        // --- FIX FOR 400 ERROR ---
+        // --- GOOGLE CALENDAR DELETION LOGIC ---
         if (taskId.startsWith('google-')) {
-            // If it's a google task, only delete from Google (if connected)
-            if (taskToDelete) {
-                await deleteGoogleEvent(taskToDelete);
+            // Find the task object from the Google Events state (passed via CalendarView usually, but here we check general handling)
+            // Since `googleEvents` state is in CalendarView, App.tsx can't directly see it unless passed up.
+            // HOWEVER, we handle `google-` prefix logic here to intercept calls from Modal.
+            
+            // To ensure deletion works, we construct a mock task object if needed or rely on what's passed if possible.
+            // But wait, `tasks` state only has Supabase tasks. 
+            // If the ID is google-, it won't be in `tasks`.
+            
+            // We need to use the `detailTask` or `inspectedTask` state which holds the object being viewed/deleted.
+            const targetTask = detailTask?.id === taskId ? detailTask : inspectedTask?.id === taskId ? inspectedTask : null;
+            
+            if (targetTask && targetTask.google_event_id) {
+                await deleteGoogleEvent(targetTask);
             }
-            // Remove from local state immediately
-            setGoogleEvents(prev => prev.filter(t => t.id !== taskId));
+            
+            // Update local state in CalendarView is handled by passing setGoogleEvents there.
+            // But App needs to close the modal.
+            setGoogleEvents(prev => prev.filter(t => t.id !== taskId)); // This updates the shared state if passed down
             setDetailTask(null);
             setInspectedTask(null);
-            return; // Do NOT try to delete from Supabase
+            return; 
         }
         
-        // Normal Supabase Task
+        // --- SUPABASE TASK DELETION ---
         if (taskToDelete) {
+            // Also try to delete google event if it was synced
             await deleteGoogleEvent(taskToDelete);
         }
         await supabase.from('tasks').delete().eq('id', taskId);

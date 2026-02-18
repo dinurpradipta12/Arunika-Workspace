@@ -13,12 +13,15 @@ import {
   Trash2,
   Settings as SettingsIcon,
   X,
-  Eye,
-  EyeOff
+  Link2,
+  Globe,
+  Loader2,
+  CheckCircle2
 } from 'lucide-react';
 import { Task, TaskStatus, Workspace, TaskPriority } from '../types';
 import { GoogleCalendarService, GoogleCalendar } from '../services/googleCalendarService';
 import { supabase } from '../lib/supabase';
+import { Button } from './ui/Button';
 
 const UI_PALETTE = [
   '#8B5CF6', // Accent (Purple)
@@ -81,13 +84,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   
-  // Manual Calendar ID State
-  const [manualCalendarId, setManualCalendarId] = useState('');
+  // Add Calendar Modal State
+  const [isAddCalendarModalOpen, setIsAddCalendarModalOpen] = useState(false);
+  const [manualCalendarInput, setManualCalendarInput] = useState('');
   
   // Calendar Settings Modal
   const [showCalendarSettings, setShowCalendarSettings] = useState(false);
-  // Store 'bottom' position relative to viewport to place modal above
-  const [settingsPos, setSettingsPos] = useState<{bottom: number, left: number, alignRight?: boolean} | null>(null);
+  const [settingsPos, setSettingsPos] = useState<{bottom: number, left: number} | null>(null);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
 
   // --- HELPER DATE FUNCTIONS ---
@@ -158,22 +161,46 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setVisibleSources(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
+  const parseCalendarId = (input: string) => {
+    // Basic regex to extract 'src' from embed code or URL
+    const srcMatch = input.match(/src=([^&]+)/);
+    if (srcMatch && srcMatch[1]) {
+        return decodeURIComponent(srcMatch[1]);
+    }
+    // Check if it's a URL but not embed
+    if (input.includes('calendar.google.com')) {
+        // Try to find the email part (simple heuristic)
+        const parts = input.split('/');
+        // Sometimes ID is the last part or param
+        return input; // Fallback, let the user input ID directly if URL fails
+    }
+    return input.trim();
+  };
+
   const handleAddManualCalendar = () => {
-    if (manualCalendarId.trim()) {
+    if (manualCalendarInput.trim()) {
+      const calId = parseCalendarId(manualCalendarInput);
+      
       const newCal: GoogleCalendar = {
-        id: manualCalendarId.trim(),
-        summary: manualCalendarId.trim(), // Use ID as name initially
-        backgroundColor: '#64748B', // Default color
+        id: calId,
+        summary: calId, // Temporary name until sync
+        backgroundColor: UI_PALETTE[googleCalendars.length % UI_PALETTE.length], 
       };
+      
       // Add to list if not exists
       setGoogleCalendars(prev => {
         if(prev.find(c => c.id === newCal.id)) return prev;
         return [...prev, newCal];
       });
+      
+      // Auto enable visibility
       setVisibleSources(prev => [...prev, newCal.id]);
-      setManualCalendarId('');
-      // Trigger sync logic if possible, but handleSync relies on fetched list usually.
-      // We will let the next sync cycle pick it up or trigger manually.
+      
+      setManualCalendarInput('');
+      setIsAddCalendarModalOpen(false);
+      
+      // Trigger sync to fetch events and real summary
+      setTimeout(() => handleSync(), 500);
     }
   };
 
@@ -186,14 +213,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       // Fetch user's calendars list
       let calendars = await service.fetchCalendars(googleAccessToken);
       
-      // Merge with manually added calendars
+      // Merge with manually added calendars that might not be in the primary fetch list
       setGoogleCalendars(prev => {
          const newIds = new Set(calendars.map(c => c.id));
-         const manualCals = prev.filter(c => !newIds.has(c.id)); // Keep manuals
+         const manualCals = prev.filter(c => !newIds.has(c.id)); 
+         // Update existing manual calendars with fetched details if available
          return [...calendars, ...manualCals];
       });
 
-      // Use the updated list for fetching events
+      // Combine for event fetching
       const currentCalendars = [...calendars, ...googleCalendars.filter(c => !calendars.find(k => k.id === c.id))];
 
       const allEventsPromises = currentCalendars.map(async (cal) => {
@@ -250,13 +278,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         if (settingsBtnRef.current) {
             const rect = settingsBtnRef.current.getBoundingClientRect();
             // Calculate position ABOVE the button
-            // bottom position relative to viewport height minus the button's top position
             const spaceFromBottom = window.innerHeight - rect.top;
             
             setSettingsPos({ 
-                bottom: spaceFromBottom + 10, // 10px gap above button
-                left: rect.left + (rect.width / 2),
-                alignRight: false
+                bottom: spaceFromBottom + 12, 
+                left: rect.left + (rect.width / 2)
             });
         }
         setShowCalendarSettings(true);
@@ -375,7 +401,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     });
 
     // 3. Assign Visual Slots (0, 1, 2...)
-    // occupied[rowIndex] = [true, false, true, ...] (7 days)
     const occupied: boolean[][] = [];
     const layout: { task: Task, row: number, startCol: number, colSpan: number }[] = [];
 
@@ -387,24 +412,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         let startCol = 0;
         let endCol = 6;
 
-        // If task starts inside this week, find which day index
         if (tStart >= weekStartStr) {
             const startIndex = weekDays.findIndex(d => d && formatDate(d) === tStart);
             if (startIndex !== -1) startCol = startIndex;
         }
 
-        // If task ends inside this week
         if (tEnd <= weekEndStr) {
             const endIndex = weekDays.findIndex(d => d && formatDate(d) === tEnd);
             if (endIndex !== -1) endCol = endIndex;
         }
 
-        // Check slots for these columns
         let rowIndex = 0;
         while (true) {
             if (!occupied[rowIndex]) occupied[rowIndex] = Array(7).fill(false);
             
-            // Check collision in the required columns
             let collision = false;
             for (let i = startCol; i <= endCol; i++) {
                 if (occupied[rowIndex][i]) {
@@ -414,7 +435,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             }
 
             if (!collision) {
-                // Book it
                 for (let i = startCol; i <= endCol; i++) {
                     occupied[rowIndex][i] = true;
                 }
@@ -442,11 +462,58 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   return (
     <div className="w-full pb-20 animate-in fade-in duration-500 space-y-6 relative">
       
-      {/* Settings Modal (Calendar Management) - POPPING UPWARDS */}
-      {showCalendarSettings && settingsPos && (
-        <div className="fixed inset-0 z-[200] bg-slate-900/10 backdrop-blur-[2px]" onClick={() => setShowCalendarSettings(false)}>
+      {/* 1. ADD CALENDAR MODAL (Standard Center Modal) */}
+      {isAddCalendarModalOpen && (
+        <div 
+            className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300"
+            onClick={() => setIsAddCalendarModalOpen(false)}
+        >
             <div 
-                className="absolute bg-white border-4 border-slate-800 rounded-[28px] shadow-[8px_8px_0px_0px_#1E293B] z-[210] w-72 overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-2 origin-bottom"
+                className="bg-white border-4 border-slate-800 rounded-[28px] shadow-[12px_12px_0px_0px_#38BDF8] w-full max-w-md overflow-hidden animate-in zoom-in-95"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="bg-sky-400 p-6 border-b-4 border-slate-800 flex justify-between items-center text-white">
+                    <div className="flex items-center gap-3">
+                        <Link2 size={24} strokeWidth={3} />
+                        <h2 className="text-2xl font-heading">Tautkan Kalender</h2>
+                    </div>
+                    <button onClick={() => setIsAddCalendarModalOpen(false)} className="p-2 hover:bg-white/20 rounded-xl transition-colors"><X size={24} strokeWidth={3}/></button>
+                </div>
+                
+                <div className="p-6 space-y-4">
+                    <div className="space-y-2">
+                        <label className="text-xs font-black uppercase tracking-widest text-slate-500">ID Kalender / Public URL</label>
+                        <div className="relative">
+                            <input 
+                                autoFocus
+                                value={manualCalendarInput}
+                                onChange={(e) => setManualCalendarInput(e.target.value)}
+                                className="w-full pl-10 pr-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-slate-800 focus:bg-white transition-all"
+                                placeholder="Paste ID atau Link disini..."
+                            />
+                            <Globe size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                            Tips: Masukkan Calendar ID (contoh: <code>group.v.calendar.google.com</code>) atau Public URL dari pengaturan Google Calendar.
+                        </p>
+                    </div>
+                    
+                    <div className="pt-2 flex justify-end gap-2">
+                        <Button variant="secondary" onClick={() => setIsAddCalendarModalOpen(false)}>Batal</Button>
+                        <Button variant="primary" onClick={handleAddManualCalendar} disabled={!manualCalendarInput.trim()}>
+                            <Plus size={16} className="mr-2" strokeWidth={3} /> Tambahkan
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* 2. CALENDAR SETTINGS POPOVER (Colorful, Above Button) */}
+      {showCalendarSettings && settingsPos && (
+        <div className="fixed inset-0 z-[200] bg-transparent" onClick={() => setShowCalendarSettings(false)}>
+            <div 
+                className="absolute bg-white border-4 border-slate-800 rounded-[24px] shadow-[8px_8px_0px_0px_#FBBF24] z-[210] w-72 overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-2 origin-bottom"
                 style={{ 
                     bottom: settingsPos.bottom,
                     left: settingsPos.left,
@@ -454,48 +521,53 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 }}
                 onClick={(e) => e.stopPropagation()}
             >
-                <div className="p-4 bg-tertiary border-b-4 border-slate-800 flex justify-between items-center relative">
-                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 flex items-center gap-2">
-                        <SettingsIcon size={16} /> Manage
+                <div className="p-4 bg-tertiary border-b-4 border-slate-800 flex justify-between items-center text-slate-900">
+                    <h3 className="text-sm font-black uppercase tracking-widest flex items-center gap-2">
+                        <SettingsIcon size={16} /> Filter Kalender
                     </h3>
-                    <button onClick={() => setShowCalendarSettings(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-slate-900"><X size={18} strokeWidth={3}/></button>
-                </div>
-                <div className="p-2 max-h-[300px] overflow-y-auto scrollbar-hide space-y-1 bg-white">
-                    {googleCalendars.length === 0 ? (
-                        <div className="p-6 text-center">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tidak ada kalender</p>
-                        </div>
-                    ) : (
-                        googleCalendars.map(gc => (
-                            <label key={gc.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl cursor-pointer group transition-colors">
-                                <div className="flex items-center gap-3 min-w-0">
-                                    <div className="w-4 h-4 rounded-full border-2 border-slate-800 shadow-sm" style={{backgroundColor: sourceColors[gc.id]}} />
-                                    <div className="min-w-0">
-                                        <span className="text-xs font-bold text-slate-700 truncate block">{gc.summary}</span>
-                                        <span className="text-[9px] font-bold text-slate-400 truncate block opacity-0 group-hover:opacity-100 transition-opacity">ID: {gc.id.substring(0,10)}...</span>
-                                    </div>
-                                </div>
-                                <div className="relative">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={visibleSources.includes(gc.id)} 
-                                        onChange={() => toggleVisibility(gc.id)}
-                                        className="peer sr-only"
-                                    />
-                                    <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-slate-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-quaternary border-2 border-slate-800"></div>
-                                </div>
-                            </label>
-                        ))
-                    )}
+                    <button onClick={() => setShowCalendarSettings(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} strokeWidth={3}/></button>
                 </div>
                 
-                {/* Decoration Arrow pointing down */}
+                <div className="max-h-[300px] overflow-y-auto scrollbar-hide bg-white p-2 space-y-1">
+                    {googleCalendars.length === 0 ? (
+                        <div className="p-6 text-center">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Belum ada kalender terhubung</p>
+                        </div>
+                    ) : (
+                        googleCalendars.map(gc => {
+                            const isVisible = visibleSources.includes(gc.id);
+                            return (
+                                <label key={gc.id} className={`flex items-center justify-between p-3 rounded-xl cursor-pointer group transition-all border-2 ${isVisible ? 'bg-slate-50 border-slate-200' : 'bg-white border-transparent hover:bg-slate-50'}`}>
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className={`w-8 h-8 rounded-lg border-2 border-slate-800 flex items-center justify-center text-xs font-black shadow-sm shrink-0`} style={{backgroundColor: sourceColors[gc.id] || '#ccc', color: '#fff'}}>
+                                            {gc.summary.substring(0, 1).toUpperCase()}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <span className={`text-xs font-bold truncate block ${isVisible ? 'text-slate-800' : 'text-slate-400'}`}>{gc.summary}</span>
+                                            <span className="text-[9px] font-bold text-slate-300 truncate block">ID: {gc.id.substring(0, 8)}...</span>
+                                        </div>
+                                    </div>
+                                    <div className={`w-5 h-5 rounded border-2 border-slate-800 flex items-center justify-center transition-colors ${isVisible ? 'bg-quaternary' : 'bg-white'}`}>
+                                        {isVisible && <Check size={12} className="text-slate-900" strokeWidth={4} />}
+                                    </div>
+                                    <input 
+                                        type="checkbox" 
+                                        checked={isVisible} 
+                                        onChange={() => toggleVisibility(gc.id)}
+                                        className="sr-only"
+                                    />
+                                </label>
+                            );
+                        })
+                    )}
+                </div>
+                {/* Decor Arrow */}
                 <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 w-5 h-5 bg-white border-b-4 border-r-4 border-slate-800 transform rotate-45 z-[-1]" />
             </div>
         </div>
       )}
 
-      {/* Header */}
+      {/* Header Page */}
       <div>
          <h2 className="text-4xl font-heading text-slate-900 tracking-tight">Calendar View Task</h2>
          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Kelola Jadwal & Agenda Harian Anda</p>
@@ -561,21 +633,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               <button onClick={() => setIsAddingCategory(!isAddingCategory)} className="p-1 hover:bg-slate-100 rounded-lg transition-colors"><Plus size={14} /></button>
             </div>
             
-            {/* MANUAL CALENDAR INPUT (White Box, Black Text) */}
-            <div className="flex gap-2">
-                <input 
-                    placeholder="Input ID Google Calendar..." 
-                    className="flex-1 bg-white text-slate-900 border-2 border-slate-200 rounded-xl px-3 py-2 text-[10px] font-bold outline-none focus:border-slate-800"
-                    value={manualCalendarId}
-                    onChange={(e) => setManualCalendarId(e.target.value)}
-                />
-                <button 
-                    onClick={handleAddManualCalendar}
-                    className="bg-slate-800 text-white px-3 rounded-xl hover:bg-slate-700 transition-colors"
-                >
-                    <Plus size={14} />
-                </button>
-            </div>
+            {/* BUTTON ADD CALENDAR (Replaces Input) */}
+            <button 
+                onClick={() => setIsAddCalendarModalOpen(true)}
+                className="w-full py-3 bg-white border-2 border-dashed border-slate-300 rounded-xl text-xs font-bold text-slate-500 flex items-center justify-center gap-2 hover:border-slate-800 hover:text-slate-800 transition-all group"
+            >
+                <Plus size={14} className="group-hover:scale-110 transition-transform" /> Tautkan Kalender
+            </button>
 
             <div className="space-y-4">
               {isAddingCategory && (
@@ -629,8 +693,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     </div>
                     <input type="checkbox" checked={showPersonalTasks} onChange={() => setShowPersonalTasks(!showPersonalTasks)} className="w-4 h-4 rounded border border-slate-800 checked:bg-accent appearance-none cursor-pointer" />
                 </div>
-                {/* Google Calendars List handled by Modal now */}
-                {googleCalendars.slice(0, 3).map(gc => (
+                {/* Google Calendars List (Condensed View) */}
+                {googleCalendars.filter(gc => visibleSources.includes(gc.id)).slice(0, 3).map(gc => (
                     <div key={gc.id} className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
                         <div className="w-4 h-4 rounded border-2 border-slate-800 cursor-pointer" style={{ backgroundColor: sourceColors[gc.id] }} onClick={() => {
@@ -639,31 +703,29 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         }} />
                         <span className="text-[11px] font-bold text-slate-700 truncate max-w-[120px]">{gc.summary}</span>
                       </div>
-                      <input type="checkbox" checked={visibleSources.includes(gc.id)} onChange={() => toggleVisibility(gc.id)} className="w-4 h-4 rounded border border-slate-800 checked:bg-secondary appearance-none cursor-pointer" />
+                      <div className="w-4 h-4 flex items-center justify-center"><CheckCircle2 size={12} className="text-quaternary"/></div>
                     </div>
                 ))}
-                {googleCalendars.length > 3 && (
-                    <p className="text-[9px] text-slate-400 italic pl-1 cursor-pointer hover:underline hover:text-slate-600" onClick={toggleSettingsModal}>+{googleCalendars.length - 3} lainnya (Lihat Setting)</p>
+                {googleCalendars.length > 0 && (
+                    <button 
+                        ref={settingsBtnRef}
+                        onClick={toggleSettingsModal}
+                        className="text-[9px] text-slate-400 italic pl-1 cursor-pointer hover:underline hover:text-slate-600 flex items-center gap-1 mt-1"
+                    >
+                        <SettingsIcon size={10} /> Kelola {googleCalendars.length} Kalender
+                    </button>
                 )}
               </div>
             </div>
           </div>
 
-          <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop p-3 flex gap-2">
-            <button onClick={handleSync} disabled={!googleAccessToken || isSyncing} className="flex-1 group flex items-center justify-between p-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all disabled:opacity-50">
+          <div className="bg-white border-2 border-slate-800 rounded-2xl shadow-pop p-3">
+            <button onClick={handleSync} disabled={!googleAccessToken || isSyncing} className="w-full group flex items-center justify-between p-2 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all disabled:opacity-50">
               <div className="flex items-center gap-2">
                 <div className={`w-8 h-8 ${gStatus.bg} rounded-lg flex items-center justify-center ${gStatus.color}`}><Chrome size={16} strokeWidth={3} /></div>
                 <div className="text-left"><p className="text-[8px] font-black uppercase text-slate-400">Google Sync</p><p className={`text-[9px] font-bold ${gStatus.color}`}>{gStatus.label}</p></div>
               </div>
               <RefreshCw size={12} className={`text-slate-300 transition-all ${isSyncing ? 'animate-spin text-accent' : ''}`} />
-            </button>
-            <button 
-                ref={settingsBtnRef}
-                onClick={toggleSettingsModal}
-                disabled={!googleAccessToken}
-                className="w-12 rounded-xl border-2 border-slate-800 shadow-pop-active bg-white hover:-translate-y-0.5 transition-all flex items-center justify-center disabled:opacity-50 hover:bg-slate-50"
-            >
-                <SettingsIcon size={20} className="text-slate-700" />
             </button>
           </div>
         </aside>
