@@ -162,39 +162,67 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setVisibleSources(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
+  // --- LOGIC HAPUS KALENDER ---
   const handleRemoveCalendar = (id: string) => {
-    setGoogleCalendars(prev => prev.filter(c => c.id !== id));
-    setVisibleSources(prev => prev.filter(s => s !== id));
-    setGoogleEvents(prev => prev.filter(e => e.workspace_id !== id));
+    if (confirm("Hapus kalender ini dari tampilan?")) {
+        setGoogleCalendars(prev => prev.filter(c => c.id !== id));
+        setVisibleSources(prev => prev.filter(s => s !== id));
+        setGoogleEvents(prev => prev.filter(e => e.workspace_id !== id));
+    }
   };
 
+  // --- LOGIC PARSING KALENDER ID YANG DIPERBAIKI ---
   const parseCalendarId = (input: string) => {
-    const decoded = decodeURIComponent(input);
+    let cleanInput = input.trim();
     
-    // 1. Extract ID from /ical/ URL (e.g., https://calendar.google.com/calendar/ical/EMAIL/public/basic.ics)
-    const icalMatch = decoded.match(/\/ical\/([^\/]+)/);
-    if (icalMatch && icalMatch[1]) return icalMatch[1];
-    
-    // 2. Extract src from embed code (src=EMAIL)
-    const srcMatch = decoded.match(/src=([^&"']+)/);
-    if (srcMatch && srcMatch[1]) return srcMatch[1];
-
-    // 3. Extract from cid param (cid=BASE64_OR_EMAIL)
-    const cidMatch = decoded.match(/cid=([^&"']+)/);
-    if (cidMatch && cidMatch[1]) {
-        // If it looks like an email, return it.
-        if(cidMatch[1].includes('@')) return cidMatch[1];
-        try { return atob(cidMatch[1]); } catch(e) { return cidMatch[1]; }
+    // 1. Decode URI Component first to handle %40 -> @
+    try {
+        cleanInput = decodeURIComponent(cleanInput);
+    } catch (e) {
+        // If fail, proceed with raw input
     }
 
-    // 4. Fallback: If input is just an email, return it trimmed
-    if (input.includes('@') && !input.includes('/')) return input.trim();
+    // 2. Remove iframe tags if pasted from Embed Code
+    const iframeMatch = cleanInput.match(/src="([^"]+)"/);
+    if (iframeMatch && iframeMatch[1]) {
+        cleanInput = iframeMatch[1];
+    }
 
-    // 5. Fallback: If input looks like a URL but we failed to parse, attempt to find email pattern
-    const emailMatch = input.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/);
+    try {
+        // 3. Try parsing as a URL
+        const urlObj = new URL(cleanInput);
+        
+        // A. Check for 'src' query param (Common in Embed URL & Public URL)
+        // e.g. https://calendar.google.com/calendar/embed?src=user@gmail.com
+        const srcParam = urlObj.searchParams.get('src');
+        if (srcParam) return srcParam;
+
+        // B. Check for 'cid' query param
+        const cidParam = urlObj.searchParams.get('cid');
+        if (cidParam) {
+             // Sometimes cid is base64
+             try { return atob(cidParam); } catch (e) { return cidParam; }
+        }
+
+        // C. Check for iCal path structure
+        // e.g. https://calendar.google.com/calendar/ical/user@gmail.com/public/basic.ics
+        const pathParts = urlObj.pathname.split('/');
+        const icalIndex = pathParts.indexOf('ical');
+        if (icalIndex > -1 && pathParts[icalIndex + 1]) {
+            return decodeURIComponent(pathParts[icalIndex + 1]);
+        }
+
+    } catch (e) {
+        // Not a valid URL, proceed to string patterns
+    }
+
+    // 4. Fallback: Regex for simple email pattern
+    // This handles if user just pasted "user@gmail.com" or "user%40gmail.com"
+    const emailMatch = cleanInput.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/);
     if (emailMatch && emailMatch[0]) return emailMatch[0];
 
-    return input.trim();
+    // 5. Fallback: Return trimmed input (User might know the exact ID)
+    return cleanInput;
   };
 
   const handleAddManualCalendar = () => {
@@ -523,19 +551,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 
                 <div className="p-6 space-y-4">
                     <div className="space-y-2">
-                        <label className="text-xs font-black uppercase tracking-widest text-slate-500">ID Kalender / Public URL</label>
+                        <label className="text-xs font-black uppercase tracking-widest text-slate-500">ID Kalender / Public URL / iCal Link</label>
                         <div className="relative">
                             <input 
                                 autoFocus
                                 value={manualCalendarInput}
                                 onChange={(e) => setManualCalendarInput(e.target.value)}
                                 className="w-full pl-10 pr-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-slate-800 focus:bg-white transition-all"
-                                placeholder="Paste ID atau Link disini..."
+                                placeholder="Paste ID, Public URL, atau iCal Link..."
                             />
                             <Globe size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         </div>
                         <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
-                            Tips: Masukkan Calendar ID (contoh: <code>group.v.calendar.google.com</code>) atau Public URL dari pengaturan Google Calendar.
+                            Tips: Bisa menggunakan Calendar ID (email), Link Share (Public URL), atau Link iCal (Secret Address). Sistem akan otomatis mendeteksi ID-nya.
                         </p>
                     </div>
                     
