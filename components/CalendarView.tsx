@@ -162,18 +162,31 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   };
 
   const parseCalendarId = (input: string) => {
-    // Basic regex to extract 'src' from embed code or URL
-    const srcMatch = input.match(/src=([^&]+)/);
-    if (srcMatch && srcMatch[1]) {
-        return decodeURIComponent(srcMatch[1]);
+    const decoded = decodeURIComponent(input);
+    
+    // 1. Extract ID from /ical/ URL (e.g., https://calendar.google.com/calendar/ical/EMAIL/public/basic.ics)
+    const icalMatch = decoded.match(/\/ical\/([^\/]+)/);
+    if (icalMatch && icalMatch[1]) return icalMatch[1];
+    
+    // 2. Extract src from embed code (src=EMAIL)
+    const srcMatch = decoded.match(/src=([^&"']+)/);
+    if (srcMatch && srcMatch[1]) return srcMatch[1];
+
+    // 3. Extract from cid param (cid=BASE64_OR_EMAIL)
+    const cidMatch = decoded.match(/cid=([^&"']+)/);
+    if (cidMatch && cidMatch[1]) {
+        // If it looks like an email, return it.
+        if(cidMatch[1].includes('@')) return cidMatch[1];
+        try { return atob(cidMatch[1]); } catch(e) { return cidMatch[1]; }
     }
-    // Check if it's a URL but not embed
-    if (input.includes('calendar.google.com')) {
-        // Try to find the email part (simple heuristic)
-        const parts = input.split('/');
-        // Sometimes ID is the last part or param
-        return input; // Fallback, let the user input ID directly if URL fails
-    }
+
+    // 4. Fallback: If input is just an email, return it trimmed
+    if (input.includes('@') && !input.includes('/')) return input.trim();
+
+    // 5. Fallback: If input looks like a URL but we failed to parse, attempt to find email pattern
+    const emailMatch = input.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/);
+    if (emailMatch && emailMatch[0]) return emailMatch[0];
+
     return input.trim();
   };
 
@@ -207,22 +220,37 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const handleSync = useCallback(async () => {
     if (!googleAccessToken) return;
     setIsSyncing(true);
+    
+    const service = new GoogleCalendarService(() => {});
+    
     try {
-      const service = new GoogleCalendarService(() => {});
-      
       // Fetch user's calendars list
-      let calendars = await service.fetchCalendars(googleAccessToken);
+      let calendars: GoogleCalendar[] = [];
+      try {
+        calendars = await service.fetchCalendars(googleAccessToken);
+      } catch (err: any) {
+        if (err.message === 'UNAUTHORIZED') {
+            console.warn("Token expired, stopping sync.");
+            localStorage.removeItem('google_access_token');
+            // Optionally notify parent to clear token state, but avoiding complex prop drill for this fix
+            setIsSyncing(false);
+            return;
+        }
+        console.warn("Could not fetch calendar list, continuing with manual calendars...", err);
+      }
       
-      // Merge with manually added calendars that might not be in the primary fetch list
+      // Merge with manually added calendars
       setGoogleCalendars(prev => {
          const newIds = new Set(calendars.map(c => c.id));
          const manualCals = prev.filter(c => !newIds.has(c.id)); 
-         // Update existing manual calendars with fetched details if available
          return [...calendars, ...manualCals];
       });
 
       // Combine for event fetching
-      const currentCalendars = [...calendars, ...googleCalendars.filter(c => !calendars.find(k => k.id === c.id))];
+      // Note: We use the *updated* set of calendars including manually added ones
+      // Since setState is async, we construct the list manually here for immediate use
+      const updatedManuals = googleCalendars.filter(c => !calendars.find(k => k.id === c.id));
+      const currentCalendars = [...calendars, ...updatedManuals];
 
       const allEventsPromises = currentCalendars.map(async (cal) => {
         try {
@@ -251,8 +279,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               google_calendar_id: cal.id // Needed for update/delete
             } as Task;
           });
-        } catch (e) { return []; }
+        } catch (e) { 
+            // Ignore 404s for individual calendars to prevent failing others
+            return []; 
+        }
       });
+      
       const results = await Promise.all(allEventsPromises);
       setGoogleEvents(results.flat());
       
@@ -260,7 +292,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       const calIds = currentCalendars.map(c => c.id);
       setVisibleSources(prev => [...new Set([...prev, ...calIds])]);
       
-    } finally { setIsSyncing(false); }
+    } catch (globalErr) {
+        console.error("Critical Sync Error:", globalErr);
+    } finally { 
+        setIsSyncing(false); 
+    }
   }, [googleAccessToken, googleCalendars, setGoogleCalendars, setGoogleEvents, setVisibleSources]);
 
   // Auto-sync when token is available on mount

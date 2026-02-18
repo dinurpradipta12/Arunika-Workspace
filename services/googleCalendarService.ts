@@ -71,13 +71,18 @@ export class GoogleCalendarService {
         }
       );
 
+      if (response.status === 401) {
+        throw new Error("UNAUTHORIZED");
+      }
+
       if (!response.ok) throw new Error("Failed to fetch calendar list");
       const data = await response.json();
       
       // Filter kalender yang bisa dibaca (accessRole !== "none")
       const calendars: GoogleCalendar[] = data.items || [];
       return calendars.filter(cal => cal.accessRole !== "none");
-    } catch (error) {
+    } catch (error: any) {
+      if (error.message === 'UNAUTHORIZED') throw error;
       console.error("Error fetching calendars:", error);
       return [];
     }
@@ -95,13 +100,23 @@ export class GoogleCalendarService {
       );
       
       if (!response.ok) {
+        // If 404 Not Found (Invalid Calendar ID), silently fail or throw specific message
+        if (response.status === 404) {
+            throw new Error("CALENDAR_NOT_FOUND");
+        }
+        if (response.status === 401) {
+            throw new Error("UNAUTHORIZED");
+        }
         throw new Error(`Failed to fetch calendar events: ${response.statusText}`);
       }
 
       const data = await response.json();
       return data.items || [];
-    } catch (error) {
-      console.error("Error fetching Google Calendar events:", error);
+    } catch (error: any) {
+      // Don't log 404s as errors to console, they are expected for some manual URLs
+      if (error.message !== 'CALENDAR_NOT_FOUND' && error.message !== 'UNAUTHORIZED') {
+          console.error("Error fetching Google Calendar events:", error);
+      }
       throw error;
     }
   }
